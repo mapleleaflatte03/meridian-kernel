@@ -9,12 +9,13 @@ Tests:
 
 Run: python3 -m unittest discover -s economy/tests -p 'test_*.py'
 """
-import json, os, sys, subprocess, unittest
+import json, os, shutil, subprocess, tempfile, unittest
 
 WORKSPACE    = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 ECONOMY_DIR  = os.path.join(WORKSPACE, 'economy')
 LEDGER_PATH  = os.path.join(ECONOMY_DIR, 'ledger.json')
 TX_PATH      = os.path.join(ECONOMY_DIR, 'transactions.jsonl')
+REVENUE_PATH = os.path.join(ECONOMY_DIR, 'revenue.json')
 
 
 def run(cmd):
@@ -48,6 +49,17 @@ def restore_score(agent_id, rep, auth):
 
 
 class TestEconomy(unittest.TestCase):
+    def setUp(self):
+        self._state_backup_dir = tempfile.mkdtemp(prefix='meridian-econ-test-')
+        self._state_files = [LEDGER_PATH, TX_PATH, REVENUE_PATH]
+        for path in self._state_files:
+            shutil.copy2(path, os.path.join(self._state_backup_dir, os.path.basename(path)))
+
+    def tearDown(self):
+        for path in self._state_files:
+            backup = os.path.join(self._state_backup_dir, os.path.basename(path))
+            shutil.copy2(backup, path)
+        shutil.rmtree(self._state_backup_dir, ignore_errors=True)
 
     def test_1_accepted_output_raises_score(self):
         """Accepted output raises REP and AUTH."""
@@ -117,6 +129,7 @@ class TestEconomy(unittest.TestCase):
     def test_4_paid_event_increases_treasury(self):
         """Paid event via revenue.py increases treasury cash."""
         cash_before = load_ledger()['treasury']['cash_usd']
+        tx_before = len(load_txs())
         test_amount = 0.01
         created_client_id = None
         created_order_id = None
@@ -151,6 +164,14 @@ class TestEconomy(unittest.TestCase):
             self.assertGreater(cash_after, cash_before, f"Treasury cash should increase: ${cash_before}->${cash_after}")
             self.assertAlmostEqual(cash_after - cash_before, test_amount, places=2,
                                    msg=f"Should deposit ${test_amount}: delta=${cash_after - cash_before}")
+            txs = load_txs()[tx_before:]
+            paid_txs = [
+                tx for tx in txs
+                if tx.get('type') == 'customer_payment'
+                and tx.get('order_id') == created_order_id
+                and tx.get('product') == 'ctrl-test-product'
+            ]
+            self.assertGreater(len(paid_txs), 0, "customer_payment transaction should exist")
         finally:
             if created_order_id:
                 run(['python3', 'economy/score.py', 'treasury', 'withdraw',

@@ -15,6 +15,20 @@ demo, and example vertical.
 - [x] Example vertical (competitive intelligence pipeline)
 - [x] Quickstart script (under 10 minutes)
 
+## v0.1.1 — Contributor Treasury Protocol
+
+- [x] Wallet registry with verification levels (0-4)
+- [x] Treasury account separation (company, maintainer, contributor)
+- [x] Maintainer and contributor registries
+- [x] Payout proposal state machine (6 states, 72h dispute window)
+- [x] Funding source classification (6 types)
+- [x] Protocol documentation (treasury policy, payout policy, wallet verification, fraud policy)
+- [x] Treasury CLI extensions (wallets, accounts, maintainers, contributors, proposals, funding-sources)
+- [x] Workspace API extensions (6 GET endpoints)
+- [ ] SIWE wallet verification (Level 3)
+- [ ] Safe multisig deployment (Level 4)
+- [ ] Authority-gated payout approvals (wire into approval queue)
+
 ## v0.2 — Vertical Plugin System
 
 Make it easy to define custom verticals without modifying kernel code.

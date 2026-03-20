@@ -12,6 +12,12 @@ Endpoints:
   GET  /api/agents                -> Agent registry
   GET  /api/authority             -> Authority state (kill switch, approvals, delegations)
   GET  /api/treasury              -> Treasury snapshot
+  GET  /api/treasury/wallets      -> Wallet registry
+  GET  /api/treasury/accounts     -> Treasury sub-accounts
+  GET  /api/treasury/maintainers  -> Maintainer registry
+  GET  /api/treasury/contributors -> Contributor registry
+  GET  /api/treasury/proposals    -> Payout proposals
+  GET  /api/treasury/funding-sources -> Funding source records
   GET  /api/court                 -> Court records
   POST /api/authority/kill-switch -> Engage/disengage kill switch
   POST /api/authority/approve     -> Decide an approval
@@ -57,7 +63,9 @@ from authority import (check_authority, request_approval, decide_approval,
                        disengage_kill_switch, get_pending_approvals,
                        get_sprint_lead, is_kill_switch_engaged, _load_queue)
 from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
-                      contribute_owner_capital, set_reserve_floor_policy)
+                      contribute_owner_capital, set_reserve_floor_policy,
+                      load_wallets, load_treasury_accounts, load_maintainers,
+                      load_contributors, load_payout_proposals, load_funding_sources)
 from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
                    get_restrictions, remediate, _load_records, VIOLATION_TYPES)
@@ -453,6 +461,18 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             })
         elif path == '/api/treasury':
             return self._json(treasury_snapshot())
+        elif path == '/api/treasury/wallets':
+            return self._json(load_wallets())
+        elif path == '/api/treasury/accounts':
+            return self._json(load_treasury_accounts())
+        elif path == '/api/treasury/maintainers':
+            return self._json(load_maintainers())
+        elif path == '/api/treasury/contributors':
+            return self._json(load_contributors())
+        elif path == '/api/treasury/proposals':
+            return self._json(load_payout_proposals())
+        elif path == '/api/treasury/funding-sources':
+            return self._json(load_funding_sources())
         elif path == '/api/court':
             records = _load_records()
             return self._json({

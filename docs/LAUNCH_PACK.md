@@ -155,9 +155,10 @@ Sponsor tiers are configured through [GitHub Sponsors](https://github.com/sponso
 
 ### Secondary: Crypto (Optional)
 
-For sponsors who prefer stablecoin:
-
-Wallet: `0x8200...7761` (USDC on Base)
+For sponsors who prefer stablecoin, see the wallet registry in
+[`treasury/wallets.json`](../treasury/wallets.json) for verified wallet
+addresses. All crypto contributions are governed by the
+[Contributor Treasury Protocol](treasury/CONTRIBUTOR_TREASURY_PROTOCOL.md).
 
 This is supplementary. GitHub Sponsors is the primary path because it provides transparency, recurring support, and community visibility.
 
@@ -489,7 +490,7 @@ The kernel is fully open-source (Apache-2.0) and always will be. The hosted Meri
 ### Must-do (blocks launch)
 
 - [ ] **Review the kernel repo** — owner hasn't audited the 40 files yet. Must confirm no private data leaked, no unwanted code exposed.
-- [ ] **Flip repo visibility** — `mapleleaflatte03/meridian-kernel` is currently PRIVATE. Owner must go to Settings → Danger Zone → Change visibility → Public.
+- [x] **Repo is PUBLIC** — `mapleleaflatte03/meridian-kernel` is public. No action needed.
 - [ ] **Set up GitHub Sponsors** — FUNDING.yml points to `mapleleaflatte03` but Sponsors profile doesn't exist yet. Go to github.com/sponsors/mapleleaflatte03 → set up profile.
 
 ### Should-do (before first social posts)
@@ -510,7 +511,6 @@ The kernel is fully open-source (Apache-2.0) and always will be. The hosted Meri
 
 1. Owner reviews repo + this pack (today)
 2. Owner sets up GitHub Sponsors (same day)
-3. Owner flips repo to public (same day or next)
-4. Owner uploads social preview image
+3. Owner uploads social preview image
 5. Owner posts to platforms in preferred order (HN and Reddit first for developer traction, LinkedIn for professional reach, VOZ for Vietnamese community)
 6. Seed initial issues within 48 hours of launch

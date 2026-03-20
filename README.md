@@ -220,12 +220,18 @@ Do not open public issues for security bugs.
 
 If Meridian is useful to your work, consider
 [sponsoring the project](https://github.com/sponsors/mapleleaflatte03).
+GitHub Sponsors is the primary funding path.
 
 Sponsors help fund:
 - Kernel development and maintenance
 - Security audits
 - Documentation and examples
 - Community infrastructure
+
+For crypto sponsorship (USDC on Base), see the wallet registry in
+[`treasury/wallets.json`](treasury/wallets.json). Crypto is a secondary
+funding path -- all contributions are governed by the
+[Contributor Treasury Protocol](docs/treasury/CONTRIBUTOR_TREASURY_PROTOCOL.md).
 
 ## License
 

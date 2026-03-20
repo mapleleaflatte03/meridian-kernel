@@ -46,7 +46,7 @@ def cmd_show(args):
     print(f"  Cash (USD):         ${t['cash_usd']:.2f}")
     print(f"  Reserve floor:      ${t['reserve_floor_usd']:.2f}")
     print(f"  Owner capital in:   ${t['owner_capital_contributed_usd']:.2f}")
-    print(f"  Revenue received:   ${t['revenue_received_usd']:.2f}")
+    print(f"  Revenue received:   ${t.get('total_revenue_usd', 0):.2f}")
     print(f"  Expenses recorded:  ${t['expenses_recorded_usd']:.2f}")
     print(f"  Owner draws:        ${t['owner_draws_usd']:.2f}")
     bp = data['bonus_pool']
@@ -112,7 +112,7 @@ def cmd_treasury(args):
         if args.type == 'owner_capital':
             t['owner_capital_contributed_usd'] += amount
         elif args.type == 'customer_payment':
-            t['revenue_received_usd'] += amount
+            t['total_revenue_usd'] = t.get('total_revenue_usd', 0) + amount
         save_ledger(data)
         append_transaction({
             'type': 'treasury_deposit',

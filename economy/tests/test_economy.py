@@ -1,67 +1,41 @@
 #!/usr/bin/env python3
 """
-Control tests for the Meridian enforced economy.
+Control tests for the Meridian kernel economy.
 Tests:
   1. Accepted output raises score
   2. Weak output triggers sanction
   3. Zero-authority agent cannot lead
+  4. Paid event increases treasury
 
-Run: python3 economy/tests/test_economy.py
-Exit 0 = all passed. Exit 1 = failures.
+Run: python3 -m unittest discover -s economy/tests -p 'test_*.py'
 """
-import json, os, sys, subprocess, shutil, datetime
+import json, os, sys, subprocess, unittest
 
 WORKSPACE    = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 ECONOMY_DIR  = os.path.join(WORKSPACE, 'economy')
 LEDGER_PATH  = os.path.join(ECONOMY_DIR, 'ledger.json')
 TX_PATH      = os.path.join(ECONOMY_DIR, 'transactions.jsonl')
 
-# -- test runner --------------------------------------------------------------
 
-class T:
-    def __init__(self):
-        self.passed = 0
-        self.failed = 0
-        self.errors = []
-
-    def ok(self, name, detail=''):
-        print(f"  PASS  {name}")
-        self.passed += 1
-
-    def fail(self, name, detail=''):
-        msg = f"FAIL  {name}" + (f": {detail}" if detail else '')
-        print(f"  {msg}")
-        self.failed += 1
-        self.errors.append(msg)
-
-    def check(self, cond, name, detail=''):
-        (self.ok if cond else self.fail)(name, detail)
-
-    def summary(self):
-        total = self.passed + self.failed
-        print(f"\n{'='*50}")
-        print(f"Results: {self.passed}/{total} passed, {self.failed} failed")
-        for e in self.errors:
-            print(f"  x {e}")
-        return self.failed == 0
-
-def run(cmd, check_rc=False):
+def run(cmd):
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=WORKSPACE)
     return r.stdout.strip(), r.returncode, r.stderr.strip()
+
 
 def load_ledger():
     with open(LEDGER_PATH) as f:
         return json.load(f)
 
+
 def load_txs():
     with open(TX_PATH) as f:
         return [json.loads(l) for l in f if l.strip()]
 
-# -- snapshot helpers ---------------------------------------------------------
 
 def snap(agent_id):
     d = load_ledger()['agents'][agent_id]
     return d['reputation_units'], d['authority_units']
+
 
 def restore_score(agent_id, rep, auth):
     current = snap(agent_id)
@@ -72,81 +46,117 @@ def restore_score(agent_id, rep, auth):
              '--agent', agent_id, '--event', 'test_restore',
              '--rep', str(rep_d), '--auth', str(auth_d), '--note', 'test cleanup'])
 
-# -- tests --------------------------------------------------------------------
 
-def test_1_accepted_output_raises_score(t):
-    print("\n=== TEST 1: accepted output raises score ===")
-    rep0, auth0 = snap('atlas')
-    out, rc, _ = run(['python3', 'economy/score.py', 'record',
-                      '--agent', 'atlas', '--event', 'test_accepted',
-                      '--rep', '10', '--auth', '8', '--note', 'ctrl-test accepted output'])
-    t.check(rc == 0, "score.py record exits 0", out)
-    rep1, auth1 = snap('atlas')
-    t.check(rep1  > rep0,  "REP increased",  f"{rep0}->{rep1}")
-    t.check(auth1 > auth0, "AUTH increased", f"{auth0}->{auth1}")
-    restore_score('atlas', rep0, auth0)
-    t.check(snap('atlas') == (rep0, auth0), "Atlas score restored after test")
+class TestEconomy(unittest.TestCase):
 
-def test_2_weak_output_sanction(t):
-    print("\n=== TEST 2: weak output triggers sanction ===")
-    tx_before = len(load_txs())
-    out, rc, _ = run(['python3', 'economy/sanctions.py', 'apply',
-                      '--agent', 'sentinel', '--type', 'lead_ban',
-                      '--note', 'ctrl-test weak output'])
-    t.check(rc == 0, "sanctions.py apply exits 0", out)
-    t.check('SANCTION APPLIED' in out, "SANCTION APPLIED printed", out)
+    def test_1_accepted_output_raises_score(self):
+        """Accepted output raises REP and AUTH."""
+        rep0, auth0 = snap('atlas')
+        if rep0 >= 95 or auth0 >= 95:
+            run(['python3', 'economy/score.py', 'record',
+                 '--agent', 'atlas', '--event', 'test_setup',
+                 '--rep', '-20', '--auth', '-20', '--note', 'ctrl-test create headroom'])
+            rep0, auth0 = snap('atlas')
+        try:
+            out, rc, _ = run(['python3', 'economy/score.py', 'record',
+                              '--agent', 'atlas', '--event', 'test_accepted',
+                              '--rep', '10', '--auth', '8', '--note', 'ctrl-test accepted output'])
+            self.assertEqual(rc, 0, f"score.py record should exit 0: {out}")
+            rep1, auth1 = snap('atlas')
+            self.assertGreater(rep1, rep0, f"REP should increase: {rep0}->{rep1}")
+            self.assertGreater(auth1, auth0, f"AUTH should increase: {auth0}->{auth1}")
+        finally:
+            restore_score('atlas', rep0, auth0)
 
-    txs_after = load_txs()
-    sanction_txs = [tx for tx in txs_after[tx_before:]
-                    if tx.get('type') == 'sanction_applied' and tx.get('agent') == 'sentinel']
-    t.check(len(sanction_txs) > 0, "sanction_applied written to transactions.jsonl")
+    def test_2_weak_output_sanction(self):
+        """Weak output triggers sanction and records transaction."""
+        tx_before = len(load_txs())
+        try:
+            out, rc, _ = run(['python3', 'economy/sanctions.py', 'apply',
+                              '--agent', 'sentinel', '--type', 'lead_ban',
+                              '--note', 'ctrl-test weak output'])
+            self.assertEqual(rc, 0, f"sanctions.py apply should exit 0: {out}")
+            self.assertIn('SANCTION APPLIED', out)
 
-    # Cleanup
-    run(['python3', 'economy/sanctions.py', 'lift',
-         '--agent', 'sentinel', '--type', 'lead_ban', '--note', 'ctrl-test cleanup'])
-    d = load_ledger()['agents']['sentinel']
-    t.check(not d.get('lead_ban'), "lead_ban cleared after lift")
+            txs_after = load_txs()
+            sanction_txs = [tx for tx in txs_after[tx_before:]
+                            if tx.get('type') == 'sanction_applied' and tx.get('agent') == 'sentinel']
+            self.assertGreater(len(sanction_txs), 0, "sanction_applied should be in transactions.jsonl")
+        finally:
+            run(['python3', 'economy/sanctions.py', 'lift',
+                 '--agent', 'sentinel', '--type', 'lead_ban', '--note', 'ctrl-test cleanup'])
+            d = load_ledger()['agents']['sentinel']
+            self.assertFalse(d.get('lead_ban'), "lead_ban should be cleared after lift")
 
-def test_3_zero_authority_cannot_lead(t):
-    print("\n=== TEST 3: zero-authority agent cannot lead ===")
-    rep0, auth0 = snap('forge')
+    def test_3_zero_authority_cannot_lead(self):
+        """Zero-authority agent is blocked from leading and AUTH gain."""
+        rep0, auth0 = snap('forge')
+        try:
+            run(['python3', 'economy/sanctions.py', 'apply',
+                 '--agent', 'forge', '--type', 'zero_authority', '--note', 'ctrl-test zero_auth'])
 
-    # Apply zero_authority
-    run(['python3', 'economy/sanctions.py', 'apply',
-         '--agent', 'forge', '--type', 'zero_authority', '--note', 'ctrl-test zero_auth'])
+            out, rc, _ = run(['python3', 'economy/authority.py', 'check',
+                              '--agent', 'forge', '--action', 'lead'])
+            self.assertEqual(rc, 1, f"authority check should exit 1 (blocked): {out}")
+            self.assertIn('BLOCKED', out)
 
-    out, rc, _ = run(['python3', 'economy/authority.py', 'check',
-                      '--agent', 'forge', '--action', 'lead'])
-    t.check(rc == 1,         "authority check exits 1 (blocked)",  out)
-    t.check('BLOCKED' in out, "BLOCKED message printed",           out)
+            out_lead, _, _ = run(['python3', 'economy/authority.py', 'sprint-lead'])
+            self.assertTrue('forge' not in out_lead.lower() or 'NONE' in out_lead,
+                            f"zero_authority forge should not be sprint lead: {out_lead}")
 
-    out_lead, _, _ = run(['python3', 'economy/authority.py', 'sprint-lead'])
-    t.check('forge' not in out_lead.lower() or 'NONE' in out_lead,
-            "zero_authority forge not selected as sprint lead", out_lead)
+            forge_auth_before = snap('forge')[1]
+            run(['python3', 'economy/score.py', 'record',
+                 '--agent', 'forge', '--event', 'test_auth_block',
+                 '--auth', '10', '--note', 'ctrl-test should be blocked'])
+            self.assertEqual(snap('forge')[1], forge_auth_before, "AUTH gain should be blocked under zero_authority")
+        finally:
+            run(['python3', 'economy/sanctions.py', 'lift',
+                 '--agent', 'forge', '--type', 'zero_authority', '--note', 'ctrl-test cleanup'])
+            restore_score('forge', rep0, auth0)
 
-    # AUTH gain blocked while zero_authority
-    forge_auth_before = snap('forge')[1]
-    run(['python3', 'economy/score.py', 'record',
-         '--agent', 'forge', '--event', 'test_auth_block',
-         '--auth', '10', '--note', 'ctrl-test should be blocked'])
-    t.check(snap('forge')[1] == forge_auth_before, "AUTH gain blocked when zero_authority")
+    def test_4_paid_event_increases_treasury(self):
+        """Paid event via revenue.py increases treasury cash."""
+        cash_before = load_ledger()['treasury']['cash_usd']
+        test_amount = 0.01
+        created_client_id = None
+        created_order_id = None
+        try:
+            out, rc, _ = run(['python3', 'economy/revenue.py', 'client', 'add',
+                              '--name', 'CtrlTestClient', '--contact', 'test@ctrl'])
+            self.assertEqual(rc, 0, f"client add should exit 0: {out}")
+            for word in out.split():
+                if len(word) == 8 and all(c in '0123456789abcdef' for c in word):
+                    created_client_id = word
+                    break
+            self.assertIsNotNone(created_client_id, f"Should find client ID in output: {out}")
 
-    # Cleanup
-    run(['python3', 'economy/sanctions.py', 'lift',
-         '--agent', 'forge', '--type', 'zero_authority', '--note', 'ctrl-test cleanup'])
-    restore_score('forge', rep0, auth0)
+            out, rc, _ = run(['python3', 'economy/revenue.py', 'order', 'create',
+                              '--client', created_client_id,
+                              '--product', 'ctrl-test-product',
+                              '--amount', str(test_amount),
+                              '--note', 'control test order'])
+            self.assertEqual(rc, 0, f"order create should exit 0: {out}")
+            for word in out.split():
+                if len(word) == 8 and all(c in '0123456789abcdef' for c in word):
+                    created_order_id = word
+                    break
+            self.assertIsNotNone(created_order_id, f"Should find order ID in output: {out}")
 
-# -- main ---------------------------------------------------------------------
+            for state in ['accepted', 'in_progress', 'delivered', 'invoiced', 'paid']:
+                out, rc, _ = run(['python3', 'economy/revenue.py', 'order', 'advance',
+                                  created_order_id])
+                self.assertEqual(rc, 0, f"advance to {state} should exit 0: {out}")
 
-def main():
-    print(f"Meridian Economy -- Control Tests")
-    print(f"Workspace: {WORKSPACE}")
-    t = T()
-    test_1_accepted_output_raises_score(t)
-    test_2_weak_output_sanction(t)
-    test_3_zero_authority_cannot_lead(t)
-    ok = t.summary()
-    sys.exit(0 if ok else 1)
+            cash_after = load_ledger()['treasury']['cash_usd']
+            self.assertGreater(cash_after, cash_before, f"Treasury cash should increase: ${cash_before}->${cash_after}")
+            self.assertAlmostEqual(cash_after - cash_before, test_amount, places=2,
+                                   msg=f"Should deposit ${test_amount}: delta=${cash_after - cash_before}")
+        finally:
+            if created_order_id:
+                run(['python3', 'economy/score.py', 'treasury', 'withdraw',
+                     '--amount', str(test_amount), '--type', 'expense',
+                     '--note', 'ctrl-test cleanup'])
+
 
 if __name__ == '__main__':
-    main()
+    unittest.main()

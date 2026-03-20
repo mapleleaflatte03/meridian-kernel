@@ -222,6 +222,9 @@ Production deployments would build their own control plane on top of the
 JSON API. External runtimes can call the JSON API directly for governance
 checks instead of importing Python modules.
 
+For the concrete handoff from local demo to real deployment, see
+[Deployment Guide](docs/DEPLOYMENT_GUIDE.md).
+
 ## Example Vertical
 
 `examples/intelligence/` demonstrates how to map a real workflow onto the

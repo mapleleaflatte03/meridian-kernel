@@ -91,6 +91,9 @@ This quickstart boots a **local demo institution** and the **reference workspace
 For a real deployment, treat the JSON API and the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md)
 as the integration boundary and build your own runtime adapter or control plane on top.
 
+Need the exact handoff from demo to real deployment?
+See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).
+
 ### Try the primitives directly
 
 ```bash
@@ -245,4 +248,4 @@ Apache-2.0. See [LICENSE](LICENSE).
 
 ---
 
-[Architecture](ARCHITECTURE.md) · [Open-Source Boundary](OPEN_SOURCE_BOUNDARY.md) · [Economy Constitution](economy/ECONOMY_CONSTITUTION.md) · [Roadmap](ROADMAP.md) · [Governance](GOVERNANCE.md)
+[Architecture](ARCHITECTURE.md) · [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) · [Open-Source Boundary](OPEN_SOURCE_BOUNDARY.md) · [Economy Constitution](economy/ECONOMY_CONSTITUTION.md) · [Roadmap](ROADMAP.md) · [Governance](GOVERNANCE.md)

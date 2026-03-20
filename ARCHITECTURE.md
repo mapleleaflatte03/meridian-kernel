@@ -156,8 +156,8 @@ Currently registered runtimes:
 |---------|------|----------------|
 | `local_kernel` | local | Compliant (7/7) |
 | `openclaw_compatible` | hosted | Partial (5/7) |
-| `mcp_generic` | mcp_app | Partial (2/7, planned adapter) |
-| `a2a_generic` | a2a_agent | Partial (1/7, planned adapter) |
+| `mcp_generic` | mcp_app | Non-compliant (2/7, planned adapter) |
+| `a2a_generic` | a2a_agent | Non-compliant (1/7, planned adapter) |
 | `openfang_compatible` | hosted | Unknown (0/7, planned) |
 
 See [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) for the full

@@ -182,8 +182,8 @@ Meridian is runtime-neutral. Five runtimes are currently registered:
 |---------|----------|----------------|
 | `local_kernel` | custom | Compliant (7/7) — built-in reference |
 | `openclaw_compatible` | custom | Partial (5/7) — adapter work underway |
-| `mcp_generic` | MCP | Partial (2/7) — planned adapter in v0.2 |
-| `a2a_generic` | A2A | Partial (1/7) — planned adapter in v0.2 |
+| `mcp_generic` | MCP | Non-compliant (2/7) — planned adapter in v0.2 |
+| `a2a_generic` | A2A | Non-compliant (1/7) — planned adapter in v0.2 |
 | `openfang_compatible` | custom | Unknown — planned |
 
 ```bash

@@ -495,7 +495,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             rt = get_runtime(runtime_id)
             if rt is None:
                 return self._json({'error': f'Runtime {runtime_id!r} not found'}, 404)
-            return self._json(rt)
+            from runtime_adapter import check_contract
+            enriched = dict(rt)
+            enriched['contract_check'] = check_contract(runtime_id)
+            return self._json(enriched)
         elif path == '/api/court':
             records = _load_records()
             return self._json({

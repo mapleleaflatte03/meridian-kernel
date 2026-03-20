@@ -21,7 +21,7 @@ demo, and example vertical.
 - [x] Runtime adapter primitive (`kernel/runtime_adapter.py`)
 - [x] Runtime registry (`kernel/runtimes.json`) with five seeds:
       local_kernel (compliant), openclaw_compatible (partial),
-      mcp_generic (partial), a2a_generic (partial), openfang_compatible (planned)
+      mcp_generic (non-compliant 2/7), a2a_generic (non-compliant 1/7), openfang_compatible (planned)
 - [x] Constitutional runtime contract (`docs/RUNTIME_CONTRACT.md`) — seven requirements
 - [x] Contract compliance checker (`check_contract`, `check-all` CLI)
 - [x] Workspace API `/api/runtimes` endpoint

@@ -1,5 +1,8 @@
 # Meridian Constitutional Kernel — Launch Post
 
+*Superseded by [LAUNCH_PACK.md](LAUNCH_PACK.md) which has platform-specific
+copy for X, Reddit, HN, LinkedIn, Facebook, Threads, and VOZ.*
+
 *For posting on HN, Reddit, dev communities. Adjust tone per platform.*
 
 ---

@@ -58,6 +58,19 @@ customer data, proprietary research sources). See
 
 You don't need the hosted service. This kernel runs standalone.
 
+## Who This Is For
+
+**Use Meridian if you:**
+- Run AI agents that spend money, call APIs, or produce work product
+- Need governance beyond "trust the prompt" but don't want to build it from scratch
+- Want agents to have identity, budgets, authority, and accountability
+- Need a kill switch, approval queues, or sanction enforcement
+- Want to separate governance from your agent runtime
+
+**This is not for you if you** need a chatbot framework, an agent runner,
+or a mature ecosystem with hundreds of integrations. Meridian is the
+governance layer — it doesn't run your agents, it governs them.
+
 ---
 
 ## Quickstart (Under 10 Minutes)

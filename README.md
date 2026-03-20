@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/meridian_lockup_flat.svg" alt="Meridian Constitutional Kernel" width="420">
+</p>
+
 # Meridian Constitutional Kernel
 
 **Five primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**

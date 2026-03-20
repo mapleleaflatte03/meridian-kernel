@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 128" role="img" aria-labelledby="title desc">
+  <title id="title">Meridian wordmark</title>
+  <desc id="desc">The Meridian wordmark in a clean flat style for light and dark backgrounds.</desc>
+  <defs>
+    <style>
+      .word { fill: #0f172a; font: 700 72px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: -1.8px; }
+      .accent { fill: #475569; font: 500 18px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: 4px; text-transform: uppercase; }
+      @media (prefers-color-scheme: dark) {
+        .word { fill: #f8fafc; }
+        .accent { fill: #94a3b8; }
+      }
+    </style>
+  </defs>
+  <text x="0" y="78" class="word">Meridian</text>
+  <text x="4" y="112" class="accent">Constitutional Systems</text>
+</svg>

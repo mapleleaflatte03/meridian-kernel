@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 256" role="img" aria-labelledby="title desc">
+  <title id="title">Meridian flat lockup</title>
+  <desc id="desc">A flat Meridian lockup combining the circular mark and the Meridian wordmark.</desc>
+  <defs>
+    <linearGradient id="ring" x1="32" y1="224" x2="224" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4fc3f7"/>
+      <stop offset="55%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <style>
+      .ink { stroke: #0f172a; fill: #0f172a; }
+      .accent { fill: #475569; font: 500 20px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: 4.5px; text-transform: uppercase; }
+      .word { fill: #0f172a; font: 700 88px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: -2px; }
+      @media (prefers-color-scheme: dark) {
+        .ink { stroke: #f8fafc; fill: #f8fafc; }
+        .accent { fill: #94a3b8; }
+        .word { fill: #f8fafc; }
+      }
+    </style>
+  </defs>
+  <circle cx="128" cy="128" r="96" fill="none" stroke="url(#ring)" stroke-width="12"/>
+  <path class="ink" d="M80 176V80L128 140L176 80V176" fill="none" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="286" y="124" class="word">Meridian</text>
+  <text x="290" y="166" class="accent">Constitutional Kernel</text>
+</svg>

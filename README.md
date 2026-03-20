@@ -1,74 +1,50 @@
 # Meridian Constitutional Kernel
 
-Open-source kernel for governed digital labor built on five primitives:
-**Institution, Agent, Authority, Treasury, and Court.**
+**Five primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**
 
-```
-pip install: not required — pure Python stdlib
-quickstart:  python3 quickstart.py
-demo:        http://localhost:18901 (governed workspace)
-```
+Pure Python. No external dependencies. Apache-2.0.
 
 ---
 
-## What This Is
-
-Meridian is a runtime-neutral constitutional layer for digital labor.
-
-It provides governance primitives that sit between any agent runtime and
-production: identity, authority, budget enforcement, and accountability — for
-any execution environment that satisfies a simple integration contract.
-
 **Meridian does not run your agents. It governs them.**
 
-Plug it into MCP-backed apps, A2A-capable agents, self-hosted runtimes,
-LangChain pipelines, or custom stacks. The governance layer is independent
-of the execution layer.
-
-If you run AI agents that spend money, make decisions, or produce work product,
-you need governance primitives — not just prompts.
-
-Meridian gives you five:
+Any runtime — MCP-backed apps, LangChain pipelines, OpenClaw, A2A agents, or your own stack — can have its agents governed by the same five primitives. The governance layer is independent of the execution layer.
 
 | Primitive | What It Does |
 |-----------|-------------|
 | **Institution** | Charter-governed container with lifecycle management and policy defaults |
 | **Agent** | First-class identity with scopes, budget, risk state, and lifecycle |
 | **Authority** | Approval queues, delegations, kill switch, sprint leadership |
-| **Treasury** | Real money tracking with balance, runway, reserve floor, and budget enforcement |
+| **Treasury** | Real money tracking: balance, runway, reserve floor, and budget enforcement |
 | **Court** | Violations, sanctions, appeals, remediation — severity-based enforcement |
 
-These compose over a three-ledger economy: **REP** (reputation/trust),
-**AUTH** (temporary authority), and **CASH** (real money). Agents earn
-reputation through accepted work, gain temporary authority from recent
-output, and spend real budget under treasury constraints.
+These compose over a three-ledger economy: **REP** (reputation/trust), **AUTH** (temporary authority), and **CASH** (real money). Agents earn reputation through accepted work, gain temporary authority from recent output, and spend real budget under treasury constraints.
 
-## Why Now
+---
 
-Runtimes are proliferating. MCP is a major open standard for tool connectivity.
-A2A is pushing agent-to-agent interoperability across vendors. Enterprise
-platforms are adding agent identity. Payment rails are adding agentic commerce.
+## The Governance Gap
 
-In this world, the execution layer fragments — every team, vendor, and platform
-will have a runtime. What doesn't fragment is the need for governance: identity,
-authority, budget, accountability, and dispute resolution.
+Runtimes are proliferating. MCP is a major open standard for tool connectivity. A2A is pushing agent-to-agent interoperability across vendors. Enterprise platforms are adding agent identity. Payment rails are adding agentic commerce.
 
-Meridian is the governance layer above the runtime layer, the same way Unix
-permissions work regardless of which shell or application you use.
+In this world, the execution layer fragments — every team, vendor, and platform will have a runtime. What doesn't fragment is the need for governance: identity, authority, budget, accountability, and dispute resolution.
+
+**Meridian is the governance layer above the runtime layer** — the same way Unix permissions work regardless of which shell or application you use.
+
+If you run AI agents that spend money, make decisions, or produce work product, you need governance primitives. Not just prompts.
+
+---
 
 ## What Is Open
 
-Everything in this repo. The five kernel primitives, the economy layer
-they compose over, the governed workspace demo, and a complete example
-vertical. Apache-2.0 licensed.
+Everything in this repo: the five kernel primitives, the economy layer they compose over, the governed workspace demo, and a complete example vertical. Apache-2.0 licensed.
 
 ## What Is Not Open
 
-The hosted Meridian service (delivery pipelines, payment processing,
-customer data, proprietary research sources). See
-[OPEN_SOURCE_BOUNDARY.md](OPEN_SOURCE_BOUNDARY.md) for the full list.
+The hosted Meridian service — delivery pipelines, payment processing, customer data, proprietary research sources. See [OPEN_SOURCE_BOUNDARY.md](OPEN_SOURCE_BOUNDARY.md) for the full list.
 
 You don't need the hosted service. This kernel runs standalone.
+
+---
 
 ## Who This Is For
 
@@ -77,17 +53,14 @@ You don't need the hosted service. This kernel runs standalone.
 - Need governance beyond "trust the prompt" but don't want to build it from scratch
 - Want agents to have identity, budgets, authority, and accountability
 - Need a kill switch, approval queues, or sanction enforcement
-- Want to separate governance from your agent runtime — and keep that separation
-  as runtimes evolve (MCP, A2A, custom)
+- Want to separate governance from your agent runtime — and keep that separation as runtimes evolve (MCP, A2A, custom)
 - Want to govern agents across multiple runtimes with a single kernel
 
-**This is not for you if you** need a chatbot framework, an agent runner,
-or a mature ecosystem with hundreds of integrations. Meridian is the
-governance layer — it doesn't run your agents, it governs them.
+**This is not for you if you** need a chatbot framework, an agent runner, or a mature ecosystem with hundreds of integrations. Meridian is the governance layer — it doesn't run your agents, it governs them.
 
 ---
 
-## Quickstart (Under 10 Minutes)
+## Quickstart
 
 **Requirements:** Python 3.9+, no external dependencies.
 
@@ -110,12 +83,9 @@ Open the dashboard to see all five primitives live:
 - Check treasury runway and budget gates
 - Run the example intelligence vertical preflight
 
-### Try It
+### Try the primitives directly
 
 ```bash
-# Check system status
-python3 kernel/workspace.py --port 18901 &
-
 # Run the example vertical preflight
 python3 examples/intelligence/ci_vertical.py preflight
 
@@ -139,7 +109,7 @@ python3 kernel/authority.py kill-switch off --by owner
 
 ---
 
-## Architecture at a Glance
+## Architecture
 
 ```
 ┌───────────────────────────────────────────────────────┐
@@ -170,9 +140,7 @@ python3 kernel/authority.py kill-switch off --by owner
 └───────────────────────────────────────────────────────┘
 ```
 
-The kernel doesn't run your agents. It governs them. Any runtime that
-satisfies the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md)
-can have its agents governed by the same five primitives.
+The kernel doesn't run your agents. It governs them. Any runtime that satisfies the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) can have its agents governed by the same five primitives.
 
 ## Runtime Adapters
 
@@ -190,22 +158,17 @@ Meridian is runtime-neutral. Five runtimes are currently registered:
 # Check contract compliance for all runtimes
 python3 kernel/runtime_adapter.py check-all
 
-# Check a specific runtime
-python3 kernel/runtime_adapter.py check-contract --runtime_id mcp_generic
-
 # Register your own runtime
 python3 kernel/runtime_adapter.py register \
   --id my_runtime --label "My Runtime" \
   --type hosted --protocols "MCP,custom" --identity_mode api_key
 ```
 
-The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the
-seven integration hooks and includes a minimal integration example.
+The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the seven integration hooks and includes a minimal integration example.
 
-### Composition Pattern
+## Composition Pattern
 
-Kernel primitives compose over the economy layer — they import and extend,
-never rewrite:
+Kernel primitives compose over the economy layer — they import and extend, never rewrite:
 
 | Economy Module | Kernel Primitive | What's Composed |
 |---------------|-----------------|-----------------|
@@ -214,7 +177,7 @@ never rewrite:
 | `economy/score.py` | `kernel/agent_registry.py` | REP/AUTH scoring synced to agent risk state |
 | `economy/revenue.py` | `kernel/treasury.py` | Balance, runway, budget enforcement |
 
-### State Files
+## State Files
 
 All state is JSON/JSONL on the local filesystem. No database required.
 
@@ -232,27 +195,22 @@ All state is JSON/JSONL on the local filesystem. No database required.
 
 ## Example Vertical: Competitive Intelligence
 
-The `examples/intelligence/` directory shows a complete agent workflow
-mapped onto the five primitives:
+The `examples/intelligence/` directory shows a complete agent workflow mapped onto the five primitives:
 
 ```
 Research (Atlas) → Write (Quill) → QA (Sentinel) → Accept (Aegis)
     → Execute (Forge) → Compress (Pulse) → Deliver → Score
 ```
 
-Each phase checks authority, respects budget gates, and records court
-violations on failure. The preflight command checks all constitutional
-gates before the pipeline runs.
+Each phase checks authority, respects budget gates, and records court violations on failure. The preflight command checks all constitutional gates before the pipeline runs.
 
-This is an example workload, not the definition of Meridian. You can
-build any governed workflow on the same kernel.
+This is an example workload, not the definition of Meridian. You can build any governed workflow on the same kernel.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). No CLA required — Apache-2.0
-inbound = outbound.
+See [CONTRIBUTING.md](CONTRIBUTING.md). No CLA required — Apache-2.0 inbound = outbound.
 
 Good places to start:
 - Issues labeled `good first issue`
@@ -263,34 +221,20 @@ Good places to start:
 
 ## Security
 
-Report vulnerabilities privately per [SECURITY.md](SECURITY.md).
-Do not open public issues for security bugs.
+Report vulnerabilities privately per [SECURITY.md](SECURITY.md). Do not open public issues for security bugs.
 
 ## Sponsorship
 
-If Meridian is useful to your work, consider
-[sponsoring the project](https://github.com/sponsors/mapleleaflatte03).
-GitHub Sponsors is the primary funding path.
+If Meridian is useful to your work, consider [sponsoring the project](https://github.com/sponsors/mapleleaflatte03). GitHub Sponsors is the primary funding path.
 
-Sponsors help fund:
-- Kernel development and maintenance
-- Security audits
-- Documentation and examples
-- Community infrastructure
+Sponsors help fund kernel development, security audits, documentation, and community infrastructure.
 
-For crypto sponsorship (USDC on Base), see the wallet registry in
-[`treasury/wallets.json`](treasury/wallets.json). Crypto is a secondary
-funding path -- all contributions are governed by the
-[Contributor Treasury Protocol](docs/treasury/CONTRIBUTOR_TREASURY_PROTOCOL.md).
+For crypto sponsorship (USDC on Base), see the wallet registry in [`treasury/wallets.json`](treasury/wallets.json). All contributions are governed by the [Contributor Treasury Protocol](docs/treasury/CONTRIBUTOR_TREASURY_PROTOCOL.md).
 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
 
-## Links
+---
 
-- [Architecture](ARCHITECTURE.md)
-- [Open-Source Boundary](OPEN_SOURCE_BOUNDARY.md)
-- [Economy Constitution](economy/ECONOMY_CONSTITUTION.md)
-- [Roadmap](ROADMAP.md)
-- [Governance](GOVERNANCE.md)
+[Architecture](ARCHITECTURE.md) · [Open-Source Boundary](OPEN_SOURCE_BOUNDARY.md) · [Economy Constitution](economy/ECONOMY_CONSTITUTION.md) · [Roadmap](ROADMAP.md) · [Governance](GOVERNANCE.md)

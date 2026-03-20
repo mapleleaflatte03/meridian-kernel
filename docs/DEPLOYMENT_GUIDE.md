@@ -67,7 +67,10 @@ python3 kernel/workspace.py --port 18901
 
 Important:
 - the built-in workspace is a reference surface
-- production teams should usually front it with their own auth/reverse proxy
+- if you expose it outside localhost, set `MERIDIAN_WORKSPACE_USER` and
+  `MERIDIAN_WORKSPACE_PASS` (or point `MERIDIAN_WORKSPACE_CREDENTIALS_FILE`
+  at a credentials file) so the workspace self-protects with HTTP Basic auth
+- production teams should usually still front it with their own auth/reverse proxy
 - many teams will build their own operator UI on top of the JSON API instead
 
 ### C. Register or model your runtime
@@ -151,9 +154,11 @@ Mutation endpoints include:
 - `/api/institution/charter`
 - `/api/institution/lifecycle`
 
-For production use, put auth in front of mutation routes. The built-in workspace
-is meant to demonstrate the control surface, not replace your deployment's
-security model.
+For production use, do not expose the workspace unauthenticated. The built-in
+workspace can self-protect with HTTP Basic auth when credentials are configured,
+and production teams should usually still put a reverse proxy / access layer in
+front of it. The reference UI is meant to demonstrate the control surface, not
+replace your deployment's full security model.
 
 ## 6. State And Persistence
 

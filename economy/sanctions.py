@@ -133,6 +133,11 @@ def lift_sanction(data, agent_id, stype, note):
         agent['probation'] = False
     if stype in ('zero_authority', 'all'):
         agent['zero_authority'] = False
+        # Prevent auto-rule from immediately re-sanctioning: grant enough AUTH
+        # to survive one epoch of inactivity (auth_decay_per_epoch + 1)
+        if agent['authority_units'] == 0:
+            floor = data.get('epoch', {}).get('auth_decay_per_epoch', 5) + 1
+            agent['authority_units'] = floor
     if stype in ('lead_ban', 'all'):
         agent.pop('lead_ban', None)
     if stype in ('remediation_only', 'all'):

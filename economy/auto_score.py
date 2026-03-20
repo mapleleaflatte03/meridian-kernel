@@ -151,6 +151,14 @@ def latest_brief():
     with open(briefs[0]) as f:
         return briefs[0], f.read()
 
+
+def latest_findings():
+    findings = glob.glob(os.path.join(ARTIFACT_DIR, 'findings-*.md'))
+    if not findings:
+        return ''
+    findings.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return findings[0]
+
 def detect_outcomes(jobs, report_text, brief_text):
     """Return list of (outcome_key, evidence) based on real artifacts."""
     outcomes = []
@@ -211,8 +219,11 @@ def detect_outcomes(jobs, report_text, brief_text):
                 outcomes.append(('execute_completed', 'Forge execution recorded in report'))
 
         if any(kw in lo_report for kw in ['finding', 'research', 'atlas']):
-            if os.path.exists(os.path.join(ARTIFACT_DIR, 'findings-' + _today() + '.md')):
-                outcomes.append(('research_delivered', 'findings file present for today'))
+            findings_path = os.path.join(ARTIFACT_DIR, 'findings-' + _today() + '.md')
+            if not os.path.exists(findings_path):
+                findings_path = latest_findings()
+            if findings_path:
+                outcomes.append(('research_delivered', f'findings file present: {os.path.basename(findings_path)}'))
 
     return outcomes
 

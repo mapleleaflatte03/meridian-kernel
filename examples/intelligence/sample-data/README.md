@@ -18,6 +18,10 @@ without depending on a private runtime layout such as `~/.openclaw/...`.
 - `findings-2026-03-20.md` — sample findings with source and recency evidence
 - `reports/run-2026-03-20.md` — sample pipeline report for post-mortem / dry-run scoring
 
+The filenames are fixed reference artifacts, not promises about today's date.
+The OSS example tooling resolves the latest sample artifacts by filename/mtime
+so the public repo does not become invalid just because the calendar changes.
+
 ## Real Deployments
 
 In a real deployment, point the example and scoring tools at your own artifact

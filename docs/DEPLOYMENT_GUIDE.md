@@ -56,8 +56,9 @@ Use the repo bootstrap paths first:
 python3 quickstart.py --init-only
 ```
 
-This creates local JSON state for the institution, agents, economy ledger, and
-workspace records.
+This reconciles the repo's local demo JSON state for the institution, agents,
+economy ledger, and workspace records so the example stays runnable even when
+reference state is already checked into git.
 
 ### B. Start the reference workspace
 

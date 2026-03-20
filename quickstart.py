@@ -107,12 +107,17 @@ def _manual_init():
         org_id = f'org_{uuid.uuid4().hex[:8]}'
         orgs['organizations'][org_id] = {
             'id': org_id,
-            'name': 'Meridian',
-            'slug': 'meridian',
+            'name': 'Demo Org',
+            'slug': 'demo-org',
             'plan': 'enterprise',
-            'owner_id': 'owner',
-            'members': ['owner'],
-            'charter': 'Constitutional operating system for governed digital labor.',
+            'owner_id': 'user_owner',
+            'members': [
+                {'user_id': 'user_owner', 'role': 'owner', 'added_at': _now()}
+            ],
+            'charter': (
+                'Reference demo institution for exercising Meridian governance locally '
+                'across institution, agent, authority, treasury, and court.'
+            ),
             'policy_defaults': {
                 'max_budget_per_agent_usd': 10.0,
                 'require_approval_above_usd': 5.0,
@@ -126,7 +131,7 @@ def _manual_init():
             'updated_at': _now(),
         }
         save_orgs(orgs)
-        step(f"Created institution: Meridian ({org_id})")
+        step(f"Created institution: Demo Org ({org_id})")
 
     # Register agents
     AGENTS = [

@@ -22,6 +22,13 @@ from audit import log_event
 
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
 LEDGER_FILE = os.path.join(WORKSPACE, 'economy', 'ledger.json')
+DEMO_ORG_NAME = 'Demo Org'
+DEMO_ORG_OWNER = 'user_owner'
+DEMO_ORG_SLUG = 'demo-org'
+DEMO_ORG_CHARTER = (
+    'Reference demo institution for exercising Meridian governance locally '
+    'across institution, agent, authority, treasury, and court.'
+)
 
 
 def bootstrap():
@@ -30,20 +37,20 @@ def bootstrap():
     founding_org_id = None
 
     for oid, org in orgs['organizations'].items():
-        if org.get('slug') == 'demo-org':
+        if org.get('slug') == DEMO_ORG_SLUG:
             founding_org_id = oid
             print(f'Founding org already exists: {oid}')
             break
 
     if not founding_org_id:
         founding_org_id = create_org(
-            name='Demo Org',
-            owner_id='user_owner',
+            name=DEMO_ORG_NAME,
+            owner_id=DEMO_ORG_OWNER,
             plan='enterprise',
         )
         # Override slug to canonical value
         orgs = load_orgs()
-        orgs['organizations'][founding_org_id]['slug'] = 'demo-org'
+        orgs['organizations'][founding_org_id]['slug'] = DEMO_ORG_SLUG
         save_orgs(orgs)
         print(f'Created founding org: {founding_org_id}')
 
@@ -51,8 +58,17 @@ def bootstrap():
     orgs = load_orgs()
     org = orgs['organizations'].get(founding_org_id, {})
     backfilled_org = False
-    if 'charter' not in org:
-        org['charter'] = ''
+    if org.get('name') != DEMO_ORG_NAME:
+        org['name'] = DEMO_ORG_NAME
+        backfilled_org = True
+    if org.get('owner_id') != DEMO_ORG_OWNER:
+        org['owner_id'] = DEMO_ORG_OWNER
+        backfilled_org = True
+    if org.get('slug') != DEMO_ORG_SLUG:
+        org['slug'] = DEMO_ORG_SLUG
+        backfilled_org = True
+    if not org.get('charter'):
+        org['charter'] = DEMO_ORG_CHARTER
         backfilled_org = True
     if 'policy_defaults' not in org:
         org['policy_defaults'] = dict(DEFAULT_POLICY_DEFAULTS)
@@ -65,6 +81,17 @@ def bootstrap():
         backfilled_org = True
     if 'settings' not in org:
         org['settings'] = {}
+        backfilled_org = True
+    members = org.get('members', [])
+    if members and isinstance(members[0], str):
+        org['members'] = [
+            {
+                'user_id': member_id,
+                'role': 'owner' if member_id == org.get('owner_id') else 'member',
+                'added_at': _now(),
+            }
+            for member_id in members
+        ]
         backfilled_org = True
     if backfilled_org:
         save_orgs(orgs)

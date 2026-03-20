@@ -75,9 +75,9 @@ python3 quickstart.py
 ```
 
 This will:
-1. Initialize an example institution with charter and policies
+1. Reconcile the repo's local demo institution, charter, and policies
 2. Register seven example agents with roles, budgets, and scopes
-3. Set up the economy (reputation, authority, treasury)
+3. Reconcile the demo economy state (reputation, authority, treasury)
 4. Start the governed workspace at `http://localhost:18901`
 
 Open the dashboard to see all five primitives live:

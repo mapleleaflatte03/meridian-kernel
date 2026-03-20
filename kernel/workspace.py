@@ -55,6 +55,7 @@ from urllib.parse import urlparse, parse_qs
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
+EXAMPLES_INTELLIGENCE_DIR = os.path.join(WORKSPACE, 'examples', 'intelligence')
 WORKSPACE_CREDENTIALS_FILE = os.environ.get(
     'MERIDIAN_WORKSPACE_CREDENTIALS_FILE',
     '/etc/caddy/.workspace_credentials',
@@ -63,6 +64,8 @@ WORKSPACE_AUTH_REQUIRED = os.environ.get('MERIDIAN_WORKSPACE_AUTH_REQUIRED', '')
     '1', 'true', 'yes', 'on'
 )
 sys.path.insert(0, PLATFORM_DIR)
+if os.path.isdir(EXAMPLES_INTELLIGENCE_DIR):
+    sys.path.insert(0, EXAMPLES_INTELLIGENCE_DIR)
 
 from organizations import (load_orgs, set_charter, set_policy_defaults,
                            transition_lifecycle as org_transition_lifecycle)
@@ -85,7 +88,7 @@ from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
                    get_restrictions, remediate, _load_records, VIOLATION_TYPES)
 
-# Optional: CI vertical import (only if present)
+# Optional: CI vertical import from the example vertical if present
 _ci_vertical_available = False
 try:
     from ci_vertical import PIPELINE_PHASES, _phase_gate_snapshot, get_agent_remediation

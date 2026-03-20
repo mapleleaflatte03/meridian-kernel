@@ -13,9 +13,17 @@ demo:        http://localhost:18901 (governed workspace)
 
 ## What This Is
 
-Meridian is a constitutional operating system for AI agents. It provides the
-governance layer that sits between "agents that can do things" and
-"agents that should be trusted to do things."
+Meridian is a runtime-neutral constitutional layer for digital labor.
+
+It provides governance primitives that sit between any agent runtime and
+production: identity, authority, budget enforcement, and accountability — for
+any execution environment that satisfies a simple integration contract.
+
+**Meridian does not run your agents. It governs them.**
+
+Plug it into MCP-backed apps, A2A-capable agents, self-hosted runtimes,
+LangChain pipelines, or custom stacks. The governance layer is independent
+of the execution layer.
 
 If you run AI agents that spend money, make decisions, or produce work product,
 you need governance primitives — not just prompts.
@@ -37,12 +45,16 @@ output, and spend real budget under treasury constraints.
 
 ## Why Now
 
-AI agents are getting deployed into production. Most governance is
-either "trust the prompt" or "build a custom permissions system per tool."
+Runtimes are proliferating. MCP is a major open standard for tool connectivity.
+A2A is pushing agent-to-agent interoperability across vendors. Enterprise
+platforms are adding agent identity. Payment rails are adding agentic commerce.
 
-Neither scales. What scales is a small, composable kernel that any
-agent runtime can adopt — the way Unix permissions work regardless of
-which shell you use.
+In this world, the execution layer fragments — every team, vendor, and platform
+will have a runtime. What doesn't fragment is the need for governance: identity,
+authority, budget, accountability, and dispute resolution.
+
+Meridian is the governance layer above the runtime layer, the same way Unix
+permissions work regardless of which shell or application you use.
 
 ## What Is Open
 
@@ -65,7 +77,9 @@ You don't need the hosted service. This kernel runs standalone.
 - Need governance beyond "trust the prompt" but don't want to build it from scratch
 - Want agents to have identity, budgets, authority, and accountability
 - Need a kill switch, approval queues, or sanction enforcement
-- Want to separate governance from your agent runtime
+- Want to separate governance from your agent runtime — and keep that separation
+  as runtimes evolve (MCP, A2A, custom)
+- Want to govern agents across multiple runtimes with a single kernel
 
 **This is not for you if you** need a chatbot framework, an agent runner,
 or a mature ecosystem with hundreds of integrations. Meridian is the
@@ -128,29 +142,65 @@ python3 kernel/authority.py kill-switch off --by owner
 ## Architecture at a Glance
 
 ```
-┌─────────────────────────────────────────────┐
-│  Governed Workspace (workspace.py)          │
-│  Owner-facing dashboard + JSON API          │
-├─────────────────────────────────────────────┤
-│  Kernel Primitives                          │
-│  ┌───────────┐ ┌───────┐ ┌───────────┐     │
-│  │Institution│ │ Agent │ │ Authority │     │
-│  └───────────┘ └───────┘ └───────────┘     │
-│  ┌───────────┐ ┌───────┐                   │
-│  │ Treasury  │ │ Court │                   │
-│  └───────────┘ └───────┘                   │
-├─────────────────────────────────────────────┤
-│  Economy Layer                              │
-│  REP (reputation) + AUTH (authority)        │
-│  + CASH (treasury) + Sanctions + Scoring    │
-├─────────────────────────────────────────────┤
-│  Your Agent Runtime                         │
-│  (OpenClaw, LangChain, CrewAI, custom, ...) │
-└─────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│  Governed Workspace (workspace.py)                    │
+│  Owner-facing dashboard + JSON API                    │
+├───────────────────────────────────────────────────────┤
+│  Kernel Primitives                                    │
+│  ┌───────────┐ ┌───────┐ ┌───────────┐ ┌──────────┐ │
+│  │Institution│ │ Agent │ │ Authority │ │ Treasury │ │
+│  └───────────┘ └───────┘ └───────────┘ └──────────┘ │
+│  ┌─────────┐ ┌────────────────────────────────────┐  │
+│  │  Court  │ │ Runtime Adapter (runtime_adapter.py)│  │
+│  └─────────┘ └────────────────────────────────────┘  │
+├───────────────────────────────────────────────────────┤
+│  Economy Layer                                        │
+│  REP (reputation) + AUTH (authority)                  │
+│  + CASH (treasury) + Sanctions + Scoring              │
+├───────────────────────────────────────────────────────┤
+│  Runtime Adapter Layer (runtime-neutral)              │
+│  ┌─────────────┐ ┌──────────────┐ ┌───────────────┐  │
+│  │ local_kernel│ │  openclaw_   │ │  mcp_generic  │  │
+│  │  (built-in) │ │  compatible  │ │   (planned)   │  │
+│  └─────────────┘ └──────────────┘ └───────────────┘  │
+│  ┌─────────────┐ ┌──────────────┐                    │
+│  │ a2a_generic │ │ your runtime │                    │
+│  │  (planned)  │ │  (register)  │                    │
+│  └─────────────┘ └──────────────┘                    │
+└───────────────────────────────────────────────────────┘
 ```
 
-The kernel doesn't run your agents. It governs them. Plug it into
-whatever agent runtime you use.
+The kernel doesn't run your agents. It governs them. Any runtime that
+satisfies the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md)
+can have its agents governed by the same five primitives.
+
+## Runtime Adapters
+
+Meridian is runtime-neutral. Five runtimes are currently registered:
+
+| Runtime | Protocol | Contract Status |
+|---------|----------|----------------|
+| `local_kernel` | custom | Compliant (7/7) — built-in reference |
+| `openclaw_compatible` | custom | Partial (5/7) — adapter work underway |
+| `mcp_generic` | MCP | Partial (2/7) — planned adapter in v0.2 |
+| `a2a_generic` | A2A | Partial (1/7) — planned adapter in v0.2 |
+| `openfang_compatible` | custom | Unknown — planned |
+
+```bash
+# Check contract compliance for all runtimes
+python3 kernel/runtime_adapter.py check-all
+
+# Check a specific runtime
+python3 kernel/runtime_adapter.py check-contract --runtime_id mcp_generic
+
+# Register your own runtime
+python3 kernel/runtime_adapter.py register \
+  --id my_runtime --label "My Runtime" \
+  --type hosted --protocols "MCP,custom" --identity_mode api_key
+```
+
+The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the
+seven integration hooks and includes a minimal integration example.
 
 ### Composition Pattern
 

@@ -18,6 +18,8 @@ Endpoints:
   GET  /api/treasury/contributors -> Contributor registry
   GET  /api/treasury/proposals    -> Payout proposals
   GET  /api/treasury/funding-sources -> Funding source records
+  GET  /api/runtimes              -> Runtime registry and contract status
+  GET  /api/runtimes/<id>         -> Single runtime record
   GET  /api/court                 -> Court records
   POST /api/authority/kill-switch -> Engage/disengage kill switch
   POST /api/authority/approve     -> Decide an approval
@@ -66,6 +68,7 @@ from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       contribute_owner_capital, set_reserve_floor_policy,
                       load_wallets, load_treasury_accounts, load_maintainers,
                       load_contributors, load_payout_proposals, load_funding_sources)
+from runtime_adapter import load_runtimes, get_runtime, check_all_contracts
 from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
                    get_restrictions, remediate, _load_records, VIOLATION_TYPES)
@@ -473,6 +476,26 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(load_payout_proposals())
         elif path == '/api/treasury/funding-sources':
             return self._json(load_funding_sources())
+        elif path == '/api/runtimes':
+            data = load_runtimes()
+            contracts = check_all_contracts()
+            runtimes = data.get('runtimes', {})
+            # Embed contract check result into each runtime entry
+            result = {}
+            for rid, rt in runtimes.items():
+                result[rid] = dict(rt)
+                result[rid]['contract_check'] = contracts.get(rid, {})
+            return self._json({
+                'runtimes': result,
+                'contract_requirements': data.get('contract_requirements', {}),
+                'compliance_thresholds': data.get('compliance_thresholds', {}),
+            })
+        elif path.startswith('/api/runtimes/'):
+            runtime_id = path[len('/api/runtimes/'):]
+            rt = get_runtime(runtime_id)
+            if rt is None:
+                return self._json({'error': f'Runtime {runtime_id!r} not found'}, 404)
+            return self._json(rt)
         elif path == '/api/court':
             records = _load_records()
             return self._json({

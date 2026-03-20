@@ -15,6 +15,21 @@ demo, and example vertical.
 - [x] Example vertical (competitive intelligence pipeline)
 - [x] Quickstart script (under 10 minutes)
 
+## v0.1.2 — Runtime-Neutral Constitutional Layer
+
+- [x] Runtime-neutral architecture thesis applied to README and ARCHITECTURE
+- [x] Runtime adapter primitive (`kernel/runtime_adapter.py`)
+- [x] Runtime registry (`kernel/runtimes.json`) with five seeds:
+      local_kernel (compliant), openclaw_compatible (partial),
+      mcp_generic (partial), a2a_generic (partial), openfang_compatible (planned)
+- [x] Constitutional runtime contract (`docs/RUNTIME_CONTRACT.md`) — seven requirements
+- [x] Contract compliance checker (`check_contract`, `check-all` CLI)
+- [x] Workspace API `/api/runtimes` endpoint
+- [ ] MCP adapter implementation (agent identity, action envelope, sanction controls)
+- [ ] A2A adapter implementation (action envelope mapping from A2A task schema)
+- [ ] OpenClaw adapter (cost attribution + budget gate hooks)
+- [ ] Runtime binding field in agent_registry.json (link agent to runtime)
+
 ## v0.1.1 — Contributor Treasury Protocol
 
 - [x] Wallet registry with verification levels (0-4)

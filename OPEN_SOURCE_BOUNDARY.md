@@ -35,6 +35,7 @@ The lower layer that kernel primitives compose over:
 A concrete example workload running on the kernel:
 - `examples/intelligence/ci_vertical.py` — Competitive intelligence pipeline mapped to five primitives
 - `examples/intelligence/brief_quality.py` — Output quality gate
+- `examples/intelligence/sample-data/` — Repo-local sample artifacts for status, post-mortem, and dry-run scoring
 - `examples/intelligence/sample-brief.json` — Sample data
 
 ### Documentation and Community

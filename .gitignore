@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# State files (generated at runtime)
+kernel/organizations.json
+kernel/agent_registry.json
+kernel/authority_queue.json
+kernel/court_records.json
+kernel/audit_log.jsonl
+kernel/metering.jsonl
+economy/ledger.json
+economy/revenue.json
+economy/transactions.jsonl
+economy/auto_score.log
+
+# Runtime
+.openclaw/
+.claude/
+.env
+*.key
+*.pem
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

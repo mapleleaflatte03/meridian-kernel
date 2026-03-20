@@ -2,7 +2,8 @@
 """
 Revenue operating layer — clients, orders, receivables.
 State machine: proposed -> accepted -> in_progress -> delivered -> invoiced -> paid
-Owner payouts (draw, reimburse, capital) → use company/accounting.py
+Owner draws, reimbursements, and capital contributions are deployment-specific
+treasury actions handled outside this revenue module.
 
 Usage:
   python3 revenue.py client add --name "Client Name" --contact "email or chat"
@@ -159,8 +160,9 @@ def cmd_order_show(args):
     print(json.dumps({**o, 'id': args.order_id, 'client_name': cname}, indent=2))
 
 # ── Summary ──────────────────────────────────────────────────────────────────
-# NOTE: Owner payouts (draw, reimburse, capital) are handled by company/accounting.py
-#       This file handles revenue operations only (clients, orders, receivables).
+# NOTE: Owner draws, reimbursements, and capital contributions are handled by
+#       deployment-specific accounting workflows. This file handles revenue
+#       operations only (clients, orders, receivables).
 
 def cmd_summary(args):
     data = load_revenue()
@@ -176,7 +178,7 @@ def cmd_summary(args):
     print(f"Total revenue:       ${t.get('total_revenue_usd', 0):.2f}")
     print(f"Owner capital in:    ${t.get('owner_capital_contributed_usd', 0):.2f}")
     print(f"Owner draws:         ${t.get('owner_draws_usd', 0):.2f}")
-    print(f"  (Owner draw/reimburse breakdown: accounting.py show)")
+    print(f"  (Owner draw/reimburse breakdown: deployment-specific accounting workflow)")
     print(f"Reserve floor:       ${t.get('reserve_floor_usd', 50):.2f}")
     print(f"Receivables:         ${data.get('receivables_usd', 0):.2f}")
     print(f"Clients:             {len(data.get('clients', {}))}")

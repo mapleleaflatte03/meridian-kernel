@@ -27,8 +27,13 @@ WORKSPACE = os.path.dirname(os.path.dirname(EXAMPLES_DIR))
 KERNEL_DIR = os.path.join(WORKSPACE, 'kernel')
 ECONOMY_DIR = os.path.join(WORKSPACE, 'economy')
 
-# Configurable: override via environment variable
-NS_DIR = os.environ.get('MERIDIAN_NS_DIR', os.path.join(WORKSPACE, 'examples', 'intelligence', 'sample-data'))
+# Configurable: override via environment variable.
+# `MERIDIAN_NS_DIR` remains for backward compatibility with older deployments.
+ARTIFACT_DIR = (
+    os.environ.get('MERIDIAN_ARTIFACT_DIR')
+    or os.environ.get('MERIDIAN_NS_DIR')
+    or os.path.join(WORKSPACE, 'examples', 'intelligence', 'sample-data')
+)
 
 sys.path.insert(0, KERNEL_DIR)
 
@@ -230,9 +235,9 @@ def status():
                     print(f"    - {step}")
 
     print(f"\n--- LATEST ARTIFACTS ---")
-    briefs = sorted(glob.glob(os.path.join(NS_DIR, 'brief-*.md')))
-    reports = sorted(glob.glob(os.path.join(NS_DIR, 'reports', '*.md')))
-    findings = sorted(glob.glob(os.path.join(NS_DIR, 'findings-*.md')))
+    briefs = sorted(glob.glob(os.path.join(ARTIFACT_DIR, 'brief-*.md')))
+    reports = sorted(glob.glob(os.path.join(ARTIFACT_DIR, 'reports', '*.md')))
+    findings = sorted(glob.glob(os.path.join(ARTIFACT_DIR, 'findings-*.md')))
     print(f"  Briefs:   {len(briefs)} (latest: {os.path.basename(briefs[-1]) if briefs else 'none'})")
     print(f"  Reports:  {len(reports)} (latest: {os.path.basename(reports[-1]) if reports else 'none'})")
     print(f"  Findings: {len(findings)} (latest: {os.path.basename(findings[-1]) if findings else 'none'})")
@@ -295,7 +300,7 @@ def post_mortem():
     """Analyze last pipeline run and file court records for failures."""
     org_id, _ = _get_org()
 
-    reports = sorted(glob.glob(os.path.join(NS_DIR, 'reports', '*.md')),
+    reports = sorted(glob.glob(os.path.join(ARTIFACT_DIR, 'reports', '*.md')),
                      key=os.path.getmtime)
     if not reports:
         print("No reports found for post-mortem.")

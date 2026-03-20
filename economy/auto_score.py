@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Auto-scorer for epoch results.
-Reads actual cron outcomes and pipeline artifacts. Scores agents.
-Advances epoch. Runs as system cron after delivery.
+Reads runtime state and pipeline artifacts, scores agents, and advances epoch.
+Designed for repo-local demos by default and configurable for any deployment.
 
 Usage:
   python3 auto_score.py           # run scoring
@@ -12,6 +12,7 @@ import json, sys, os, glob, random, datetime, argparse
 
 ECONOMY_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE   = os.path.dirname(ECONOMY_DIR)
+SAMPLE_DATA_DIR = os.path.join(WORKSPACE, 'examples', 'intelligence', 'sample-data')
 
 # Optional: import brief_quality from examples if available
 _assess_brief_content = None
@@ -23,9 +24,20 @@ try:
 except ImportError:
     pass
 
-# Configurable paths -- override via environment variables
-CRON_JOBS   = os.environ.get('MERIDIAN_CRON_JOBS', os.path.expanduser('~/.openclaw/cron/jobs.json'))
-NS_DIR      = os.environ.get('MERIDIAN_NS_DIR', os.path.join(WORKSPACE, 'night-shift'))
+# Configurable paths -- override via environment variables.
+# Backward-compatible legacy env vars are still honored, but repo-local sample
+# data is the default so the OSS repo does not assume a private OpenClaw layout.
+RUN_STATE_FILE = (
+    os.environ.get('MERIDIAN_RUN_STATE_FILE')
+    or os.environ.get('MERIDIAN_CRON_JOBS')
+    or os.path.join(SAMPLE_DATA_DIR, 'run-state.json')
+)
+ARTIFACT_DIR = (
+    os.environ.get('MERIDIAN_ARTIFACT_DIR')
+    or os.environ.get('MERIDIAN_NS_DIR')
+    or SAMPLE_DATA_DIR
+)
+DELIVER_JOB_NAME = os.environ.get('MERIDIAN_DELIVER_JOB_NAME', 'deliver')
 LEDGER      = os.path.join(ECONOMY_DIR, 'ledger.json')
 TRANSACTIONS = os.path.join(ECONOMY_DIR, 'transactions.jsonl')
 LOG         = os.path.join(ECONOMY_DIR, 'auto_score.log')
@@ -103,17 +115,27 @@ def log(msg):
 
 # -- outcome detection --------------------------------------------------------
 
-def read_cron_jobs():
+def read_run_state():
     try:
-        with open(CRON_JOBS) as f:
+        with open(RUN_STATE_FILE) as f:
             return json.load(f).get('jobs', [])
     except Exception as e:
-        log(f"WARN: cannot read cron jobs: {e}")
+        log(f"WARN: cannot read run state: {e}")
         return []
+
+
+def find_deliver_job(jobs):
+    preferred = DELIVER_JOB_NAME
+    legacy = 'night-shift-deliver'
+    for name in (preferred, legacy):
+        match = next((j for j in jobs if j.get('name') == name), None)
+        if match:
+            return match, name
+    return None, preferred
 
 def latest_report():
     """Return (path, text) for the most recently MODIFIED report file."""
-    reports = glob.glob(os.path.join(NS_DIR, 'reports', '*.md'))
+    reports = glob.glob(os.path.join(ARTIFACT_DIR, 'reports', '*.md'))
     if not reports:
         return '', ''
     reports.sort(key=lambda p: os.path.getmtime(p), reverse=True)
@@ -122,7 +144,7 @@ def latest_report():
         return path, f.read()
 
 def latest_brief():
-    briefs = glob.glob(os.path.join(NS_DIR, 'brief-*.md'))
+    briefs = glob.glob(os.path.join(ARTIFACT_DIR, 'brief-*.md'))
     if not briefs:
         return '', ''
     briefs.sort(key=lambda p: os.path.getmtime(p), reverse=True)
@@ -140,15 +162,15 @@ def detect_outcomes(jobs, report_text, brief_text):
         brief_audit = _assess_brief_content(brief_text, brief_date=_today())
 
     # 1. Deliver job
-    deliver = next((j for j in jobs if j.get('name') == 'night-shift-deliver'), None)
+    deliver, deliver_name = find_deliver_job(jobs)
     if deliver:
         status = deliver.get('state', {}).get('lastRunStatus', '')
         if status == 'ok' and deliver.get('state', {}).get('lastDelivered'):
             outcomes.append(('deliver_success',
-                             f"night-shift-deliver ok+delivered at {deliver['state'].get('lastRunAtMs','')}"))
+                             f"{deliver_name} ok+delivered at {deliver['state'].get('lastRunAtMs','')}"))
         elif status == 'error':
             err = deliver.get('state', {}).get('lastError', 'unknown error')
-            outcomes.append(('deliver_fail', f"night-shift-deliver error: {err[:120]}"))
+            outcomes.append(('deliver_fail', f"{deliver_name} error: {err[:120]}"))
 
     # 2. QA outcomes from report
     if report_text:
@@ -189,7 +211,7 @@ def detect_outcomes(jobs, report_text, brief_text):
                 outcomes.append(('execute_completed', 'Forge execution recorded in report'))
 
         if any(kw in lo_report for kw in ['finding', 'research', 'atlas']):
-            if os.path.exists(os.path.join(NS_DIR, 'findings-' + _today() + '.md')):
+            if os.path.exists(os.path.join(ARTIFACT_DIR, 'findings-' + _today() + '.md')):
                 outcomes.append(('research_delivered', 'findings file present for today'))
 
     return outcomes
@@ -250,7 +272,7 @@ def advance_epoch(data, scored_agents, dry_run=False):
 
 def already_scored(jobs):
     """Return True if the current deliver run was already scored."""
-    deliver = next((j for j in jobs if j.get('name') == 'night-shift-deliver'), None)
+    deliver, _ = find_deliver_job(jobs)
     if not deliver:
         return False
     deliver_ms = deliver.get('state', {}).get('lastRunAtMs', 0)
@@ -272,7 +294,7 @@ def already_scored(jobs):
 def run(dry_run=False):
     log(f"=== auto_score start (dry_run={dry_run}) ===")
 
-    jobs         = read_cron_jobs()
+    jobs         = read_run_state()
     rpath, rtxt  = latest_report()
     bpath, btxt  = latest_brief()
 

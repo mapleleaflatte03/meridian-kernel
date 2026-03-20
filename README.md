@@ -87,6 +87,10 @@ Open the dashboard to see all five primitives live:
 - Check treasury runway and budget gates
 - Run the example intelligence vertical preflight
 
+This quickstart boots a **local demo institution** and the **reference workspace**.
+For a real deployment, treat the JSON API and the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md)
+as the integration boundary and build your own runtime adapter or control plane on top.
+
 ### Try the primitives directly
 
 ```bash

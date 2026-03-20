@@ -58,9 +58,13 @@ python3 examples/intelligence/ci_vertical.py preflight
 # View full constitutional status
 python3 examples/intelligence/ci_vertical.py status
 
-# Analyze a pipeline run (looks for reports in night-shift/)
+# Analyze a sample or deployment run
 python3 examples/intelligence/ci_vertical.py post-mortem
 ```
+
+By default, the example reads artifacts from `examples/intelligence/sample-data/`.
+For a real deployment, point it at your own runtime output with
+`MERIDIAN_ARTIFACT_DIR=/path/to/artifacts`.
 
 ## Building Your Own Vertical
 

@@ -80,7 +80,7 @@ Reserve floor: **$50 USD minimum before any owner payout.**
 
 ## Epoch Definition
 
-One epoch = one night-shift cycle (one full run of kickoff → deliver).
+One epoch = one governed delivery cycle (for example, one nightly intelligence run).
 
 After each epoch:
 1. The manager reads the ledger and run results
@@ -166,10 +166,13 @@ No agent may authorize an owner payout. Only the owner may.
 
 ## Scoring Procedure (per epoch)
 
-Run after night-shift-deliver job completes:
+Run after your delivery step completes:
 ```bash
 python3 economy/score.py record --agent <id> --event <type> --rep <delta> --auth <delta> --note "<evidence>"
 ```
+
+If you use `economy/auto_score.py`, point it at your runtime's run-state file and
+artifact directory with `MERIDIAN_RUN_STATE_FILE` and `MERIDIAN_ARTIFACT_DIR`.
 
 Events to score per epoch:
 - Each agent that ran: did their output get accepted?

@@ -20,10 +20,12 @@ from typing import Any
 EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.dirname(os.path.dirname(EXAMPLES_DIR))
 
-# Configurable: override via environment variable
-NIGHT_SHIFT_DIR = os.environ.get(
-    'MERIDIAN_NS_DIR',
-    os.path.join(WORKSPACE, 'examples', 'intelligence', 'sample-data')
+# Configurable: override via environment variable.
+# `MERIDIAN_NS_DIR` remains for backward compatibility with older deployments.
+ARTIFACT_DIR = (
+    os.environ.get('MERIDIAN_ARTIFACT_DIR')
+    or os.environ.get('MERIDIAN_NS_DIR')
+    or os.path.join(WORKSPACE, 'examples', 'intelligence', 'sample-data')
 )
 
 # Minimum sellable brief bar for delivery/money paths.
@@ -123,10 +125,10 @@ def resolve_findings_path(brief_path: str, findings_path: str | None) -> str | N
     brief_date = detect_date_from_path(brief_path)
     if not brief_date:
         return None
-    candidate = os.path.join(NIGHT_SHIFT_DIR, f"findings-{brief_date.isoformat()}.md")
+    candidate = os.path.join(ARTIFACT_DIR, f"findings-{brief_date.isoformat()}.md")
     if os.path.exists(candidate):
         return candidate
-    findings = sorted(glob.glob(os.path.join(NIGHT_SHIFT_DIR, "findings-*.md")))
+    findings = sorted(glob.glob(os.path.join(ARTIFACT_DIR, "findings-*.md")))
     return findings[-1] if findings else None
 
 
@@ -220,7 +222,7 @@ def assess_brief_content(content: str, brief_date: str | None = None) -> dict[st
     parsed_brief_date = parse_iso_date(brief_date or "") or dt.date.today()
     findings_text = ""
     if brief_date:
-        findings_path = os.path.join(NIGHT_SHIFT_DIR, f"findings-{parsed_brief_date.isoformat()}.md")
+        findings_path = os.path.join(ARTIFACT_DIR, f"findings-{parsed_brief_date.isoformat()}.md")
         if os.path.exists(findings_path):
             findings_text = load_text(findings_path)
     return _assess(content, parsed_brief_date, findings_text=findings_text)

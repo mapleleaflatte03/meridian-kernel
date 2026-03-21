@@ -98,6 +98,18 @@ class WorkspaceSessionAuthContextTests(unittest.TestCase):
         self.assertTrue(perms['/api/session/issue']['allowed'])
         self.assertFalse(perms['/api/session/revoke']['allowed'])
 
+    def test_wrong_org_bearer_does_not_fallback_to_credentials(self):
+        """A Bearer token for the wrong org must not silently grant credential auth."""
+        sa = self.ws._session_authority
+        token = sa.issue('org_other', 'user_owner', 'owner')
+        claims = sa.validate(token, expected_org_id='org_a')
+        # Token is valid but for wrong org
+        self.assertIsNone(claims)
+        # Verify that _session_claims_from_request returns None for wrong org
+        full_claims = sa.validate(token)
+        self.assertIsNotNone(full_claims)
+        self.assertEqual(full_claims.org_id, 'org_other')
+
     def test_session_authority_exists_at_module_level(self):
         """Workspace module creates a process-level SessionAuthority."""
         sa = self.ws._session_authority

@@ -12,8 +12,9 @@ import json, sys, os, argparse, datetime, random
 
 RAND_CAP = {'rep': 3, 'auth': 4}
 
-LEDGER = os.path.join(os.path.dirname(__file__), 'ledger.json')
-TRANSACTIONS = os.path.join(os.path.dirname(__file__), 'transactions.jsonl')
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+LEDGER = os.path.join(_THIS_DIR, 'ledger.json')
+TRANSACTIONS = os.path.join(_THIS_DIR, 'transactions.jsonl')
 
 def load_ledger():
     with open(LEDGER) as f:
@@ -34,23 +35,24 @@ def clamp(val, lo=0, hi=100):
 
 def cmd_show(args):
     data = load_ledger()
-    print(f"\n=== ECONOMY LEDGER (v{data['version']}) ===")
+    print(f"\n=== ECONOMY LEDGER (v{data.get('version', '?')}) ===")
     print(f"Updated: {data['updatedAt']}\n")
     print(f"{'Agent':<12} {'Name':<14} {'Role':<12} {'REP':>5} {'AUTH':>5} {'Status':<10}")
     print('-' * 65)
     for aid, a in data['agents'].items():
         status = 'PROBATION' if a.get('probation') else ('0-AUTH' if a.get('zero_authority') else a.get('status','?'))
-        print(f"{aid:<12} {a['name']:<14} {a['role']:<12} {a['reputation_units']:>5} {a['authority_units']:>5} {status:<10}")
+        print(f"{aid:<12} {a.get('name','?'):<14} {a.get('role','?'):<12} {a['reputation_units']:>5} {a['authority_units']:>5} {status:<10}")
     t = data['treasury']
     print(f"\n=== TREASURY ===")
     print(f"  Cash (USD):         ${t['cash_usd']:.2f}")
     print(f"  Reserve floor:      ${t['reserve_floor_usd']:.2f}")
     print(f"  Owner capital in:   ${t['owner_capital_contributed_usd']:.2f}")
     print(f"  Revenue received:   ${t.get('total_revenue_usd', 0):.2f}")
-    print(f"  Expenses recorded:  ${t['expenses_recorded_usd']:.2f}")
-    print(f"  Owner draws:        ${t['owner_draws_usd']:.2f}")
-    bp = data['bonus_pool']
-    print(f"\n=== BONUS POOL ===  ${bp['available_usd']:.2f} available\n")
+    print(f"  Support received:   ${t.get('support_received_usd', 0):.2f}")
+    print(f"  Expenses recorded:  ${t.get('expenses_recorded_usd', 0):.2f}")
+    print(f"  Owner draws:        ${t.get('owner_draws_usd', 0):.2f}")
+    bp = data.get('bonus_pool', {})
+    print(f"\n=== BONUS POOL ===  ${bp.get('available_usd', 0):.2f} available\n")
 
 def cmd_record(args):
     if not args.agent or not args.event:
@@ -104,7 +106,7 @@ def cmd_treasury(args):
     t = data['treasury']
     amount = float(args.amount)
     if args.subcommand == 'deposit':
-        valid_types = ['owner_capital', 'customer_payment', 'reimbursement']
+        valid_types = ['owner_capital', 'customer_payment', 'reimbursement', 'support']
         if args.type not in valid_types:
             print(f"ERROR: type must be one of {valid_types}")
             sys.exit(1)
@@ -113,6 +115,8 @@ def cmd_treasury(args):
             t['owner_capital_contributed_usd'] += amount
         elif args.type == 'customer_payment':
             t['total_revenue_usd'] = t.get('total_revenue_usd', 0) + amount
+        elif args.type == 'support':
+            t['support_received_usd'] = t.get('support_received_usd', 0) + amount
         save_ledger(data)
         append_transaction({
             'type': 'treasury_deposit',

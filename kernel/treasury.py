@@ -131,6 +131,18 @@ def contribute_owner_capital(amount_usd, note='', by='owner'):
     ledger_path = os.path.join(ECONOMY_DIR, 'ledger.json')
     with open(ledger_path, 'w') as f:
         json.dump(ledger, f, indent=2)
+    # Append transaction for auditability
+    tx_path = os.path.join(ECONOMY_DIR, 'transactions.jsonl')
+    tx_entry = json.dumps({
+        'type': 'treasury_deposit',
+        'deposit_type': 'owner_capital',
+        'amount_usd': amount_usd,
+        'cash_after': ledger['treasury']['cash_usd'],
+        'note': note,
+        'ts': _now(),
+    })
+    with open(tx_path, 'a') as f:
+        f.write(tx_entry + '\n')
     return {
         'amount_usd': amount_usd,
         'cash_after_usd': ledger['treasury']['cash_usd'],

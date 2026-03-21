@@ -75,7 +75,35 @@ def _load_ledger():
 
 def check_authority(agent_id, action):
     """Check if agent can perform action. Returns (allowed, reason).
-    Checks kill switch, delegations, then economy authority."""
+    Checks institution lifecycle, agent lifecycle, kill switch, delegations,
+    then economy authority."""
+    # -- Lifecycle enforcement: institution must be active ----------------------
+    try:
+        from agent_registry import load_registry
+        from organizations import load_orgs
+        reg = load_registry()
+        # Look up agent by registry ID or by economy_key
+        agent_rec = reg.get('agents', {}).get(agent_id, {})
+        if not agent_rec:
+            for a in reg.get('agents', {}).values():
+                if a.get('economy_key') == agent_id:
+                    agent_rec = a
+                    break
+        # Check agent lifecycle
+        agent_lifecycle = agent_rec.get('lifecycle_state', 'active')
+        if agent_lifecycle in ('quarantined', 'decommissioned'):
+            return False, f"Agent {agent_id} is {agent_lifecycle}"
+        # Check institution lifecycle
+        org_id = agent_rec.get('org_id')
+        if org_id:
+            orgs = load_orgs()
+            org = orgs.get('organizations', {}).get(org_id, {})
+            org_lifecycle = org.get('lifecycle_state', 'active')
+            if org_lifecycle in ('suspended', 'dissolved'):
+                return False, f"Institution {org_id} is {org_lifecycle}"
+    except Exception:
+        pass  # Graceful degradation if registry/orgs unavailable
+
     queue = _load_queue()
 
     # Kill switch overrides everything except owner

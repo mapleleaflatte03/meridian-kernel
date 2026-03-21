@@ -96,6 +96,14 @@ try:
 except ImportError:
     pass
 
+# Optional: Phase machine import
+_phase_machine_available = False
+try:
+    from phase_machine import current_phase, PHASES as PHASE_DEFS
+    _phase_machine_available = True
+except ImportError:
+    pass
+
 
 def _now():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -201,6 +209,20 @@ def api_status():
     if _ci_vertical_available:
         result['ci_vertical'] = _ci_vertical_status(reg, lead_id)
 
+    if _phase_machine_available:
+        try:
+            phase_num, phase_info = current_phase()
+            result['phase_machine'] = {
+                'current_phase': phase_num,
+                'name': phase_info['name'],
+                'description': phase_info['description'],
+                'next_phase': phase_info.get('next_phase'),
+                'next_unlock': phase_info.get('next_unlock'),
+                'checks': phase_info.get('checks', []),
+            }
+        except Exception:
+            result['phase_machine'] = {'error': 'evaluation failed'}
+
     return result
 
 
@@ -287,6 +309,10 @@ a:hover { text-decoration: underline; }
 
 <div class="status-bar" id="status-bar">Loading...</div>
 
+<!-- PHASE MACHINE -->
+<h2>Phase Machine</h2>
+<div class="card" id="phase-card">Loading...</div>
+
 <!-- INSTITUTION -->
 <h2>Institution</h2>
 <div class="card" id="inst-card">Loading...</div>
@@ -344,6 +370,29 @@ function render(data) {
   sb += '<span class="item">Approvals: <strong>' + data.authority.pending_approvals.length + ' pending</strong></span>';
   sb += '<span class="item">Lead: <strong>' + (data.authority.sprint_lead.agent_id || 'none') + '</strong></span>';
   document.getElementById('status-bar').innerHTML = sb;
+
+  // Phase Machine
+  var pm = data.phase_machine;
+  if (pm && !pm.error) {
+    var pc = '<div class="form-row"><label>Current Phase</label> <strong>Phase ' + pm.current_phase + ' &mdash; ' + pm.name + '</strong></div>';
+    pc += '<div class="form-row"><label>Description</label> ' + pm.description + '</div>';
+    if (pm.next_phase !== null && pm.next_phase !== undefined) {
+      pc += '<div class="form-row"><label>Next Phase</label> Phase ' + pm.next_phase + '</div>';
+      pc += '<div class="form-row"><label>Unlock needs</label> ' + (pm.next_unlock || '?') + '</div>';
+    }
+    if (pm.checks) {
+      pc += '<table><tr><th>#</th><th>Phase</th><th>Status</th><th>Reason</th></tr>';
+      pm.checks.forEach(function(c) {
+        pc += '<tr><td>' + c.phase + '</td><td>' + c.name + '</td>';
+        pc += '<td>' + (c.met ? '<span class="tag tag-live">PASS</span>' : '<span class="tag tag-warn">FAIL</span>') + '</td>';
+        pc += '<td>' + c.reason + '</td></tr>';
+      });
+      pc += '</table>';
+    }
+    document.getElementById('phase-card').innerHTML = pc;
+  } else {
+    document.getElementById('phase-card').innerHTML = '<em>Phase machine not available</em>';
+  }
 
   var inst = data.institution;
   if (inst) {

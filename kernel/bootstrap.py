@@ -22,35 +22,47 @@ from audit import log_event
 
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
 LEDGER_FILE = os.path.join(WORKSPACE, 'economy', 'ledger.json')
-DEMO_ORG_NAME = 'Demo Org'
-DEMO_ORG_OWNER = 'user_owner'
-DEMO_ORG_SLUG = 'demo-org'
-DEMO_ORG_CHARTER = (
+
+# Defaults for the demo institution -- override via bootstrap() parameters
+_DEFAULT_ORG_NAME = 'Demo Org'
+_DEFAULT_ORG_OWNER = 'user_owner'
+_DEFAULT_ORG_SLUG = 'demo-org'
+_DEFAULT_ORG_CHARTER = (
     'Reference demo institution for exercising Meridian governance locally '
     'across institution, agent, authority, treasury, and court.'
 )
 
 
-def bootstrap():
+def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterprise'):
+    """Bootstrap an institution with agents.
+
+    All parameters are optional -- defaults create a demo institution suitable
+    for local experimentation.  Re-running is safe (idempotent).
+    """
+    org_name = name or _DEFAULT_ORG_NAME
+    org_owner = owner_id or _DEFAULT_ORG_OWNER
+    org_slug = slug or _DEFAULT_ORG_SLUG
+    org_charter = charter or _DEFAULT_ORG_CHARTER
+
     # -- 1. Create founding organization --------------------------------------
     orgs = load_orgs()
     founding_org_id = None
 
     for oid, org in orgs['organizations'].items():
-        if org.get('slug') == DEMO_ORG_SLUG:
+        if org.get('slug') == org_slug:
             founding_org_id = oid
             print(f'Founding org already exists: {oid}')
             break
 
     if not founding_org_id:
         founding_org_id = create_org(
-            name=DEMO_ORG_NAME,
-            owner_id=DEMO_ORG_OWNER,
-            plan='enterprise',
+            name=org_name,
+            owner_id=org_owner,
+            plan=plan,
         )
         # Override slug to canonical value
         orgs = load_orgs()
-        orgs['organizations'][founding_org_id]['slug'] = DEMO_ORG_SLUG
+        orgs['organizations'][founding_org_id]['slug'] = org_slug
         save_orgs(orgs)
         print(f'Created founding org: {founding_org_id}')
 
@@ -58,17 +70,17 @@ def bootstrap():
     orgs = load_orgs()
     org = orgs['organizations'].get(founding_org_id, {})
     backfilled_org = False
-    if org.get('name') != DEMO_ORG_NAME:
-        org['name'] = DEMO_ORG_NAME
+    if org.get('name') != org_name:
+        org['name'] = org_name
         backfilled_org = True
-    if org.get('owner_id') != DEMO_ORG_OWNER:
-        org['owner_id'] = DEMO_ORG_OWNER
+    if org.get('owner_id') != org_owner:
+        org['owner_id'] = org_owner
         backfilled_org = True
-    if org.get('slug') != DEMO_ORG_SLUG:
-        org['slug'] = DEMO_ORG_SLUG
+    if org.get('slug') != org_slug:
+        org['slug'] = org_slug
         backfilled_org = True
     if not org.get('charter'):
-        org['charter'] = DEMO_ORG_CHARTER
+        org['charter'] = org_charter
         backfilled_org = True
     if 'policy_defaults' not in org:
         org['policy_defaults'] = dict(DEFAULT_POLICY_DEFAULTS)

@@ -11,6 +11,7 @@ Usage:
   python3 quickstart.py --port 8080  # Use a different port
 """
 import argparse
+import datetime
 import json
 import os
 import subprocess
@@ -29,6 +30,10 @@ def step(msg):
     print(f"\n  → {msg}")
 
 
+def now_ts():
+    return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 def check_python_version():
     if sys.version_info < (3, 9):
         print(f"Error: Python 3.9+ required (found {sys.version})")
@@ -44,23 +49,35 @@ def init_economy():
 
     step("Creating economy ledger")
     ledger = {
+        "version": 1,
+        "schema": "meridian-kernel-economy-v1",
+        "updatedAt": now_ts(),
         "agents": {
-            "main":     {"name": "Leviathann", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
-            "atlas":    {"name": "Atlas",      "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
-            "sentinel": {"name": "Sentinel",   "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
-            "forge":    {"name": "Forge",      "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
-            "quill":    {"name": "Quill",      "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
-            "aegis":    {"name": "Aegis",      "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
-            "pulse":    {"name": "Pulse",      "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False},
+            "main":     {"name": "Leviathann", "role": "manager", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
+            "atlas":    {"name": "Atlas",      "role": "analyst", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
+            "sentinel": {"name": "Sentinel",   "role": "verifier", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
+            "forge":    {"name": "Forge",      "role": "executor", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
+            "quill":    {"name": "Quill",      "role": "writer", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
+            "aegis":    {"name": "Aegis",      "role": "qa_gate", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
+            "pulse":    {"name": "Pulse",      "role": "compressor", "reputation_units": 50, "authority_units": 50, "probation": False, "zero_authority": False, "status": "active"},
         },
         "treasury": {
             "cash_usd": 0.0,
             "reserve_floor_usd": 50.0,
             "total_revenue_usd": 0.0,
+            "support_received_usd": 0.0,
             "owner_capital_contributed_usd": 0.0,
+            "expenses_recorded_usd": 0.0,
             "owner_draws_usd": 0.0,
         },
-        "epoch": 0,
+        "bonus_pool": {
+            "available_usd": 0.0
+        },
+        "epoch": {
+            "number": 0,
+            "started_at": now_ts(),
+            "auth_decay_per_epoch": 5
+        },
         "transactions": [],
     }
     with open(ledger_path, 'w') as f:
@@ -77,7 +94,7 @@ def init_kernel():
     """Run kernel bootstrap to initialize all primitives."""
     step("Running kernel bootstrap")
     try:
-        from bootstrap import bootstrap
+        from kernel.bootstrap import bootstrap
         bootstrap()
     except Exception as e:
         # Fallback: run bootstrap.py as script
@@ -95,14 +112,14 @@ def init_kernel():
 
 def _manual_init():
     """Manual initialization if bootstrap fails."""
-    from organizations import load_orgs, save_orgs, _now
-    from agent_registry import load_registry, save_registry
+    from kernel.organizations import load_orgs, save_orgs, _now
+    from kernel.agent_registry import load_registry, save_registry
 
     # Create org
     orgs = load_orgs()
     if not orgs.get('organizations'):
         orgs['organizations'] = {}
-    if not any(o.get('slug') == 'meridian' for o in orgs.get('organizations', {}).values()):
+    if not any(o.get('slug') == 'demo-org' for o in orgs.get('organizations', {}).values()):
         import uuid
         org_id = f'org_{uuid.uuid4().hex[:8]}'
         orgs['organizations'][org_id] = {
@@ -145,7 +162,7 @@ def _manual_init():
     ]
     reg = load_registry()
     existing_names = {a['name'] for a in reg.get('agents', {}).values()}
-    org_id = next((oid for oid, o in orgs['organizations'].items() if o.get('slug') == 'meridian'), '')
+    org_id = next((oid for oid, o in orgs['organizations'].items() if o.get('slug') == 'demo-org'), '')
 
     for name, role, ekey, purpose in AGENTS:
         if name not in existing_names:
@@ -183,7 +200,7 @@ def show_status():
     print(f"{'='*55}")
 
     try:
-        from organizations import load_orgs
+        from kernel.organizations import load_orgs
         orgs = load_orgs()
         for oid, org in orgs.get('organizations', {}).items():
             print(f"\n  Institution: {org['name']}")
@@ -193,7 +210,7 @@ def show_status():
         pass
 
     try:
-        from agent_registry import load_registry
+        from kernel.agent_registry import load_registry
         reg = load_registry()
         print(f"\n  Agents: {len(reg.get('agents', {}))}")
         for a in reg.get('agents', {}).values():

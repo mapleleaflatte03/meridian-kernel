@@ -8,33 +8,57 @@ Usage:
   python3 score.py treasury withdraw --amount <USD> --type <expense|owner_draw|owner_reimbursement|bonus> --note "<reason>"
   python3 score.py epoch --advance
 """
-import json, sys, os, argparse, datetime, random
+import argparse
+import datetime
+import json
+import os
+import random
+import sys
 
 RAND_CAP = {'rep': 3, 'auth': 4}
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-LEDGER = os.path.join(_THIS_DIR, 'ledger.json')
-TRANSACTIONS = os.path.join(_THIS_DIR, 'transactions.jsonl')
+_ROOT_DIR = os.path.dirname(_THIS_DIR)
+_KERNEL_DIR = os.path.join(_ROOT_DIR, 'kernel')
 
-def load_ledger():
-    with open(LEDGER) as f:
+if _KERNEL_DIR not in sys.path:
+    sys.path.insert(0, _KERNEL_DIR)
+
+# Capsule-aware path resolution: org_id=None -> economy/ (legacy default)
+try:
+    from capsule import capsule_path
+except ImportError:
+    def capsule_path(org_id, filename):
+        return os.path.join(_THIS_DIR, filename)
+
+
+def _ledger_path(org_id=None):
+    return capsule_path(org_id, 'ledger.json')
+
+
+def _tx_path(org_id=None):
+    return capsule_path(org_id, 'transactions.jsonl')
+
+
+def load_ledger(org_id=None):
+    with open(_ledger_path(org_id)) as f:
         return json.load(f)
 
-def save_ledger(data):
+def save_ledger(data, org_id=None):
     data['updatedAt'] = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    with open(LEDGER, 'w') as f:
+    with open(_ledger_path(org_id), 'w') as f:
         json.dump(data, f, indent=2)
 
-def append_transaction(entry):
+def append_transaction(entry, org_id=None):
     entry['ts'] = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    with open(TRANSACTIONS, 'a') as f:
+    with open(_tx_path(org_id), 'a') as f:
         f.write(json.dumps(entry) + '\n')
 
 def clamp(val, lo=0, hi=100):
     return max(lo, min(hi, val))
 
 def cmd_show(args):
-    data = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     print(f"\n=== ECONOMY LEDGER (v{data.get('version', '?')}) ===")
     print(f"Updated: {data['updatedAt']}\n")
     print(f"{'Agent':<12} {'Name':<14} {'Role':<12} {'REP':>5} {'AUTH':>5} {'Status':<10}")
@@ -58,7 +82,8 @@ def cmd_record(args):
     if not args.agent or not args.event:
         print("ERROR: --agent and --event are required")
         sys.exit(1)
-    data = load_ledger()
+    org_id = getattr(args, 'org_id', None)
+    data = load_ledger(org_id)
     if args.agent not in data['agents']:
         print(f"ERROR: unknown agent '{args.agent}'. Known: {list(data['agents'].keys())}")
         sys.exit(1)
@@ -86,7 +111,7 @@ def cmd_record(args):
     agent['last_scored_at'] = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
     agent['last_score_reason'] = args.note or args.event
 
-    save_ledger(data)
+    save_ledger(data, org_id)
     append_transaction({
         'type': 'agent_score',
         'agent': args.agent,
@@ -98,11 +123,12 @@ def cmd_record(args):
         'auth_after': agent['authority_units'],
         'auth_delta': auth_delta,
         'note': args.note or ''
-    })
+    }, org_id)
     print(f"Recorded: {args.agent} | REP {old_rep} → {agent['reputation_units']} ({rep_delta:+}) | AUTH {old_auth} → {agent['authority_units']} ({auth_delta:+})")
 
 def cmd_treasury(args):
-    data = load_ledger()
+    org_id = getattr(args, 'org_id', None)
+    data = load_ledger(org_id)
     t = data['treasury']
     amount = float(args.amount)
     if args.subcommand == 'deposit':
@@ -117,14 +143,14 @@ def cmd_treasury(args):
             t['total_revenue_usd'] = t.get('total_revenue_usd', 0) + amount
         elif args.type == 'support':
             t['support_received_usd'] = t.get('support_received_usd', 0) + amount
-        save_ledger(data)
+        save_ledger(data, org_id)
         append_transaction({
             'type': 'treasury_deposit',
             'deposit_type': args.type,
             'amount_usd': amount,
             'cash_after': t['cash_usd'],
             'note': args.note or ''
-        })
+        }, org_id)
         print(f"Treasury deposit: +${amount:.2f} ({args.type}) → cash now ${t['cash_usd']:.2f}")
     elif args.subcommand == 'withdraw':
         valid_types = ['expense', 'owner_draw', 'owner_reimbursement', 'bonus']
@@ -139,18 +165,19 @@ def cmd_treasury(args):
             t['owner_draws_usd'] += amount
         elif args.type == 'expense':
             t['expenses_recorded_usd'] += amount
-        save_ledger(data)
+        save_ledger(data, org_id)
         append_transaction({
             'type': 'treasury_withdraw',
             'withdraw_type': args.type,
             'amount_usd': amount,
             'cash_after': t['cash_usd'],
             'note': args.note or ''
-        })
+        }, org_id)
         print(f"Treasury withdraw: -${amount:.2f} ({args.type}) → cash now ${t['cash_usd']:.2f}")
 
 def cmd_epoch(args):
-    data = load_ledger()
+    org_id = getattr(args, 'org_id', None)
+    data = load_ledger(org_id)
     epoch = data['epoch']
     if args.advance:
         for aid, agent in data['agents'].items():
@@ -162,21 +189,28 @@ def cmd_epoch(args):
                 print(f"  AUTH decay: {aid} {old} → {agent['authority_units']}")
         epoch['number'] += 1
         epoch['started_at'] = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-        save_ledger(data)
+        save_ledger(data, org_id)
         append_transaction({
             'type': 'epoch_advance',
             'new_epoch': epoch['number'],
             'note': 'Auto decay applied to inactive agents'
-        })
+        }, org_id)
         print(f"Advanced to epoch {epoch['number']}")
+
+
+def add_org_arg(parser):
+    parser.add_argument('--org_id', default=None,
+                        help='Institution context. Defaults to the legacy founding institution.')
 
 def main():
     parser = argparse.ArgumentParser(description='Meridian Economy Scoring Tool')
     sub = parser.add_subparsers(dest='command')
 
     show_p = sub.add_parser('show')
+    add_org_arg(show_p)
 
     rec_p = sub.add_parser('record')
+    add_org_arg(rec_p)
     rec_p.add_argument('--agent', required=True)
     rec_p.add_argument('--event', required=True)
     rec_p.add_argument('--rep',       default='0')
@@ -188,15 +222,18 @@ def main():
     tr_p = sub.add_parser('treasury')
     tr_sub = tr_p.add_subparsers(dest='subcommand')
     dep = tr_sub.add_parser('deposit')
+    add_org_arg(dep)
     dep.add_argument('--amount', required=True)
     dep.add_argument('--type', required=True)
     dep.add_argument('--note', default='')
     wd = tr_sub.add_parser('withdraw')
+    add_org_arg(wd)
     wd.add_argument('--amount', required=True)
     wd.add_argument('--type', required=True)
     wd.add_argument('--note', default='')
 
     ep_p = sub.add_parser('epoch')
+    add_org_arg(ep_p)
     ep_p.add_argument('--advance', action='store_true')
 
     args = parser.parse_args()

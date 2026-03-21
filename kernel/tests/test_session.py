@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -148,6 +149,75 @@ class SessionClaimsTests(unittest.TestCase):
         claims = SessionClaims('ses_a', 'org_a', 'user_1', 'owner',
                                '2026-01-01T00:00:00Z', future)
         self.assertFalse(claims.is_expired)
+
+
+class SessionRevocationPersistenceTests(unittest.TestCase):
+    def test_revocation_persists_across_reload(self):
+        """With revocation_file, revoked sessions stay revoked after reload."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.revocations',
+                                         delete=False) as f:
+            revocation_path = f.name
+        try:
+            sa1 = SessionAuthority(secret='persist-key', revocation_file=revocation_path)
+            token = sa1.issue('org_a', 'user_1', 'owner')
+            claims = sa1.validate(token)
+            sa1.revoke(claims.session_id)
+            self.assertIsNone(sa1.validate(token))
+
+            # Reload with same key and file
+            sa2 = SessionAuthority(secret='persist-key', revocation_file=revocation_path)
+            self.assertIsNone(sa2.validate(token))
+            self.assertTrue(sa2.is_revoked(claims.session_id))
+        finally:
+            os.unlink(revocation_path)
+
+    def test_no_revocation_file_means_in_memory_only(self):
+        """Without revocation_file, revocations are lost on reload."""
+        sa1 = SessionAuthority(secret='ephemeral-test')
+        token = sa1.issue('org_a', 'user_1', 'owner')
+        claims = sa1.validate(token)
+        sa1.revoke(claims.session_id)
+        self.assertIsNone(sa1.validate(token))
+
+        # New instance with same key — revocation is lost
+        sa2 = SessionAuthority(secret='ephemeral-test')
+        self.assertIsNotNone(sa2.validate(token))
+        self.assertFalse(sa2.is_revoked(claims.session_id))
+
+    def test_revocation_file_created_on_first_revoke(self):
+        """File is created lazily on first revoke, not on init."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            revocation_path = os.path.join(tmpdir, 'revocations')
+            sa = SessionAuthority(secret='test-key', revocation_file=revocation_path)
+            self.assertFalse(os.path.exists(revocation_path))
+            token = sa.issue('org_a', 'user_1', 'owner')
+            claims = sa.validate(token)
+            sa.revoke(claims.session_id)
+            self.assertTrue(os.path.exists(revocation_path))
+
+    def test_multiple_revocations_all_persist(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.revocations',
+                                         delete=False) as f:
+            revocation_path = f.name
+        try:
+            sa1 = SessionAuthority(secret='multi-key', revocation_file=revocation_path)
+            tokens = []
+            session_ids = []
+            for i in range(3):
+                token = sa1.issue('org_a', f'user_{i}', 'member')
+                claims = sa1.validate(token)
+                tokens.append(token)
+                session_ids.append(claims.session_id)
+                sa1.revoke(claims.session_id)
+
+            # Reload — all three should still be revoked
+            sa2 = SessionAuthority(secret='multi-key', revocation_file=revocation_path)
+            for token in tokens:
+                self.assertIsNone(sa2.validate(token))
+            for sid in session_ids:
+                self.assertTrue(sa2.is_revoked(sid))
+        finally:
+            os.unlink(revocation_path)
 
 
 class SessionAuthorityAutoKeyTests(unittest.TestCase):

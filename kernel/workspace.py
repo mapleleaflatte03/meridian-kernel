@@ -104,7 +104,13 @@ from session import SessionAuthority
 
 # Process-level session authority (tokens do not survive restarts unless
 # MERIDIAN_SESSION_SECRET is set in the environment).
-_session_authority = SessionAuthority()
+_session_revocation_file = (
+    os.environ.get('MERIDIAN_SESSION_REVOCATIONS_FILE', '').strip() or None
+)
+if not _session_revocation_file and os.environ.get('MERIDIAN_SESSION_SECRET', '').strip():
+    # Persistent signing key → revocations must also persist.
+    _session_revocation_file = os.path.join(PLATFORM_DIR, '.session_revocations')
+_session_authority = SessionAuthority(revocation_file=_session_revocation_file)
 
 # Optional: CI vertical import from the example vertical if present
 _ci_vertical_available = False

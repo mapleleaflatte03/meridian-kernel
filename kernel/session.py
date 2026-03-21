@@ -20,7 +20,8 @@ Payload fields:
 Usage:
     from session import SessionAuthority
 
-    sa = SessionAuthority(secret='...')      # or auto-generated
+    sa = SessionAuthority(secret='...',       # or auto-generated
+                          revocation_file='/path/to/revocations')
     token = sa.issue('org_a', 'user_1', 'owner', ttl_seconds=3600)
     result = sa.validate(token)              # -> SessionClaims or None
     sa.revoke(result.session_id)
@@ -98,9 +99,18 @@ class SessionAuthority:
     The secret key is used to HMAC-sign tokens.  If not provided, a
     per-process random key is generated (safe for single-process
     deployments; tokens won't survive restarts).
+
+    Revocation persistence:
+        If revocation_file is provided, revoked session IDs are persisted
+        to disk (one per line, append-only).  On init, existing entries are
+        loaded.  When the signing key is ephemeral (auto-generated), file
+        persistence is unnecessary since all tokens die on restart anyway.
+        When the signing key is persistent (MERIDIAN_SESSION_SECRET),
+        callers should also provide a revocation_file so that revocations
+        survive restarts alongside the tokens they govern.
     """
 
-    def __init__(self, secret=None):
+    def __init__(self, secret=None, revocation_file=None):
         if secret:
             self._key = secret.encode('utf-8') if isinstance(secret, str) else secret
         else:
@@ -109,7 +119,14 @@ class SessionAuthority:
                 self._key = env_secret.encode('utf-8')
             else:
                 self._key = os.urandom(32)
+        self._revocation_file = revocation_file
         self._revoked = set()
+        if self._revocation_file and os.path.exists(self._revocation_file):
+            with open(self._revocation_file) as f:
+                for line in f:
+                    sid = line.strip()
+                    if sid:
+                        self._revoked.add(sid)
 
     def _sign(self, payload_bytes: bytes) -> bytes:
         return hmac.new(self._key, payload_bytes, hashlib.sha256).digest()
@@ -202,9 +219,17 @@ class SessionAuthority:
         return claims
 
     def revoke(self, session_id):
-        """Revoke a session by ID.  Future validate() calls will reject it."""
-        if session_id:
-            self._revoked.add(session_id)
+        """Revoke a session by ID.  Future validate() calls will reject it.
+
+        If a revocation_file was configured, the revocation is persisted
+        so it survives process restarts.
+        """
+        if not session_id:
+            return
+        self._revoked.add(session_id)
+        if self._revocation_file:
+            with open(self._revocation_file, 'a') as f:
+                f.write(session_id + '\n')
 
     def is_revoked(self, session_id):
         return session_id in self._revoked

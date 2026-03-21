@@ -72,6 +72,14 @@ WORKSPACE_CREDENTIALS_FILE = os.environ.get(
     'MERIDIAN_WORKSPACE_CREDENTIALS_FILE',
     '/etc/caddy/.workspace_credentials',
 )
+RUNTIME_HOST_IDENTITY_FILE = os.environ.get(
+    'MERIDIAN_RUNTIME_HOST_IDENTITY_FILE',
+    os.path.join(PLATFORM_DIR, 'host_identity.json'),
+)
+RUNTIME_ADMISSION_FILE = os.environ.get(
+    'MERIDIAN_RUNTIME_ADMISSION_FILE',
+    os.path.join(PLATFORM_DIR, 'institution_admissions.json'),
+)
 WORKSPACE_ORG_ID = (os.environ.get('MERIDIAN_WORKSPACE_ORG_ID') or '').strip() or None
 WORKSPACE_AUTH_REQUIRED = os.environ.get('MERIDIAN_WORKSPACE_AUTH_REQUIRED', '').lower() in (
     '1', 'true', 'yes', 'on'
@@ -105,6 +113,11 @@ from institution_context import (
     InstitutionContext,
     WORKSPACE_BOUNDARY,
     runtime_core_snapshot,
+)
+from runtime_host import (
+    load_host_identity,
+    load_admission_registry,
+    ensure_org_admitted,
 )
 
 # Process-level session authority (tokens do not survive restarts unless
@@ -211,13 +224,40 @@ def _resolve_workspace_context():
         org = load_orgs().get('organizations', {}).get(configured_org_id)
         if not org:
             raise RuntimeError(f'Configured workspace org not found: {configured_org_id}')
-        return InstitutionContext.bind(configured_org_id, org, 'configured_org', WORKSPACE_BOUNDARY)
+        ctx = InstitutionContext.bind(configured_org_id, org, 'configured_org', WORKSPACE_BOUNDARY)
+        _runtime_host_state(ctx.org_id)
+        return ctx
     if credential_scope_active:
         org = load_orgs().get('organizations', {}).get(credential_org_id)
         if not org:
             raise RuntimeError(f'Credential-scoped workspace org not found: {credential_org_id}')
-        return InstitutionContext.bind(credential_org_id, org, 'credentials_org', WORKSPACE_BOUNDARY)
-    return InstitutionContext.resolve(WORKSPACE_BOUNDARY)
+        ctx = InstitutionContext.bind(credential_org_id, org, 'credentials_org', WORKSPACE_BOUNDARY)
+        _runtime_host_state(ctx.org_id)
+        return ctx
+    ctx = InstitutionContext.resolve(WORKSPACE_BOUNDARY)
+    _runtime_host_state(ctx.org_id)
+    return ctx
+
+
+def _runtime_host_state(bound_org_id):
+    host_identity = load_host_identity(
+        RUNTIME_HOST_IDENTITY_FILE,
+        supported_boundaries=[
+            'workspace',
+            'cli',
+            'mcp_service',
+            'payment_monitor',
+            'subscriptions',
+            'accounting',
+        ],
+    )
+    admission_registry = load_admission_registry(
+        RUNTIME_ADMISSION_FILE,
+        bound_org_id=bound_org_id,
+        host_identity=host_identity,
+    )
+    ensure_org_admitted(bound_org_id, admission_registry)
+    return host_identity, admission_registry
 
 
 def _requested_org_override(parsed_url, headers):
@@ -411,6 +451,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
     org_id = inst_ctx.org_id
     org = inst_ctx.org
     context_source = inst_ctx.context_source
+    host_identity, admission_registry = _runtime_host_state(org_id)
 
     reg = _scoped_registry(org_id)
     queue = _load_queue(org_id)
@@ -462,6 +503,8 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
         'runtime_core': runtime_core_snapshot(
             inst_ctx,
             additional_institutions_allowed=True,
+            host_identity=host_identity,
+            admission_registry=admission_registry,
         ),
         'institution': {
             'id': org_id,
@@ -932,6 +975,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         elif path == '/api/status':
             return self._json(api_status(institution_context=inst_ctx))
         elif path == '/api/context':
+            host_identity, admission_registry = _runtime_host_state(org_id)
             return self._json({
                 **request_context,
                 'auth': auth_context,
@@ -940,6 +984,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'runtime_core': runtime_core_snapshot(
                     inst_ctx,
                     additional_institutions_allowed=True,
+                    host_identity=host_identity,
+                    admission_registry=admission_registry,
                 ),
             })
         elif path == '/api/institution':

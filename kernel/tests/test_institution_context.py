@@ -103,6 +103,13 @@ class InstitutionContextCreationTests(unittest.TestCase):
             InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
         self.assertIn('dissolved', str(cm.exception))
 
+    def test_bind_rejects_lifecycle_suspended_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org(lifecycle_state='suspended')
+        with self.assertRaises(RuntimeError) as cm:
+            InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        self.assertIn('suspended', str(cm.exception))
+
 
 class InstitutionContextAdmissionTests(unittest.TestCase):
 
@@ -199,13 +206,32 @@ class InstitutionContextSerializationTests(unittest.TestCase):
             WORKSPACE_BOUNDARY,
             runtime_core_snapshot,
         )
+        from runtime_host import default_host_identity
         org = _make_org()
         ctx = InstitutionContext.bind('org_1', org, 'configured_org', WORKSPACE_BOUNDARY)
-        snap = runtime_core_snapshot(ctx, additional_institutions_allowed=True)
+        host = default_host_identity(host_id='host_alpha', federation_enabled=True)
+        snap = runtime_core_snapshot(
+            ctx,
+            additional_institutions_allowed=True,
+            host_identity=host,
+            admission_registry={
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'institutions': {
+                    'org_1': {'status': 'admitted'},
+                    'org_2': {'status': 'admitted'},
+                },
+                'admitted_org_ids': ['org_1', 'org_2'],
+            },
+        )
         self.assertEqual(snap['institution_context']['org_id'], 'org_1')
+        self.assertEqual(snap['host_identity']['host_id'], 'host_alpha')
         self.assertEqual(snap['current_boundary']['name'], 'workspace')
         self.assertEqual(snap['admission']['mode'], 'single_process_per_institution')
         self.assertTrue(snap['admission']['additional_institutions_allowed'])
+        self.assertEqual(snap['admission']['host_id'], 'host_alpha')
+        self.assertEqual(snap['admission']['admission_source'], 'file')
+        self.assertEqual(snap['admission']['admitted_org_ids'], ['org_1', 'org_2'])
 
     def test_runtime_core_snapshot_for_single_institution_deployment(self):
         from institution_context import (
@@ -213,12 +239,25 @@ class InstitutionContextSerializationTests(unittest.TestCase):
             MCP_SERVICE_BOUNDARY,
             runtime_core_snapshot,
         )
+        from runtime_host import default_host_identity
         org = _make_org()
         ctx = InstitutionContext.bind('org_1', org, 'founding_default', MCP_SERVICE_BOUNDARY)
-        snap = runtime_core_snapshot(ctx)
+        host = default_host_identity(host_id='host_live')
+        snap = runtime_core_snapshot(
+            ctx,
+            host_identity=host,
+            admission_registry={
+                'source': 'derived_bound_default',
+                'host_id': 'host_live',
+                'institutions': {'org_1': {'status': 'admitted'}},
+                'admitted_org_ids': ['org_1'],
+            },
+        )
         self.assertEqual(snap['admission']['mode'], 'single_institution_deployment')
         self.assertFalse(snap['admission']['additional_institutions_allowed'])
         self.assertIn('does not admit additional institutions', snap['admission']['second_institution_path'])
+        self.assertEqual(snap['admission']['host_id'], 'host_live')
+        self.assertTrue(snap['service_registry']['payment_monitor']['requires_admitted_institution'])
 
 
 class InstitutionContextResolveTests(unittest.TestCase):

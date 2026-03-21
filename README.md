@@ -43,7 +43,7 @@ The public proof is intentionally narrower than the full thesis.
 What is real today:
 - the five kernel primitives
 - the reference workspace and JSON API
-- the `runtime_core` surface that exposes institution context, boundary identity model, service registry, and admission mode
+- the `runtime_core` surface that exposes institution context, host identity, boundary identity model, service registry, and admission state
 - one real built-in reference runtime path: `local_kernel`
 - one tested kernel-side reference adapter library: `openclaw_compatible`
 
@@ -123,11 +123,12 @@ credentials file if you want mutation audit and role checks to bind to a real
 institution member instead of a generic Basic-auth username. `/api/context`
 also exposes the effective mutation permission snapshot for that bound actor.
 `/api/context` and `/api/status` now also expose `runtime_core`, which surfaces
-the bound institution context, the current boundary identity model, the known
-boundary registry, and the admission model for the current process. This
-remains a process-bound reference surface, not general multi-org routing. The
-current admission model is `single_process_per_institution`: bind a different
-institution with another process, not by hopping orgs inside one process.
+the bound institution context, the current host identity, the current boundary
+identity model, the known boundary registry, and the admission state for the
+current process. This remains a process-bound reference surface, not general
+multi-org routing. The current admission model is `single_process_per_institution`:
+admit institutions at the host level, then bind a different institution with
+another process instead of hopping orgs inside one process.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

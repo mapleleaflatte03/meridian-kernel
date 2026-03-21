@@ -25,13 +25,21 @@ class WorkspaceContextTests(unittest.TestCase):
     def setUp(self):
         self.workspace = _load_workspace('kernel_workspace_context_test')
         self.orig_workspace_org_id = self.workspace.WORKSPACE_ORG_ID
+        self.orig_runtime_host_identity_file = self.workspace.RUNTIME_HOST_IDENTITY_FILE
+        self.orig_runtime_admission_file = self.workspace.RUNTIME_ADMISSION_FILE
         self.orig_load_orgs = self.workspace.load_orgs
         self.orig_load_workspace_credentials = self.workspace._load_workspace_credentials
+        self.orig_load_host_identity = self.workspace.load_host_identity
+        self.orig_load_admission_registry = self.workspace.load_admission_registry
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
+        self.workspace.RUNTIME_HOST_IDENTITY_FILE = self.orig_runtime_host_identity_file
+        self.workspace.RUNTIME_ADMISSION_FILE = self.orig_runtime_admission_file
         self.workspace.load_orgs = self.orig_load_orgs
         self.workspace._load_workspace_credentials = self.orig_load_workspace_credentials
+        self.workspace.load_host_identity = self.orig_load_host_identity
+        self.workspace.load_admission_registry = self.orig_load_admission_registry
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -145,6 +153,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertFalse(permissions['/api/treasury/contribute']['allowed'])
 
     def test_api_status_exposes_runtime_core(self):
+        from runtime_host import default_host_identity
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_owner')
         self.workspace.load_orgs = lambda: {
             'organizations': {
@@ -171,11 +180,27 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.get_pending_approvals = lambda org_id=None: []
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
         self.workspace.get_agent_remediation = lambda economy_key, reg: None
+        self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            supported_boundaries=['workspace', 'cli'],
+        )
+        self.workspace.load_admission_registry = lambda *args, **kwargs: {
+            'source': 'file',
+            'host_id': 'host_alpha',
+            'institutions': {
+                'org_a': {'status': 'admitted'},
+                'org_b': {'status': 'admitted'},
+            },
+            'admitted_org_ids': ['org_a', 'org_b'],
+        }
         ctx = self.workspace._resolve_workspace_context()
         status = self.workspace.api_status(institution_context=ctx)
         self.assertEqual(status['runtime_core']['institution_context']['org_id'], 'org_a')
         self.assertTrue(status['runtime_core']['service_registry']['workspace']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['admission']['additional_institutions_allowed'])
+        self.assertEqual(status['runtime_core']['host_identity']['host_id'], 'host_alpha')
+        self.assertEqual(status['runtime_core']['admission']['admitted_org_ids'], ['org_a', 'org_b'])
 
 
 if __name__ == '__main__':

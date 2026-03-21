@@ -39,8 +39,8 @@ deliberately narrow:
 
 - the five kernel primitives are real
 - the reference workspace is real
-- `runtime_core` now surfaces institution context, boundary identity model,
-  service registry, and admission mode as machine-readable state
+- `runtime_core` now surfaces institution context, host identity, boundary
+  identity model, service registry, and admission state as machine-readable state
 - one built-in runtime path (`local_kernel`) is the real reference adapter
 - one external runtime family (`openclaw_compatible`) now has a tested
   kernel-side reference adapter library
@@ -258,6 +258,7 @@ returns the effective mutation permission snapshot for that bound actor.
 `/api/context` and `/api/status` also expose `runtime_core`, which answers
 three runtime-core questions directly in surfaced state:
 - what institution this process is acting for
+- what host is serving that institution
 - what identity model governs the current boundary
 - how additional institutions are admitted without cross-org bleed
 

@@ -27,7 +27,7 @@ The lower layer that kernel primitives compose over:
 - `economy/sanctions.py` — Sanction types, auto-apply/lift rules, restriction checks
 - `economy/score.py` — REP/AUTH scoring, treasury deposits/withdrawals
 - `economy/auto_score.py` — Automatic agent scoring after delivery cycles
-- `economy/revenue.py` — Revenue and order tracking (module code, not live data)
+- `economy/revenue.py` — Revenue, external settlement evidence, and support/customer payment recording (module code, not live data)
 - `economy/ECONOMY_CONSTITUTION.md` — Three-ledger system rules
 - `economy/tests/` — Economy layer tests
 

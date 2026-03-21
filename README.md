@@ -186,7 +186,7 @@ Kernel primitives compose over the economy layer — they import and extend, nev
 | `economy/authority.py` | `kernel/authority.py` | Sprint leadership, action rights, block matrix |
 | `economy/sanctions.py` | `kernel/court.py` | Sanction application, lifting, restriction checks |
 | `economy/score.py` | `kernel/agent_registry.py` | REP/AUTH scoring synced to agent risk state |
-| `economy/revenue.py` | `kernel/treasury.py` | Balance, runway, budget enforcement |
+| `economy/revenue.py` | `kernel/treasury.py` | Balance, runway, budget enforcement, external settlement evidence |
 
 ## State Files
 

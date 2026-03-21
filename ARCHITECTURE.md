@@ -173,7 +173,7 @@ The kernel composes over a three-ledger economy:
 |--------|---------|------------|
 | **REP** (reputation) | Long-term trust | Non-transferable, earned from accepted output, decays on inactivity |
 | **AUTH** (authority) | Temporary power | Earned from recent output, decays every epoch, suspendable |
-| **CASH** (treasury) | Real money | Only from owner capital or customer payments, never self-minted |
+| **CASH** (treasury) | Real money | Only from owner capital, support contributions, or customer payments, never self-minted |
 
 Key rule: these ledgers are **never collapsed into one token**. REP measures
 trust, AUTH measures current authority, CASH measures money. Agents optimize

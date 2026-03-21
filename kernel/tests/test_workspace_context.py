@@ -36,7 +36,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace._load_workspace_credentials = self.orig_load_workspace_credentials
 
     def test_configured_org_binds_process_context(self):
-        self.workspace._load_workspace_credentials = lambda: (None, None, None)
+        self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
         self.workspace.WORKSPACE_ORG_ID = 'org_b'
         self.workspace.load_orgs = lambda: {
             'organizations': {
@@ -50,7 +50,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(source, 'configured_org')
 
     def test_credential_scoped_org_binds_process_context(self):
-        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_b')
+        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_b', None)
         self.workspace.load_orgs = lambda: {
             'organizations': {
                 'org_a': {'id': 'org_a', 'slug': 'a', 'name': 'A'},
@@ -63,7 +63,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(source, 'credentials_org')
 
     def test_credential_scope_conflict_is_rejected(self):
-        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a')
+        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', None)
         self.workspace.WORKSPACE_ORG_ID = 'org_b'
         with self.assertRaises(RuntimeError):
             self.workspace._resolve_workspace_context()
@@ -85,10 +85,17 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(context['bound_org_id'], 'org_a')
 
     def test_auth_context_reports_credential_binding(self):
-        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a')
+        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', None)
         auth = self.workspace._resolve_auth_context('org_a')
         self.assertEqual(auth['mode'], 'credential_bound')
         self.assertEqual(auth['org_id'], 'org_a')
+        self.assertEqual(auth['actor_id'], 'workspace_user:owner')
+
+    def test_auth_context_prefers_explicit_user_id(self):
+        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_meridian_owner')
+        auth = self.workspace._resolve_auth_context('org_a')
+        self.assertEqual(auth['actor_id'], 'user_meridian_owner')
+        self.assertEqual(auth['actor_source'], 'credentials')
 
 
 if __name__ == '__main__':

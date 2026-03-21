@@ -853,7 +853,9 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         return hmac.compare_digest(supplied_user, user) and hmac.compare_digest(supplied_password, password)
 
     def _require_auth(self, path):
-        protected = path == '/' or path.startswith('/workspace') or path.startswith('/api/')
+        # Session validate is a passive introspection endpoint — the token is the proof.
+        protected = (path == '/' or path.startswith('/workspace') or path.startswith('/api/')) \
+            and path != '/api/session/validate'
         if not protected:
             return True
         if self._is_authorized():

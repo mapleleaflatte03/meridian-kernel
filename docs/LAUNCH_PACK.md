@@ -498,7 +498,7 @@ The kernel is fully open-source (Apache-2.0) and always will be. The hosted Meri
 - [ ] **Choose social preview image** — pick from `ovkumo` (if text gets fixed), `logo.png` (safe fallback), or `8a7yq8`. Upload at repo Settings → Social preview.
 - [ ] **Review social copy** — all 7 platform posts in section 5 above. Approve, edit, or reject each.
 - [ ] **Decide on crypto wallet in sponsor call** — the truncated wallet `0x8200...7761` appears in section 4. Owner must confirm whether to include it publicly or remove.
-- [ ] **Fix CONTRIBUTING.md Python version** — currently says Python 3.11+ but README says Python 3.9+. Owner decides which is correct.
+- [x] **Fix CONTRIBUTING.md Python version** — resolved, both README and CONTRIBUTING.md now say Python 3.9+.
 
 ### Nice-to-have (can happen after launch)
 

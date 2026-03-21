@@ -129,6 +129,12 @@ def _load_workspace_credentials():
 
 
 def _get_founding_org():
+    """Return (org_id, org) for the first registered institution.
+
+    This is a single-institution reference implementation.  The workspace
+    serves one org — the first one in organizations.json.  Multi-org
+    routing requires an auth model that does not exist yet.
+    """
     orgs = load_orgs()
     for oid, org in orgs['organizations'].items():
         return oid, org

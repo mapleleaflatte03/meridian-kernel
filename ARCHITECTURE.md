@@ -155,10 +155,10 @@ Currently registered runtimes:
 | Runtime | Type | Contract Status |
 |---------|------|----------------|
 | `local_kernel` | local | Compliant (7/7) |
-| `openclaw_compatible` | hosted | Partial (5/7) |
-| `mcp_generic` | mcp_app | Non-compliant (2/7, planned adapter) |
-| `a2a_generic` | a2a_agent | Non-compliant (1/7, planned adapter) |
-| `openfang_compatible` | hosted | Unknown (0/7, planned) |
+| `openclaw_compatible` | hosted | Registered (5/7 partial, no adapter yet) |
+| `mcp_generic` | mcp_app | Planned (2/7, no adapter yet) |
+| `a2a_generic` | a2a_agent | Planned (1/7, no adapter yet) |
+| `openfang_compatible` | hosted | Planned (0/7, no adapter yet) |
 
 See [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) for the full
 requirements and integration guide.
@@ -202,7 +202,7 @@ All state is JSON/JSONL on the local filesystem. This is deliberate:
 - No database dependency for getting started
 - Easy to inspect, backup, and version
 - Append-only audit trail via JSONL
-- Future storage backends (SQLite, PostgreSQL) planned for v0.4
+- Alternative storage backends (SQLite, PostgreSQL) are possible future extensions
 
 State files are gitignored by default. The `bootstrap.py` script
 initializes clean state for a new deployment.
@@ -217,10 +217,11 @@ This is the owner-facing control surface:
 - **Auto-refresh** — dashboard updates every 15 seconds
 - **Audit trail** — every action logged
 
-The workspace is a demo/reference surface, not a production UI.
-Production deployments would build their own control plane or adapter bridge
-on top of the Python primitives. The demo JSON API is a reference surface,
-not a full remote governance adapter API.
+The workspace is a single-institution demo/reference surface, not a production UI.
+It serves the first registered institution — there is no multi-org routing or
+org-scoped auth.  Production deployments would build their own control plane
+or adapter bridge on top of the Python primitives.  The demo JSON API is a
+reference surface, not a full remote governance adapter API.
 
 For the concrete handoff from local demo to real deployment, see
 [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).
@@ -245,9 +246,12 @@ constitutional pipeline applies to any runtime that satisfies the contract.
 ### Contributor Treasury Protocol
 
 `treasury/` contains the contributor economy layer built on top of the Treasury
-primitive:
+primitive.  The protocol registries (wallets, accounts, contributors, maintainers,
+payout proposals, funding sources) define the schema and state machines but have
+**zero real entries** — no payouts have ever been executed.  This is infrastructure
+ready for use when the project has real contributors and revenue.
+
 - Wallet registry with five verification levels
-- Three treasury sub-accounts (company, maintainer, contributor)
 - Payout proposal state machine with 72-hour dispute window
 - Fraud and dispute policy mapping to the Court primitive
 

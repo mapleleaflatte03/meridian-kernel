@@ -51,8 +51,8 @@
         "court": "violation_file"
       },
       "adapter_available": false,
-      "status": "active",
-      "notes": "Requires cost attribution hook to satisfy treasury contract fully. Budget gate depends on agent calling check_budget() before cost-bearing operations. Adapter implementation planned."
+      "status": "registered",
+      "notes": "Registered as a known runtime type. No Meridian adapter implemented yet. Requires cost attribution hook and budget gate to satisfy treasury contract fully. Adapter planned."
     },
     "openfang_compatible": {
       "id": "openfang_compatible",

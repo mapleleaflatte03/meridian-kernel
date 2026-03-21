@@ -58,7 +58,7 @@ You don't need the hosted service. This kernel runs standalone.
 - Want agents to have identity, budgets, authority, and accountability
 - Need a kill switch, approval queues, or sanction enforcement
 - Want to separate governance from your agent runtime — and keep that separation as runtimes evolve (MCP, A2A, custom)
-- Want to govern agents across multiple runtimes with a single kernel
+- Want a governance layer that is runtime-neutral and can extend to new runtimes over time
 
 **This is not for you if you** need a chatbot framework, an agent runner, or a mature ecosystem with hundreds of integrations. Meridian is the governance layer — it doesn't run your agents, it governs them.
 
@@ -155,15 +155,15 @@ The kernel doesn't run your agents. It governs them. Any runtime that satisfies 
 
 ## Runtime Adapters
 
-Meridian is runtime-neutral. Five runtimes are currently registered:
+Meridian is runtime-neutral. One runtime is fully implemented; four more are registered as planned targets:
 
 | Runtime | Protocol | Contract Status |
 |---------|----------|----------------|
 | `local_kernel` | custom | Compliant (7/7) — built-in reference |
-| `openclaw_compatible` | custom | Partial (5/7) — adapter work underway |
-| `mcp_generic` | MCP | Non-compliant (2/7) — planned adapter in v0.2 |
-| `a2a_generic` | A2A | Non-compliant (1/7) — planned adapter in v0.2 |
-| `openfang_compatible` | custom | Unknown — planned |
+| `openclaw_compatible` | custom | Registered (5/7 partial) — no adapter yet |
+| `mcp_generic` | MCP | Planned (2/7) — no adapter yet |
+| `a2a_generic` | A2A | Planned (1/7) — no adapter yet |
+| `openfang_compatible` | custom | Planned (0/7) — no adapter yet |
 
 ```bash
 # Check contract compliance for all runtimes
@@ -192,15 +192,15 @@ Kernel primitives compose over the economy layer — they import and extend, nev
 
 All state is JSON/JSONL on the local filesystem. No database required.
 
-| File | Contents |
-|------|----------|
-| `kernel/organizations.json` | Institutions with charters and policies |
-| `kernel/agent_registry.json` | Agents with scores, budgets, risk states |
-| `kernel/authority_queue.json` | Pending approvals, delegations, kill switch |
-| `kernel/court_records.json` | Violations, sanctions, appeals |
-| `kernel/audit_log.jsonl` | Append-only audit trail |
-| `kernel/metering.jsonl` | Usage metering events |
-| `economy/ledger.json` | Economy state (REP, AUTH, CASH per agent) |
+| File | Contents | Scope |
+|------|----------|-------|
+| `kernel/organizations.json` | Institutions with charters and policies | Global |
+| `kernel/agent_registry.json` | Agents with scores, budgets, risk states | Global |
+| `economy/ledger.json` | Economy state (REP, AUTH, CASH per agent) | Per-institution (capsule) |
+| `economy/authority_queue.json` | Pending approvals, delegations, kill switch | Per-institution (capsule) |
+| `economy/court_records.json` | Violations, sanctions, appeals | Per-institution (capsule) |
+| `kernel/audit_log.jsonl` | Append-only audit trail | Global (org-tagged) |
+| `kernel/metering.jsonl` | Usage metering events | Global (org-tagged) |
 
 ---
 

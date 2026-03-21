@@ -27,6 +27,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_workspace_org_id = self.workspace.WORKSPACE_ORG_ID
         self.orig_runtime_host_identity_file = self.workspace.RUNTIME_HOST_IDENTITY_FILE
         self.orig_runtime_admission_file = self.workspace.RUNTIME_ADMISSION_FILE
+        self.orig_federation_peers_file = self.workspace.FEDERATION_PEERS_FILE
+        self.orig_federation_replay_file = self.workspace.FEDERATION_REPLAY_FILE
+        self.orig_federation_signing_secret = self.workspace.FEDERATION_SIGNING_SECRET
         self.orig_load_orgs = self.workspace.load_orgs
         self.orig_load_workspace_credentials = self.workspace._load_workspace_credentials
         self.orig_load_host_identity = self.workspace.load_host_identity
@@ -36,6 +39,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
         self.workspace.RUNTIME_HOST_IDENTITY_FILE = self.orig_runtime_host_identity_file
         self.workspace.RUNTIME_ADMISSION_FILE = self.orig_runtime_admission_file
+        self.workspace.FEDERATION_PEERS_FILE = self.orig_federation_peers_file
+        self.workspace.FEDERATION_REPLAY_FILE = self.orig_federation_replay_file
+        self.workspace.FEDERATION_SIGNING_SECRET = self.orig_federation_signing_secret
         self.workspace.load_orgs = self.orig_load_orgs
         self.workspace._load_workspace_credentials = self.orig_load_workspace_credentials
         self.workspace.load_host_identity = self.orig_load_host_identity
@@ -198,9 +204,95 @@ class WorkspaceContextTests(unittest.TestCase):
         status = self.workspace.api_status(institution_context=ctx)
         self.assertEqual(status['runtime_core']['institution_context']['org_id'], 'org_a')
         self.assertTrue(status['runtime_core']['service_registry']['workspace']['supports_institution_routing'])
+        self.assertTrue(status['runtime_core']['service_registry']['federation_gateway']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['admission']['additional_institutions_allowed'])
         self.assertEqual(status['runtime_core']['host_identity']['host_id'], 'host_alpha')
         self.assertEqual(status['runtime_core']['admission']['admitted_org_ids'], ['org_a', 'org_b'])
+        self.assertIn('federation', status['runtime_core'])
+
+    def test_federation_snapshot_surfaces_trusted_peers(self):
+        from runtime_host import default_host_identity
+        import tempfile
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            peers_path = os.path.join(tmp, 'federation_peers.json')
+            replay_path = os.path.join(tmp, 'federation_replay.log')
+            with open(peers_path, 'w') as f:
+                json.dump({
+                    'host_id': 'host_alpha',
+                    'peers': {
+                        'host_beta': {
+                            'label': 'Beta Host',
+                            'transport': 'https',
+                            'trust_state': 'trusted',
+                            'shared_secret': 'beta-secret',
+                            'admitted_org_ids': ['org_b'],
+                        }
+                    },
+                }, f)
+            self.workspace.FEDERATION_PEERS_FILE = peers_path
+            self.workspace.FEDERATION_REPLAY_FILE = replay_path
+            self.workspace.FEDERATION_SIGNING_SECRET = 'alpha-secret'
+            host = default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+            )
+            snap = self.workspace._federation_snapshot(
+                'org_a',
+                host_identity=host,
+                admission_registry={'admitted_org_ids': ['org_a', 'org_b']},
+            )
+            self.assertTrue(snap['enabled'])
+            self.assertEqual(snap['peer_count'], 1)
+            self.assertEqual(snap['trusted_peer_ids'], ['host_beta'])
+            self.assertEqual(snap['admitted_org_ids'], ['org_a', 'org_b'])
+
+    def test_accept_federation_request_consumes_envelope(self):
+        from federation import FederationAuthority
+        from runtime_host import default_host_identity
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            replay_path = os.path.join(tmp, 'federation_replay.log')
+            self.workspace.FEDERATION_REPLAY_FILE = replay_path
+            self.workspace.FEDERATION_SIGNING_SECRET = 'alpha-secret'
+            self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+                supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+            )
+            self.workspace.load_admission_registry = lambda *args, **kwargs: {
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'institutions': {'org_a': {'status': 'admitted'}},
+                'admitted_org_ids': ['org_a'],
+            }
+            sender = FederationAuthority(
+                default_host_identity(
+                    host_id='host_alpha',
+                    federation_enabled=True,
+                    peer_transport='https',
+                ),
+                signing_secret='alpha-secret',
+            )
+            envelope = sender.issue(
+                'org_a',
+                'host_alpha',
+                'org_a',
+                'execution_request',
+                payload={'task': 'demo'},
+            )
+            claims, snapshot = self.workspace._accept_federation_request(
+                'org_a',
+                envelope,
+                payload={'task': 'demo'},
+            )
+            self.assertEqual(claims.source_host_id, 'host_alpha')
+            self.assertTrue(snapshot['enabled'])
+            self.assertEqual(snapshot['replay_protection']['entries'], 1)
 
 
 if __name__ == '__main__':

@@ -40,10 +40,13 @@ deliberately narrow:
 - the five kernel primitives are real
 - the reference workspace is real
 - `runtime_core` now surfaces institution context, host identity, boundary
-  identity model, service registry, and admission state as machine-readable state
+  identity model, service registry, admission state, and federation gateway
+  state as machine-readable state
 - one built-in runtime path (`local_kernel`) is the real reference adapter
 - one external runtime family (`openclaw_compatible`) now has a tested
   kernel-side reference adapter library
+- one host-service federation primitive now exists as a kernel reference:
+  HMAC-signed envelopes, peer registry, and replay protection
 
 What is not yet broadly proven in public code:
 - live end-to-end OpenClaw-compatible deployment wiring
@@ -261,10 +264,14 @@ three runtime-core questions directly in surfaced state:
 - what host is serving that institution
 - what identity model governs the current boundary
 - how additional institutions are admitted without cross-org bleed
+- whether host-service federation is enabled and which peers are trusted
 
 In the OSS reference workspace, the current admission mode is
 `single_process_per_institution`: a second institution is admitted by binding a
 separate process, not by turning on request-level multi-org routing.
+The federation gateway is now a real boundary in the service registry, but it
+remains a host-service primitive. It proves signed cross-host identity and
+replay protection, not broad multi-host execution parity.
 Production deployments would build their own control plane
 or adapter bridge on top of the Python primitives.  The demo JSON API is a
 reference surface, not a full remote governance adapter API.

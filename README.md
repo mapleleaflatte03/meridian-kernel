@@ -43,12 +43,14 @@ The public proof is intentionally narrower than the full thesis.
 What is real today:
 - the five kernel primitives
 - the reference workspace and JSON API
-- the `runtime_core` surface that exposes institution context, host identity, boundary identity model, service registry, and admission state
+- the `runtime_core` surface that exposes institution context, host identity, boundary identity model, service registry, admission state, and federation gateway state
 - one real built-in reference runtime path: `local_kernel`
 - one tested kernel-side reference adapter library: `openclaw_compatible`
+- one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 
 What is not yet broadly proven:
 - live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
+- live multi-host federation between independent Meridian deployments
 - live multi-institution routing inside one deployed service boundary
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
@@ -129,6 +131,9 @@ current process. This remains a process-bound reference surface, not general
 multi-org routing. The current admission model is `single_process_per_institution`:
 admit institutions at the host level, then bind a different institution with
 another process instead of hopping orgs inside one process.
+The same `runtime_core` surface now also exposes the `federation_gateway`
+boundary state: whether the host has federation enabled, which peer hosts are
+trusted, and whether replay protection is file-backed or memory-only.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

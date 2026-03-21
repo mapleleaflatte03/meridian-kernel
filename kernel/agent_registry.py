@@ -26,6 +26,12 @@ REGISTRY_FILE = os.path.join(PLATFORM_DIR, 'agent_registry.json')
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
 LEDGER_FILE = os.path.join(WORKSPACE, 'economy', 'ledger.json')
 
+try:
+    from capsule import capsule_path
+except ImportError:
+    def capsule_path(org_id, filename):
+        return os.path.join(WORKSPACE, 'economy', filename)
+
 VALID_ROLLOUT_STATES = ('active', 'staged', 'quarantined', 'disabled')
 VALID_ROLES = ('manager', 'analyst', 'verifier', 'executor', 'writer', 'qa_gate', 'compressor')
 VALID_RISK_STATES = ('nominal', 'elevated', 'critical', 'suspended')
@@ -51,6 +57,16 @@ def save_registry(data):
     data['updatedAt'] = _now()
     with open(REGISTRY_FILE, 'w') as f:
         json.dump(data, f, indent=2)
+
+
+def _org_matches(agent, org_id=None):
+    return org_id is None or agent.get('org_id') == org_id
+
+
+def _ledger_path(org_id=None):
+    if org_id is None:
+        return LEDGER_FILE
+    return capsule_path(org_id, 'ledger.json')
 
 
 def register_agent(org_id, name, role, purpose, scopes=None, model_policy=None,
@@ -97,9 +113,12 @@ def register_agent(org_id, name, role, purpose, scopes=None, model_policy=None,
     return agent_id
 
 
-def get_agent(agent_id):
+def get_agent(agent_id, org_id=None):
     data = load_registry()
-    return data['agents'].get(agent_id)
+    agent = data['agents'].get(agent_id)
+    if agent and _org_matches(agent, org_id):
+        return agent
+    return None
 
 
 def list_agents(org_id=None, include_disabled=False):
@@ -155,7 +174,7 @@ def set_scopes(agent_id, scopes):
 
 def check_budget(agent_id, cost_usd):
     """Check if an agent can spend the given amount. Returns (allowed, reason)."""
-    agent = get_agent(agent_id)
+    agent = resolve_agent(agent_id)
     if not agent:
         return False, 'Agent not found'
     if agent['rollout_state'] in ('quarantined', 'disabled'):
@@ -167,7 +186,7 @@ def check_budget(agent_id, cost_usd):
 
 def check_scope(agent_id, required_scope):
     """Check if an agent has the required scope. Returns (allowed, reason)."""
-    agent = get_agent(agent_id)
+    agent = resolve_agent(agent_id)
     if not agent:
         return False, 'Agent not found'
     if not agent['scopes']:
@@ -227,28 +246,53 @@ def record_incident(agent_id):
     return count
 
 
-def get_agent_by_economy_key(economy_key):
-    """Lookup agent by economy ledger key."""
+def get_agents_by_economy_key(economy_key, org_id=None):
+    """Lookup all agents matching an economy ledger key, optionally scoped to an institution."""
     data = load_registry()
+    matches = []
     for agent in data['agents'].values():
-        if agent.get('economy_key') == economy_key:
-            return agent
-    return None
+        if agent.get('economy_key') == economy_key and _org_matches(agent, org_id):
+            matches.append(agent)
+    return matches
 
 
-def sync_from_economy():
-    """Sync REP/AUTH and sanction flags from economy/ledger.json into the agent registry."""
-    if not os.path.exists(LEDGER_FILE):
-        print('No ledger found at', LEDGER_FILE)
+def get_agent_by_economy_key(economy_key, org_id=None):
+    """Lookup a single agent by economy ledger key.
+
+    Returns None when the lookup is ambiguous and no org_id is provided.
+    """
+    matches = get_agents_by_economy_key(economy_key, org_id=org_id)
+    if not matches:
+        return None
+    if org_id is None and len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def resolve_agent(agent_ref, org_id=None):
+    """Resolve an agent by registry id first, then by economy_key with org scoping."""
+    agent = get_agent(agent_ref, org_id=org_id)
+    if agent:
+        return agent
+    return get_agent_by_economy_key(agent_ref, org_id=org_id)
+
+
+def sync_from_economy(org_id=None):
+    """Sync REP/AUTH and sanction flags from the relevant ledger into the agent registry."""
+    ledger_path = _ledger_path(org_id)
+    if not os.path.exists(ledger_path):
+        print('No ledger found at', ledger_path)
         return
 
-    with open(LEDGER_FILE) as f:
+    with open(ledger_path) as f:
         ledger = json.load(f)
 
     data = load_registry()
     synced = 0
 
     for agent in data['agents'].values():
+        if org_id is not None and agent.get('org_id') != org_id:
+            continue
         # Match by economy_key first, then by name
         ledger_agent = None
         ekey = agent.get('economy_key')
@@ -294,6 +338,7 @@ def main():
 
     g = sub.add_parser('get')
     g.add_argument('--agent_id', required=True)
+    g.add_argument('--org_id', default=None)
 
     ls = sub.add_parser('list')
     ls.add_argument('--org_id', default=None)
@@ -317,7 +362,8 @@ def main():
     d = sub.add_parser('disable')
     d.add_argument('--agent_id', required=True)
 
-    sub.add_parser('sync-economy')
+    sync = sub.add_parser('sync-economy')
+    sync.add_argument('--org_id', default=None)
 
     rs = sub.add_parser('set-risk')
     rs.add_argument('--agent_id', required=True)
@@ -338,7 +384,7 @@ def main():
                              scopes=scopes, approval_required=args.approval_required)
         print(f'Registered agent: {aid}')
     elif args.command == 'get':
-        agent = get_agent(args.agent_id)
+        agent = resolve_agent(args.agent_id, org_id=getattr(args, 'org_id', None))
         print(json.dumps(agent, indent=2) if agent else f'Not found: {args.agent_id}')
     elif args.command == 'list':
         for a in list_agents(args.org_id, getattr(args, 'include_disabled', False)):
@@ -358,7 +404,7 @@ def main():
         update_agent(args.agent_id, rollout_state='disabled')
         print(f'Disabled {args.agent_id}')
     elif args.command == 'sync-economy':
-        sync_from_economy()
+        sync_from_economy(getattr(args, 'org_id', None))
     elif args.command == 'set-risk':
         set_risk_state(args.agent_id, args.state)
         print(f'Risk state set to {args.state} for {args.agent_id}')

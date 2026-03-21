@@ -125,16 +125,22 @@ ROLE_RANK = {
     'owner': 3,
 }
 
-MEMBER_MUTATION_PATHS = {
-    '/api/authority/request',
-    '/api/court/file',
-    '/api/court/appeal',
-}
-
-OWNER_ONLY_MUTATION_PATHS = {
-    '/api/treasury/contribute',
-    '/api/treasury/reserve-floor',
-    '/api/institution/lifecycle',
+MUTATION_ROLE_REQUIREMENTS = {
+    '/api/authority/kill-switch': 'admin',
+    '/api/authority/approve': 'admin',
+    '/api/authority/request': 'member',
+    '/api/authority/delegate': 'admin',
+    '/api/authority/revoke': 'admin',
+    '/api/court/file': 'member',
+    '/api/court/resolve': 'admin',
+    '/api/court/appeal': 'member',
+    '/api/court/decide-appeal': 'admin',
+    '/api/court/auto-review': 'admin',
+    '/api/court/remediate': 'admin',
+    '/api/treasury/contribute': 'owner',
+    '/api/treasury/reserve-floor': 'owner',
+    '/api/institution/charter': 'admin',
+    '/api/institution/lifecycle': 'owner',
 }
 
 
@@ -296,11 +302,7 @@ def _member_role(org_id, user_id):
 
 
 def _required_mutation_role(path):
-    if path in OWNER_ONLY_MUTATION_PATHS:
-        return 'owner'
-    if path in MEMBER_MUTATION_PATHS:
-        return 'member'
-    return 'admin'
+    return MUTATION_ROLE_REQUIREMENTS.get(path, 'admin')
 
 
 def _enforce_mutation_authorization(auth_context, org_id, path):
@@ -317,6 +319,24 @@ def _enforce_mutation_authorization(auth_context, org_id, path):
             f"Workspace actor role '{role}' cannot mutate '{path}'; requires {required_role}"
         )
     return required_role
+
+
+def _permission_snapshot(auth_context):
+    role = auth_context.get('role')
+    permissions = {}
+    for path, required_role in MUTATION_ROLE_REQUIREMENTS.items():
+        permissions[path] = {
+            'required_role': required_role,
+            'allowed': bool(
+                auth_context.get('enabled')
+                and role
+                and ROLE_RANK.get(role, -1) >= ROLE_RANK.get(required_role, 99)
+            ),
+        }
+    return {
+        'read_allowed': bool(auth_context.get('enabled') or not WORKSPACE_AUTH_REQUIRED),
+        'mutation_paths': permissions,
+    }
 
 
 def _scoped_registry(org_id):
@@ -354,6 +374,7 @@ def api_status(org_id=None, context_source='founding_default'):
     snap = treasury_snapshot(org_id)
     records = _load_records(org_id)
     lead_id, lead_auth = get_sprint_lead(org_id)
+    auth_context = _resolve_auth_context(org_id)
 
     agents = []
     remediations = []
@@ -392,7 +413,8 @@ def api_status(org_id=None, context_source='founding_default'):
             'bound_org_id': org_id,
             'source': context_source,
             'request_override': 'exact-match-only',
-            'auth': _resolve_auth_context(org_id),
+            'auth': auth_context,
+            'permissions': _permission_snapshot(auth_context),
         },
         'institution': {
             'id': org_id,
@@ -569,6 +591,16 @@ function api(method, path, body) {
   return fetch(path, opts).then(function(r) { return r.json(); });
 }
 
+var currentContext = null;
+function can(path) {
+  var perms = currentContext && currentContext.permissions && currentContext.permissions.mutation_paths;
+  return !!(perms && perms[path] && perms[path].allowed);
+}
+function requiredRole(path) {
+  var perms = currentContext && currentContext.permissions && currentContext.permissions.mutation_paths;
+  return perms && perms[path] ? perms[path].required_role : 'admin';
+}
+
 function riskTag(state) {
   if (state === 'critical') return '<span class="tag tag-crit">CRITICAL</span>';
   if (state === 'elevated') return '<span class="tag tag-warn">ELEVATED</span>';
@@ -577,6 +609,7 @@ function riskTag(state) {
 }
 
 function render(data) {
+  currentContext = data.context || null;
   var ks = data.authority.kill_switch;
   var sb = '';
   sb += '<span class="item">Kill switch: ' + (ks.engaged
@@ -586,6 +619,9 @@ function render(data) {
   sb += '<span class="item">Violations: <strong>' + data.court.open_violations.length + ' open</strong></span>';
   sb += '<span class="item">Approvals: <strong>' + data.authority.pending_approvals.length + ' pending</strong></span>';
   sb += '<span class="item">Lead: <strong>' + (data.authority.sprint_lead.agent_id || 'none') + '</strong></span>';
+  if (data.context && data.context.auth && data.context.auth.actor_id) {
+    sb += '<span class="item">Actor: <strong>' + data.context.auth.actor_id + '</strong> (' + (data.context.auth.role || 'unbound') + ')</span>';
+  }
   document.getElementById('status-bar').innerHTML = sb;
 
   // Phase Machine
@@ -620,7 +656,11 @@ function render(data) {
     ic += '</div><div>';
     ic += '<div class="form-row"><label>Charter</label></div>';
     ic += '<textarea id="charter-text" placeholder="Set institution charter...">' + (inst.charter || '') + '</textarea>';
-    ic += '<div class="action-row"><button onclick="setCharter()">Save Charter</button></div>';
+    if (can('/api/institution/charter')) {
+      ic += '<div class="action-row"><button onclick="setCharter()">Save Charter</button></div>';
+    } else {
+      ic += '<div class="form-row"><label></label><span style="color:var(--dim);font-size:0.8rem">Charter updates require ' + requiredRole('/api/institution/charter') + ' role.</span></div>';
+    }
     ic += '</div></div>';
     document.getElementById('inst-card').innerHTML = ic;
   }
@@ -641,8 +681,8 @@ function render(data) {
   var au = '<div class="card">';
   au += '<strong>Kill Switch</strong>: ' + (ks.engaged
     ? '<span class="tag tag-on">ENGAGED</span> by ' + ks.engaged_by + ' -- ' + ks.reason
-      + ' <button onclick="killSwitch(false)">Disengage</button>'
-    : '<span class="tag tag-off">OFF</span> <button class="danger" onclick="killSwitch(true)">Engage Kill Switch</button>');
+      + (can('/api/authority/kill-switch') ? ' <button onclick="killSwitch(false)">Disengage</button>' : '')
+    : '<span class="tag tag-off">OFF</span>' + (can('/api/authority/kill-switch') ? ' <button class="danger" onclick="killSwitch(true)">Engage Kill Switch</button>' : ' <span style="color:var(--dim);font-size:0.8rem">requires ' + requiredRole('/api/authority/kill-switch') + '</span>'));
   au += '</div>';
   au += '<div class="card"><strong>Pending Approvals</strong> (' + data.authority.pending_approvals.length + ')';
   if (data.authority.pending_approvals.length === 0) {
@@ -670,11 +710,12 @@ function render(data) {
 function killSwitch(engage) {
   var reason = engage ? prompt('Reason for engaging kill switch:') : '';
   if (engage && !reason) return;
-  api('POST', '/api/authority/kill-switch', { engage: engage, by: 'owner', reason: reason })
+  api('POST', '/api/authority/kill-switch', { engage: engage, reason: reason })
     .then(function(r) { toast(r.message); refresh(); });
 }
 
 function setCharter() {
+  if (!can('/api/institution/charter')) return toast('This action requires ' + requiredRole('/api/institution/charter') + ' role.');
   var text = document.getElementById('charter-text').value;
   api('POST', '/api/institution/charter', { text: text })
     .then(function(r) { toast(r.message); refresh(); });
@@ -819,6 +860,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json({
                 **request_context,
                 'auth': auth_context,
+                'permissions': _permission_snapshot(auth_context),
                 'source': context_source,
                 'institution_name': org.get('name', '') if org else '',
                 'institution_slug': org.get('slug', '') if org else '',

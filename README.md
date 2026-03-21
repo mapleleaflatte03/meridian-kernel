@@ -103,8 +103,9 @@ context. It also reports the workspace auth scope; `MERIDIAN_WORKSPACE_AUTH_ORG_
 or an `org_id:` line in the credentials file can pin HTTP Basic auth to the same
 institution. Add `MERIDIAN_WORKSPACE_USER_ID=<user_id>` or `user_id:` in the
 credentials file if you want mutation audit and role checks to bind to a real
-institution member instead of a generic Basic-auth username. This remains a
-process-bound reference surface, not general multi-org routing.
+institution member instead of a generic Basic-auth username. `/api/context`
+also exposes the effective mutation permission snapshot for that bound actor.
+This remains a process-bound reference surface, not general multi-org routing.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

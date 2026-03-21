@@ -135,20 +135,39 @@ def _get_founding_org():
     return None, None
 
 
+def _scoped_registry(org_id):
+    reg = load_registry()
+    if org_id is None:
+        return reg
+    scoped_agents = {
+        agent_id: agent
+        for agent_id, agent in reg.get('agents', {}).items()
+        if agent.get('org_id') in (None, org_id)
+    }
+    return {
+        **reg,
+        'agents': scoped_agents,
+    }
+
+
 # -- API data builders --------------------------------------------------------
 
-def api_status():
-    org_id, org = _get_founding_org()
-    reg = load_registry()
-    queue = _load_queue()
-    snap = treasury_snapshot()
-    records = _load_records()
-    lead_id, lead_auth = get_sprint_lead()
+def api_status(org_id=None):
+    if org_id is None:
+        org_id, org = _get_founding_org()
+    else:
+        org = load_orgs().get('organizations', {}).get(org_id)
+
+    reg = _scoped_registry(org_id)
+    queue = _load_queue(org_id)
+    snap = treasury_snapshot(org_id)
+    records = _load_records(org_id)
+    lead_id, lead_auth = get_sprint_lead(org_id)
 
     agents = []
     remediations = []
     for a in reg['agents'].values():
-        restrictions = get_restrictions(a.get('economy_key', a['name'].lower()))
+        restrictions = get_restrictions(a.get('economy_key', a['name'].lower()), org_id=org_id)
         remediation = None
         if _ci_vertical_available:
             remediation = get_agent_remediation(a.get('economy_key', a['name'].lower()), reg)
@@ -211,7 +230,7 @@ def api_status():
 
     if _phase_machine_available:
         try:
-            phase_num, phase_info = current_phase()
+            phase_num, phase_info = current_phase(org_id)
             result['phase_machine'] = {
                 'current_phase': phase_num,
                 'name': phase_info['name'],
@@ -588,16 +607,19 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         if path == '/' or path == '/workspace':
             return self._html(DASHBOARD_HTML)
         elif path == '/api/status':
-            return self._json(api_status())
+            org_id, _ = _get_founding_org()
+            return self._json(api_status(org_id))
         elif path == '/api/institution':
             _, org = _get_founding_org()
             return self._json(org or {})
         elif path == '/api/agents':
-            reg = load_registry()
+            org_id, _ = _get_founding_org()
+            reg = _scoped_registry(org_id)
             return self._json(list(reg['agents'].values()))
         elif path == '/api/authority':
-            queue = _load_queue()
-            lead_id, lead_auth = get_sprint_lead()
+            org_id, _ = _get_founding_org()
+            queue = _load_queue(org_id)
+            lead_id, lead_auth = get_sprint_lead(org_id)
             return self._json({
                 'kill_switch': queue['kill_switch'],
                 'pending_approvals': list(queue['pending_approvals'].values()),
@@ -605,19 +627,26 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'sprint_lead': {'agent_id': lead_id, 'auth': lead_auth},
             })
         elif path == '/api/treasury':
-            return self._json(treasury_snapshot())
+            org_id, _ = _get_founding_org()
+            return self._json(treasury_snapshot(org_id))
         elif path == '/api/treasury/wallets':
-            return self._json(load_wallets())
+            org_id, _ = _get_founding_org()
+            return self._json(load_wallets(org_id))
         elif path == '/api/treasury/accounts':
-            return self._json(load_treasury_accounts())
+            org_id, _ = _get_founding_org()
+            return self._json(load_treasury_accounts(org_id))
         elif path == '/api/treasury/maintainers':
-            return self._json(load_maintainers())
+            org_id, _ = _get_founding_org()
+            return self._json(load_maintainers(org_id))
         elif path == '/api/treasury/contributors':
-            return self._json(load_contributors())
+            org_id, _ = _get_founding_org()
+            return self._json(load_contributors(org_id))
         elif path == '/api/treasury/proposals':
-            return self._json(load_payout_proposals())
+            org_id, _ = _get_founding_org()
+            return self._json(load_payout_proposals(org_id))
         elif path == '/api/treasury/funding-sources':
-            return self._json(load_funding_sources())
+            org_id, _ = _get_founding_org()
+            return self._json(load_funding_sources(org_id))
         elif path == '/api/runtimes':
             data = load_runtimes()
             contracts = check_all_contracts()
@@ -642,7 +671,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             enriched['contract_check'] = check_contract(runtime_id)
             return self._json(enriched)
         elif path == '/api/court':
-            records = _load_records()
+            org_id, _ = _get_founding_org()
+            records = _load_records(org_id)
             return self._json({
                 'violations': list(records['violations'].values()),
                 'appeals': list(records['appeals'].values()),
@@ -671,12 +701,12 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         try:
             if path == '/api/authority/kill-switch':
                 if body.get('engage'):
-                    engage_kill_switch(by, body.get('reason', ''))
+                    engage_kill_switch(by, body.get('reason', ''), org_id=org_id)
                     log_event(org_id, 'system', 'kill_switch_engaged', outcome='success',
                               details={'by': by, 'reason': body.get('reason')})
                     return self._json({'message': 'Kill switch ENGAGED'})
                 else:
-                    disengage_kill_switch(by)
+                    disengage_kill_switch(by, org_id=org_id)
                     log_event(org_id, 'system', 'kill_switch_disengaged', outcome='success',
                               details={'by': by})
                     return self._json({'message': 'Kill switch disengaged'})
@@ -684,21 +714,21 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             elif path == '/api/authority/approve':
                 decision = body['decision']
                 decide_approval(body['approval_id'], decision,
-                               by, body.get('reason', ''))
+                               by, body.get('reason', ''), org_id=org_id)
                 return self._json({'message': f'Approval {body["approval_id"]}: {decision}'})
 
             elif path == '/api/authority/request':
                 aid = request_approval(body['agent'], body['action'],
-                                       body['resource'], body.get('cost', 0))
+                                       body['resource'], body.get('cost', 0), org_id=org_id)
                 return self._json({'message': f'Approval requested: {aid}', 'approval_id': aid})
 
             elif path == '/api/authority/delegate':
                 scopes = [s.strip() for s in body['scopes'].split(',') if s.strip()]
-                did = delegate(body['from'], body['to'], scopes, body.get('hours', 24))
+                did = delegate(body['from'], body['to'], scopes, body.get('hours', 24), org_id=org_id)
                 return self._json({'message': f'Delegation created: {did}', 'delegation_id': did})
 
             elif path == '/api/authority/revoke':
-                revoke_delegation(body['delegation_id'])
+                revoke_delegation(body['delegation_id'], org_id=org_id)
                 return self._json({'message': f'Delegation revoked: {body["delegation_id"]}'})
 
             elif path == '/api/court/file':
@@ -708,42 +738,42 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 return self._json({'message': f'Violation filed: {vid}', 'violation_id': vid})
 
             elif path == '/api/court/resolve':
-                resolve_violation(body['violation_id'], body['note'])
+                resolve_violation(body['violation_id'], body['note'], org_id=org_id)
                 return self._json({'message': f'Violation resolved: {body["violation_id"]}'})
 
             elif path == '/api/court/appeal':
-                aid = file_appeal(body['violation_id'], body['agent'], body['grounds'])
+                aid = file_appeal(body['violation_id'], body['agent'], body['grounds'], org_id=org_id)
                 return self._json({'message': f'Appeal filed: {aid}', 'appeal_id': aid})
 
             elif path == '/api/court/decide-appeal':
-                decide_appeal(body['appeal_id'], body['decision'], by)
+                decide_appeal(body['appeal_id'], body['decision'], by, org_id=org_id)
                 return self._json({'message': f'Appeal {body["appeal_id"]}: {body["decision"]}'})
 
             elif path == '/api/court/auto-review':
-                vids = auto_review()
+                vids = auto_review(org_id=org_id)
                 return self._json({'message': f'Auto-review: {len(vids)} violation(s) created',
                                    'violations': vids})
 
             elif path == '/api/court/remediate':
                 lifted = remediate(body['agent_id'], by,
-                                   body.get('note', ''))
+                                   body.get('note', ''), org_id=org_id)
                 return self._json({'message': f'Remediation complete: lifted {lifted}',
                                    'lifted': lifted})
 
             elif path == '/api/treasury/contribute':
                 result = contribute_owner_capital(body['amount'], body.get('note', ''),
-                                                  by)
+                                                  by, org_id=org_id)
                 return self._json({
                     'message': f'Owner capital recorded: +${result["amount_usd"]:.2f}',
-                    'snapshot': treasury_snapshot(),
+                    'snapshot': treasury_snapshot(org_id),
                 })
 
             elif path == '/api/treasury/reserve-floor':
                 result = set_reserve_floor_policy(body['amount'], body.get('note', ''),
-                                                  by)
+                                                  by, org_id=org_id)
                 return self._json({
                     'message': 'Reserve floor updated',
-                    'snapshot': treasury_snapshot(),
+                    'snapshot': treasury_snapshot(org_id),
                 })
 
             elif path == '/api/institution/charter':

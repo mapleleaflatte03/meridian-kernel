@@ -12,7 +12,17 @@ import json, sys, os, glob, random, datetime, argparse
 
 ECONOMY_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE   = os.path.dirname(ECONOMY_DIR)
+KERNEL_DIR = os.path.join(WORKSPACE, 'kernel')
 SAMPLE_DATA_DIR = os.path.join(WORKSPACE, 'examples', 'intelligence', 'sample-data')
+
+if KERNEL_DIR not in sys.path:
+    sys.path.insert(0, KERNEL_DIR)
+
+try:
+    from capsule import capsule_path
+except ImportError:
+    def capsule_path(org_id, filename):
+        return os.path.join(ECONOMY_DIR, filename)
 
 # Optional: import brief_quality from examples if available
 _assess_brief_content = None
@@ -38,9 +48,6 @@ ARTIFACT_DIR = (
     or SAMPLE_DATA_DIR
 )
 DELIVER_JOB_NAME = os.environ.get('MERIDIAN_DELIVER_JOB_NAME', 'deliver')
-LEDGER      = os.path.join(ECONOMY_DIR, 'ledger.json')
-TRANSACTIONS = os.path.join(ECONOMY_DIR, 'transactions.jsonl')
-LOG         = os.path.join(ECONOMY_DIR, 'auto_score.log')
 
 # Per-outcome, per-role: (rep_base, auth_base)
 OUTCOME_DELTAS = {
@@ -93,24 +100,36 @@ def now_ts():
 def clamp(v, lo=0, hi=100):
     return max(lo, min(hi, v))
 
-def load_ledger():
-    with open(LEDGER) as f:
+def _ledger_path(org_id=None):
+    return capsule_path(org_id, 'ledger.json')
+
+
+def _tx_path(org_id=None):
+    return capsule_path(org_id, 'transactions.jsonl')
+
+
+def _log_path(org_id=None):
+    return capsule_path(org_id, 'auto_score.log')
+
+
+def load_ledger(org_id=None):
+    with open(_ledger_path(org_id)) as f:
         return json.load(f)
 
-def save_ledger(data):
+def save_ledger(data, org_id=None):
     data['updatedAt'] = now_ts()
-    with open(LEDGER, 'w') as f:
+    with open(_ledger_path(org_id), 'w') as f:
         json.dump(data, f, indent=2)
 
-def append_tx(entry):
+def append_tx(entry, org_id=None):
     entry['ts'] = now_ts()
-    with open(TRANSACTIONS, 'a') as f:
+    with open(_tx_path(org_id), 'a') as f:
         f.write(json.dumps(entry) + '\n')
 
-def log(msg):
+def log(msg, org_id=None):
     line = f"[{now_ts()}] {msg}"
     print(line)
-    with open(LOG, 'a') as f:
+    with open(_log_path(org_id), 'a') as f:
         f.write(line + '\n')
 
 # -- outcome detection --------------------------------------------------------
@@ -281,7 +300,7 @@ def advance_epoch(data, scored_agents, dry_run=False):
 
 # -- main ---------------------------------------------------------------------
 
-def already_scored(jobs):
+def already_scored(jobs, org_id=None):
     """Return True if the current deliver run was already scored."""
     deliver, _ = find_deliver_job(jobs)
     if not deliver:
@@ -290,7 +309,7 @@ def already_scored(jobs):
     if not deliver_ms:
         return False
     try:
-        with open(TRANSACTIONS) as f:
+        with open(_tx_path(org_id)) as f:
             for line in f:
                 tx = json.loads(line.strip())
                 if tx.get('type') == 'epoch_advance':
@@ -302,31 +321,31 @@ def already_scored(jobs):
         pass
     return False
 
-def run(dry_run=False):
-    log(f"=== auto_score start (dry_run={dry_run}) ===")
+def run(dry_run=False, org_id=None):
+    log(f"=== auto_score start (dry_run={dry_run}, org_id={org_id or 'founding'}) ===", org_id=org_id)
 
     jobs         = read_run_state()
     rpath, rtxt  = latest_report()
     bpath, btxt  = latest_brief()
 
-    if not dry_run and already_scored(jobs):
-        log("Already scored this deliver run -- skipping. (dedup guard)")
+    if not dry_run and already_scored(jobs, org_id=org_id):
+        log("Already scored this deliver run -- skipping. (dedup guard)", org_id=org_id)
         return
 
     outcomes = detect_outcomes(jobs, rtxt, btxt)
     if not outcomes:
-        log("No scoreable outcomes detected -- check report files and cron state.")
+        log("No scoreable outcomes detected -- check report files and cron state.", org_id=org_id)
         return
 
-    log(f"Detected {len(outcomes)} outcome(s):")
+    log(f"Detected {len(outcomes)} outcome(s):", org_id=org_id)
     for key, evidence in outcomes:
-        log(f"  [{key}] {evidence}")
+        log(f"  [{key}] {evidence}", org_id=org_id)
 
     if dry_run:
-        log("DRY RUN -- no writes")
+        log("DRY RUN -- no writes", org_id=org_id)
         return
 
-    data = load_ledger()
+    data = load_ledger(org_id)
     scored = set()
 
     participating = set()
@@ -343,7 +362,7 @@ def run(dry_run=False):
             if agent_id not in data['agents']:
                 continue
             if agent_id not in participating and rd > 0 and not is_recovery:
-                log(f"  {agent_id}: SKIPPED (blocked/non-participating) -- no positive score from {outcome_key}")
+                log(f"  {agent_id}: SKIPPED (blocked/non-participating) -- no positive score from {outcome_key}", org_id=org_id)
                 continue
             agent    = data['agents'][agent_id]
             old_rep  = agent['reputation_units']
@@ -363,55 +382,53 @@ def run(dry_run=False):
                 'auth_before': old_auth, 'auth_after': new_auth, 'auth_delta': actual_auth,
                 'note':       f"auto: {evidence[:100]}",
                 'randomized': (actual_rep != rd or actual_auth != ad),
-            })
+            }, org_id=org_id)
             scored.add(agent_id)
-            log(f"  {agent_id}: REP {old_rep}->{new_rep} ({actual_rep:+}) | AUTH {old_auth}->{new_auth} ({actual_auth:+})")
+            log(f"  {agent_id}: REP {old_rep}->{new_rep} ({actual_rep:+}) | AUTH {old_auth}->{new_auth} ({actual_auth:+})", org_id=org_id)
 
     new_epoch = advance_epoch(data, scored, dry_run=False)
     append_tx({'type': 'epoch_advance', 'new_epoch': new_epoch,
-               'note': f'auto-advance. scored: {sorted(scored)}'})
+               'note': f'auto-advance. scored: {sorted(scored)}'}, org_id=org_id)
 
-    save_ledger(data)
-    log(f"Done. Scored {len(scored)} agent(s). Epoch={new_epoch}.")
+    save_ledger(data, org_id)
+    log(f"Done. Scored {len(scored)} agent(s). Epoch={new_epoch}.", org_id=org_id)
 
     # Auto-apply/lift sanctions based on new scores
     try:
         import sanctions as sanctions_mod
-        data2 = load_ledger()
-        sanctions_mod.check_auto_sanctions(data2, dry_run=False)
-        save_ledger(data2)
-        log("Auto-sanction check complete.")
+        data2 = load_ledger(org_id)
+        sanctions_mod.check_auto_sanctions(data2, dry_run=False, org_id=org_id)
+        save_ledger(data2, org_id)
+        log("Auto-sanction check complete.", org_id=org_id)
     except Exception as e:
-        log(f"WARN: auto-sanction check failed: {e}")
+        log(f"WARN: auto-sanction check failed: {e}", org_id=org_id)
 
     # Sync scores to agent registry (kernel integration)
     try:
-        kernel_dir = os.path.join(WORKSPACE, 'kernel')
-        sys.path.insert(0, kernel_dir)
         from agent_registry import sync_from_economy
-        sync_from_economy()
-        log("Agent registry synced from economy ledger.")
+        sync_from_economy(org_id=org_id)
+        log("Agent registry synced from economy ledger.", org_id=org_id)
     except Exception as e:
-        log(f"WARN: agent registry sync failed: {e}")
+        log(f"WARN: agent registry sync failed: {e}", org_id=org_id)
 
     # Court auto-review
     try:
-        kernel_dir = os.path.join(WORKSPACE, 'kernel')
-        sys.path.insert(0, kernel_dir)
         from court import auto_review as court_auto_review
-        violations = court_auto_review()
+        violations = court_auto_review(org_id=org_id)
         if violations:
-            log(f"Court auto-review created {len(violations)} violation(s).")
+            log(f"Court auto-review created {len(violations)} violation(s).", org_id=org_id)
         else:
-            log("Court auto-review: no new violations.")
+            log("Court auto-review: no new violations.", org_id=org_id)
     except Exception as e:
-        log(f"WARN: court auto-review failed: {e}")
+        log(f"WARN: court auto-review failed: {e}", org_id=org_id)
 
 def main():
     p = argparse.ArgumentParser(description='Auto-scorer for epoch results')
     p.add_argument('--dry-run', action='store_true')
+    p.add_argument('--org_id', default=None,
+                   help='Institution context. Defaults to the legacy founding institution.')
     args = p.parse_args()
-    run(dry_run=args.dry_run)
+    run(dry_run=args.dry_run, org_id=args.org_id)
 
 if __name__ == '__main__':
     main()

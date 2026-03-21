@@ -141,7 +141,7 @@ def _manual_init():
                 'auto_sanctions_enabled': True,
                 'auth_decay_per_epoch': 5,
             },
-            'treasury_id': None,
+            'treasury_id': f'capsule://{org_id}/treasury',
             'lifecycle_state': 'active',
             'settings': {},
             'created_at': _now(),

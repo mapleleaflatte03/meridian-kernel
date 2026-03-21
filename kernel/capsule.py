@@ -33,6 +33,12 @@ CAPSULE_FILES = (
     'revenue.json',
     'authority_queue.json',
     'court_records.json',
+    'wallets.json',
+    'treasury_accounts.json',
+    'maintainers.json',
+    'contributors.json',
+    'payout_proposals.json',
+    'funding_sources.json',
     'metering.jsonl',
     'transactions.jsonl',
     'policies.json',
@@ -180,12 +186,116 @@ _EMPTY_AUTHORITY_QUEUE = {
 }
 
 _EMPTY_COURT_RECORDS = {'violations': {}, 'appeals': {}}
+_EMPTY_WALLETS = {
+    'wallets': {},
+    'verification_levels': {
+        '0': {'label': 'observed_only', 'description': 'Seen on-chain, no ownership proof', 'payout_eligible': False},
+        '1': {'label': 'linked', 'description': 'Owner claims ownership, no crypto proof', 'payout_eligible': False},
+        '2': {'label': 'exchange_linked', 'description': 'Exchange deposit screen, NOT self-custody', 'payout_eligible': False},
+        '3': {'label': 'self_custody_verified', 'description': 'SIWE signature or equivalent', 'payout_eligible': True},
+        '4': {'label': 'multisig_controlled', 'description': 'Safe or similar multisig', 'payout_eligible': True},
+    },
+}
+_EMPTY_TREASURY_ACCOUNTS = {
+    'accounts': {},
+    'transfer_policy': {
+        'requires_owner_approval': True,
+        'must_maintain_reserve': True,
+        'audit_required': True,
+    },
+}
+_EMPTY_MAINTAINERS = {
+    'maintainers': {},
+    'roles': {
+        'bdfl': 'Benevolent Dictator For Life -- final authority on project direction and treasury',
+        'core': 'Core maintainer with merge rights and payout eligibility',
+        'maintainer': 'Active maintainer with review and triage rights',
+    },
+}
+_EMPTY_CONTRIBUTORS = {
+    'contributors': {},
+    'contribution_types': [
+        'code',
+        'documentation',
+        'security_report',
+        'bug_report',
+        'design',
+        'vertical_example',
+        'test_coverage',
+        'review',
+        'community',
+    ],
+    'registration_requirements': {
+        'github_account': True,
+        'signed_commits': False,
+        'payout_wallet_level': 3,
+        'notes': 'Contributors register by submitting accepted PRs. Payout eligibility requires a Level 3+ verified wallet.',
+    },
+}
+_EMPTY_PAYOUT_PROPOSALS = {
+    'proposals': {},
+    'state_machine': {
+        'states': ['draft', 'submitted', 'under_review', 'approved', 'dispute_window', 'executed', 'rejected', 'cancelled'],
+        'transitions': {
+            'draft': ['submitted', 'cancelled'],
+            'submitted': ['under_review', 'rejected', 'cancelled'],
+            'under_review': ['approved', 'rejected'],
+            'approved': ['dispute_window'],
+            'dispute_window': ['executed', 'rejected'],
+            'executed': [],
+            'rejected': [],
+            'cancelled': [],
+        },
+        'dispute_window_hours': 72,
+        'notes': 'Proposals require evidence of contribution, a reviewer, and owner approval. 72-hour dispute window between approval and execution.',
+    },
+    'proposal_schema': {
+        'id': 'string -- unique proposal ID',
+        'contributor_id': 'string -- references contributors.json',
+        'amount_usd': 'number -- payout amount',
+        'currency': 'string -- USDC or other',
+        'contribution_type': 'string -- from contribution_types list',
+        'evidence': {
+            'pr_urls': ['list of PR URLs'],
+            'commit_hashes': ['list of commit hashes'],
+            'issue_refs': ['list of issue references'],
+            'description': 'string -- summary of contribution',
+        },
+        'recipient_wallet_id': 'string -- references wallets.json, must be Level 3+',
+        'proposed_by': 'string -- who created the proposal',
+        'reviewed_by': 'string -- who reviewed',
+        'approved_by': 'string -- who approved (must be owner or delegated authority)',
+        'status': 'string -- from state_machine.states',
+        'created_at': 'ISO 8601 timestamp',
+        'updated_at': 'ISO 8601 timestamp',
+        'dispute_window_ends_at': 'ISO 8601 timestamp or null',
+        'executed_at': 'ISO 8601 timestamp or null',
+        'tx_hash': 'string or null -- on-chain transaction hash',
+    },
+}
+_EMPTY_FUNDING_SOURCES = {
+    'sources': {},
+    'source_types': {
+        'owner_capital': 'Direct capital contribution from project owner',
+        'github_sponsors': 'Recurring or one-time sponsorship via GitHub Sponsors',
+        'direct_crypto': 'Direct stablecoin transfer from identified sponsor',
+        'customer_payment': 'Payment for a product or service',
+        'grant': 'Grant from a foundation or organization',
+        'reimbursement': 'Reimbursement of expenses previously paid out-of-pocket',
+    },
+}
 
 _CAPSULE_DEFAULTS = {
     'ledger.json': _EMPTY_LEDGER,
     'revenue.json': _EMPTY_REVENUE,
     'authority_queue.json': _EMPTY_AUTHORITY_QUEUE,
     'court_records.json': _EMPTY_COURT_RECORDS,
+    'wallets.json': _EMPTY_WALLETS,
+    'treasury_accounts.json': _EMPTY_TREASURY_ACCOUNTS,
+    'maintainers.json': _EMPTY_MAINTAINERS,
+    'contributors.json': _EMPTY_CONTRIBUTORS,
+    'payout_proposals.json': _EMPTY_PAYOUT_PROPOSALS,
+    'funding_sources.json': _EMPTY_FUNDING_SOURCES,
     'policies.json': {'policies': []},
     'phase_state.json': {},
 }

@@ -19,6 +19,11 @@ from organizations import load_orgs, save_orgs, create_org, _now, DEFAULT_POLICY
 from agent_registry import (load_registry, save_registry, _now as _reg_now,
                             INCIDENT_ELEVATED_THRESHOLD, INCIDENT_CRITICAL_THRESHOLD)
 from audit import log_event
+from capsule import capsule_path
+from authority import _load_queue, _save_queue
+from court import _load_records, _save_records
+from treasury import (load_wallets, load_treasury_accounts, load_maintainers,
+                      load_contributors, load_payout_proposals, load_funding_sources)
 
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
 LEDGER_FILE = os.path.join(WORKSPACE, 'economy', 'ledger.json')
@@ -85,8 +90,9 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
     if 'policy_defaults' not in org:
         org['policy_defaults'] = dict(DEFAULT_POLICY_DEFAULTS)
         backfilled_org = True
-    if 'treasury_id' not in org:
-        org['treasury_id'] = 'economy/ledger.json:treasury'
+    canonical_treasury_id = f'capsule://{founding_org_id}/treasury'
+    if org.get('treasury_id') != canonical_treasury_id:
+        org['treasury_id'] = canonical_treasury_id
         backfilled_org = True
     if 'lifecycle_state' not in org:
         org['lifecycle_state'] = 'active'
@@ -275,35 +281,30 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
     if backfilled_agents:
         print(f'  Backfilled fields on {backfilled_agents} agent(s)')
 
-    # -- 2c. Initialize authority_queue.json ----------------------------------
-    authority_queue_file = os.path.join(PLATFORM_DIR, 'authority_queue.json')
+    # -- 2c. Initialize capsule-owned governance files ------------------------
+    authority_queue_file = capsule_path(founding_org_id, 'authority_queue.json')
     if not os.path.exists(authority_queue_file):
-        now = _reg_now()
-        with open(authority_queue_file, 'w') as f:
-            json.dump({
-                'pending_approvals': {},
-                'delegations': {},
-                'kill_switch': {
-                    'engaged': False,
-                    'engaged_by': None,
-                    'engaged_at': None,
-                    'reason': '',
-                },
-                'updatedAt': now,
-            }, f, indent=2)
-        print('  Initialized authority_queue.json')
+        _save_queue(_load_queue(founding_org_id), founding_org_id)
+        print('  Initialized capsule authority queue')
 
-    # -- 2d. Initialize court_records.json ------------------------------------
-    court_records_file = os.path.join(PLATFORM_DIR, 'court_records.json')
+    court_records_file = capsule_path(founding_org_id, 'court_records.json')
     if not os.path.exists(court_records_file):
-        now = _reg_now()
-        with open(court_records_file, 'w') as f:
-            json.dump({
-                'violations': {},
-                'appeals': {},
-                'updatedAt': now,
-            }, f, indent=2)
-        print('  Initialized court_records.json')
+        _save_records(_load_records(founding_org_id), founding_org_id)
+        print('  Initialized capsule court records')
+
+    protocol_loaders = [
+        ('wallets.json', load_wallets),
+        ('treasury_accounts.json', load_treasury_accounts),
+        ('maintainers.json', load_maintainers),
+        ('contributors.json', load_contributors),
+        ('payout_proposals.json', load_payout_proposals),
+        ('funding_sources.json', load_funding_sources),
+    ]
+    for filename, loader in protocol_loaders:
+        protocol_path = capsule_path(founding_org_id, filename)
+        if not os.path.exists(protocol_path):
+            loader(founding_org_id)
+            print(f'  Initialized capsule {filename}')
 
     # -- 3. Log bootstrap event -----------------------------------------------
     log_event(

@@ -1,0 +1,92 @@
+{
+  "wallets": {
+    "company_treasury_v1": {
+      "id": "company_treasury_v1",
+      "label": "Company Treasury (Base)",
+      "address": "0x82009D0fa435d490A12e0cBfBE47bf3358e47761",
+      "chain": "base",
+      "asset": "USDC",
+      "verification_level": 1,
+      "verification_label": "linked",
+      "verification_details": "Owner claims ownership. No SIWE signature on file.",
+      "payout_eligible": false,
+      "status": "active",
+      "added_at": "2026-03-16T00:00:00Z",
+      "verified_at": null,
+      "notes": "Rotated 2026-03-15 after prior key leak. Receives owner capital deposits."
+    },
+    "founder_exchange_linked": {
+      "id": "founder_exchange_linked",
+      "label": "Founder OKX-Linked",
+      "address": "0x66e90b7f0e40421b653b3f859d50e06b9c60e078",
+      "chain": "base",
+      "asset": "USDC",
+      "verification_level": 2,
+      "verification_label": "exchange_linked",
+      "verification_details": "OKX deposit screen observed. NOT self-custody. Exchange controls the key.",
+      "payout_eligible": false,
+      "status": "active",
+      "added_at": "2026-03-16T00:00:00Z",
+      "verified_at": null,
+      "notes": "Exchange-linked wallets cannot receive payouts. Self-custody required."
+    },
+    "observed_sender_17fe": {
+      "id": "observed_sender_17fe",
+      "label": "Observed External Sender",
+      "address": "0x17fe9197970454875df742a74b74ed5f984b645a",
+      "chain": "base",
+      "asset": "USDC",
+      "verification_level": 0,
+      "verification_label": "observed_only",
+      "verification_details": "Seen on-chain as sender. No ownership claim. Not founder wallet.",
+      "payout_eligible": false,
+      "status": "observed",
+      "added_at": "2026-03-16T00:00:00Z",
+      "verified_at": null,
+      "notes": "Observed on-chain only. No relationship to project established."
+    },
+    "company_treasury_multisig_target": {
+      "id": "company_treasury_multisig_target",
+      "label": "Company Treasury Multisig (Planned)",
+      "address": null,
+      "chain": "base",
+      "asset": "USDC",
+      "verification_level": null,
+      "verification_label": null,
+      "verification_details": "Safe multisig planned but not deployed.",
+      "payout_eligible": false,
+      "status": "planned",
+      "added_at": "2026-03-20T00:00:00Z",
+      "verified_at": null,
+      "notes": "Target: Gnosis Safe on Base with 2-of-3 signer threshold. Not yet deployed."
+    }
+  },
+  "verification_levels": {
+    "0": {
+      "label": "observed_only",
+      "description": "Seen on-chain, no ownership proof",
+      "payout_eligible": false
+    },
+    "1": {
+      "label": "linked",
+      "description": "Owner claims ownership, no crypto proof",
+      "payout_eligible": false
+    },
+    "2": {
+      "label": "exchange_linked",
+      "description": "Exchange deposit screen, NOT self-custody",
+      "payout_eligible": false
+    },
+    "3": {
+      "label": "self_custody_verified",
+      "description": "SIWE signature or equivalent",
+      "payout_eligible": true
+    },
+    "4": {
+      "label": "multisig_controlled",
+      "description": "Safe or similar multisig",
+      "payout_eligible": true
+    }
+  },
+  "updatedAt": "2026-03-20T00:00:00Z"
+}

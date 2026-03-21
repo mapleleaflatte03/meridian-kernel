@@ -1,0 +1,11 @@
+{
+  "pending_approvals": {},
+  "delegations": {},
+  "kill_switch": {
+    "engaged": false,
+    "engaged_by": null,
+    "engaged_at": null,
+    "reason": ""
+  },
+  "updatedAt": "2026-03-21T07:45:36Z"
+}

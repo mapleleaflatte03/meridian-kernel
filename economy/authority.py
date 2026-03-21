@@ -10,9 +10,33 @@ Usage:
   python3 authority.py eligible --action <action>
   python3 authority.py show
 """
-import json, sys, os, argparse
+import argparse
+import json
+import os
+import sys
 
-LEDGER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ledger.json')
+ECONOMY_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(ECONOMY_DIR)
+KERNEL_DIR = os.path.join(ROOT_DIR, 'kernel')
+
+if KERNEL_DIR not in sys.path:
+    sys.path.insert(0, KERNEL_DIR)
+
+try:
+    from capsule import capsule_path
+except ImportError:
+    def capsule_path(org_id, filename):
+        return os.path.join(ECONOMY_DIR, filename)
+
+
+def _ledger_path(org_id=None):
+    return capsule_path(org_id, 'ledger.json')
+
+
+def _missing_org_error(org_id):
+    raise SystemExit(
+        f"ERROR: institution '{org_id}' is not initialized. Run quickstart.py --init-only or bootstrap the capsule first."
+    )
 
 # Minimum AUTH to be eligible for lead (even without sanctions)
 AUTH_LEAD_THRESHOLD = 30
@@ -27,8 +51,11 @@ BLOCK_MATRIX = {
     'remediate': [],  # always allowed — this IS the remediation action
 }
 
-def load_ledger():
-    with open(LEDGER) as f:
+def load_ledger(org_id=None):
+    path = _ledger_path(org_id)
+    if org_id and not os.path.exists(path):
+        _missing_org_error(org_id)
+    with open(path) as f:
         return json.load(f)
 
 def get_sprint_lead(data):
@@ -68,7 +95,7 @@ def get_eligible(data, action):
 # ── CLI commands ──────────────────────────────────────────────────────────────
 
 def cmd_sprint_lead(args):
-    data    = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     lead_id, auth = get_sprint_lead(data)
     if not lead_id:
         print("SPRINT_LEAD: NONE (no eligible agent)")
@@ -77,7 +104,7 @@ def cmd_sprint_lead(args):
     print(f"SPRINT_LEAD: {lead_id} | {agent['name']} | AUTH={auth}")
 
 def cmd_check(args):
-    data    = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     allowed, reason = check_rights(data, args.agent, args.action)
     if allowed:
         print(f"ALLOWED: {args.agent} may perform '{args.action}'")
@@ -87,12 +114,12 @@ def cmd_check(args):
         sys.exit(1)
 
 def cmd_eligible(args):
-    data   = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     agents = get_eligible(data, args.action)
     print(f"ELIGIBLE for '{args.action}': {', '.join(agents) if agents else 'none'}")
 
 def cmd_show(args):
-    data = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     lead_id, _ = get_sprint_lead(data)
     print(f"\n{'Agent':<12} {'Name':<14} {'AUTH':>5} {'Lead?':<6} {'Flags'}")
     print('-' * 56)
@@ -108,16 +135,24 @@ def main():
     p   = argparse.ArgumentParser(description='Authority enforcement engine')
     sub = p.add_subparsers(dest='command')
 
-    sub.add_parser('sprint-lead')
+    def add_org_arg(parser):
+        parser.add_argument('--org_id', default=None,
+                            help='Institution context. Defaults to the legacy founding institution.')
+
+    sl = sub.add_parser('sprint-lead')
+    add_org_arg(sl)
 
     chk = sub.add_parser('check')
+    add_org_arg(chk)
     chk.add_argument('--agent',  required=True)
     chk.add_argument('--action', required=True, choices=list(BLOCK_MATRIX.keys()))
 
     eli = sub.add_parser('eligible')
+    add_org_arg(eli)
     eli.add_argument('--action', required=True, choices=list(BLOCK_MATRIX.keys()))
 
-    sub.add_parser('show')
+    show = sub.add_parser('show')
+    add_org_arg(show)
 
     args = p.parse_args()
     if   args.command == 'sprint-lead': cmd_sprint_lead(args)

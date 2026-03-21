@@ -10,11 +10,38 @@ Usage:
   python3 sanctions.py auto-check [--dry-run]
   python3 sanctions.py show
 """
-import json, sys, os, argparse, datetime
+import argparse
+import datetime
+import json
+import os
+import sys
 
-ECONOMY_DIR  = os.path.dirname(os.path.abspath(__file__))
-LEDGER       = os.path.join(ECONOMY_DIR, 'ledger.json')
-TRANSACTIONS = os.path.join(ECONOMY_DIR, 'transactions.jsonl')
+ECONOMY_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(ECONOMY_DIR)
+KERNEL_DIR = os.path.join(ROOT_DIR, 'kernel')
+
+if KERNEL_DIR not in sys.path:
+    sys.path.insert(0, KERNEL_DIR)
+
+try:
+    from capsule import capsule_path
+except ImportError:
+    def capsule_path(org_id, filename):
+        return os.path.join(ECONOMY_DIR, filename)
+
+
+def _ledger_path(org_id=None):
+    return capsule_path(org_id, 'ledger.json')
+
+
+def _tx_path(org_id=None):
+    return capsule_path(org_id, 'transactions.jsonl')
+
+
+def _missing_org_error(org_id):
+    raise SystemExit(
+        f"ERROR: institution '{org_id}' is not initialized. Run quickstart.py --init-only or bootstrap the capsule first."
+    )
 
 # Actions blocked per sanction flag
 RESTRICTION_MAP = {
@@ -66,18 +93,27 @@ AUTO_LIFT_RULES = [
 def now_ts():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
-def load_ledger():
-    with open(LEDGER) as f:
+def load_ledger(org_id=None):
+    path = _ledger_path(org_id)
+    if org_id and not os.path.exists(path):
+        _missing_org_error(org_id)
+    with open(path) as f:
         return json.load(f)
 
-def save_ledger(data):
+def save_ledger(data, org_id=None):
     data['updatedAt'] = now_ts()
-    with open(LEDGER, 'w') as f:
+    path = _ledger_path(org_id)
+    if org_id and not os.path.isdir(os.path.dirname(path)):
+        _missing_org_error(org_id)
+    with open(path, 'w') as f:
         json.dump(data, f, indent=2)
 
-def append_tx(entry):
+def append_tx(entry, org_id=None):
     entry['ts'] = now_ts()
-    with open(TRANSACTIONS, 'a') as f:
+    path = _tx_path(org_id)
+    if org_id and not os.path.isdir(os.path.dirname(path)):
+        _missing_org_error(org_id)
+    with open(path, 'a') as f:
         f.write(json.dumps(entry) + '\n')
 
 def get_restrictions(data, agent_id):
@@ -90,7 +126,7 @@ def get_restrictions(data, agent_id):
             r.update(actions)
     return sorted(r)
 
-def apply_sanction(data, agent_id, stype, note, level='manual'):
+def apply_sanction(data, agent_id, stype, note, level='manual', org_id=None):
     if agent_id not in data['agents']:
         print(f"ERROR: unknown agent '{agent_id}'")
         return False
@@ -119,11 +155,11 @@ def apply_sanction(data, agent_id, stype, note, level='manual'):
         'level':        level,
         'reason':       note,
         'restrictions': get_restrictions(data, agent_id),
-    })
+    }, org_id)
     print(f"SANCTION APPLIED: {agent_id} → {stype} | restrictions: {get_restrictions(data, agent_id)}")
     return True
 
-def lift_sanction(data, agent_id, stype, note):
+def lift_sanction(data, agent_id, stype, note, org_id=None):
     if agent_id not in data['agents']:
         print(f"ERROR: unknown agent '{agent_id}'")
         return False
@@ -143,13 +179,13 @@ def lift_sanction(data, agent_id, stype, note):
     if stype in ('remediation_only', 'all'):
         agent.pop('remediation_only', None)
 
-    append_tx({'type': 'sanction_lifted', 'agent': agent_id, 'sanction': stype, 'reason': note})
+    append_tx({'type': 'sanction_lifted', 'agent': agent_id, 'sanction': stype, 'reason': note}, org_id)
     print(f"SANCTION LIFTED: {agent_id} → {stype} cleared")
     return True
 
 # ── programmatic API ──────────────────────────────────────────────────────────
 
-def check_auto_sanctions(data, dry_run=False):
+def check_auto_sanctions(data, dry_run=False, org_id=None):
     """Evaluate auto-apply and auto-lift rules against data (in-place). Returns list of changes."""
     changes = []
     for aid, agent in data['agents'].items():
@@ -169,25 +205,27 @@ def check_auto_sanctions(data, dry_run=False):
         return changes
     for kind, aid, stype, note, level in changes:
         if kind == 'apply':
-            apply_sanction(data, aid, stype, note, level or 'auto')
+            apply_sanction(data, aid, stype, note, level or 'auto', org_id=org_id)
         else:
-            lift_sanction(data, aid, stype, note)
+            lift_sanction(data, aid, stype, note, org_id=org_id)
     return changes
 
 # ── CLI commands ──────────────────────────────────────────────────────────────
 
 def cmd_apply(args):
-    data = load_ledger()
-    if apply_sanction(data, args.agent, args.type, args.note):
-        save_ledger(data)
+    org_id = getattr(args, 'org_id', None)
+    data = load_ledger(org_id)
+    if apply_sanction(data, args.agent, args.type, args.note, org_id=org_id):
+        save_ledger(data, org_id)
 
 def cmd_lift(args):
-    data = load_ledger()
-    if lift_sanction(data, args.agent, args.type, args.note):
-        save_ledger(data)
+    org_id = getattr(args, 'org_id', None)
+    data = load_ledger(org_id)
+    if lift_sanction(data, args.agent, args.type, args.note, org_id=org_id):
+        save_ledger(data, org_id)
 
 def cmd_restrictions(args):
-    data = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     r = get_restrictions(data, args.agent)
     if r:
         print(f"{args.agent} restricted from: {', '.join(r)}")
@@ -195,22 +233,9 @@ def cmd_restrictions(args):
         print(f"{args.agent}: no active restrictions")
 
 def cmd_auto_check(args):
-    data    = load_ledger()
-    changes = []
-
-    for aid, agent in data['agents'].items():
-        for rule in AUTO_RULES:
-            try:
-                if rule['condition'](agent):
-                    changes.append(('apply', aid, rule['apply'], rule['note'], rule['level']))
-            except Exception:
-                pass
-        for rule in AUTO_LIFT_RULES:
-            try:
-                if rule['condition'](agent):
-                    changes.append(('lift', aid, rule['lift'], rule['note'], None))
-            except Exception:
-                pass
+    org_id = getattr(args, 'org_id', None)
+    data = load_ledger(org_id)
+    changes = check_auto_sanctions(data, dry_run=True, org_id=org_id)
 
     if args.dry_run:
         print(f"Auto-check: {len(changes)} change(s) would apply")
@@ -220,16 +245,16 @@ def cmd_auto_check(args):
 
     for kind, aid, stype, note, level in changes:
         if kind == 'apply':
-            apply_sanction(data, aid, stype, note, level or 'auto')
+            apply_sanction(data, aid, stype, note, level or 'auto', org_id=org_id)
         else:
-            lift_sanction(data, aid, stype, note)
+            lift_sanction(data, aid, stype, note, org_id=org_id)
 
     if not changes:
         print("Auto-check: no changes needed")
-    save_ledger(data)
+    save_ledger(data, org_id)
 
 def cmd_show(args):
-    data = load_ledger()
+    data = load_ledger(getattr(args, 'org_id', None))
     print(f"\n{'Agent':<12} {'REP':>5} {'AUTH':>5} {'Prob':<5} {'0Auth':<6} {'Restrictions'}")
     print('-' * 60)
     for aid, agent in data['agents'].items():
@@ -243,25 +268,34 @@ def main():
     p   = argparse.ArgumentParser(description='Sanction enforcement engine')
     sub = p.add_subparsers(dest='command')
 
+    def add_org_arg(parser):
+        parser.add_argument('--org_id', default=None,
+                            help='Institution context. Defaults to the legacy founding institution.')
+
     ap = sub.add_parser('apply')
+    add_org_arg(ap)
     ap.add_argument('--agent',  required=True)
     ap.add_argument('--type',   required=True,
                     choices=['probation','zero_authority','lead_ban','remediation_only'])
     ap.add_argument('--note',   default='manual sanction')
 
     lp = sub.add_parser('lift')
+    add_org_arg(lp)
     lp.add_argument('--agent', required=True)
     lp.add_argument('--type',  required=True,
                     choices=['probation','zero_authority','lead_ban','all'])
     lp.add_argument('--note',  default='sanction lifted')
 
     rp = sub.add_parser('restrictions')
+    add_org_arg(rp)
     rp.add_argument('--agent', required=True)
 
     ac = sub.add_parser('auto-check')
+    add_org_arg(ac)
     ac.add_argument('--dry-run', action='store_true')
 
-    sub.add_parser('show')
+    show = sub.add_parser('show')
+    add_org_arg(show)
 
     args = p.parse_args()
     if   args.command == 'apply':        cmd_apply(args)

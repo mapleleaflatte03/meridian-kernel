@@ -233,6 +233,21 @@ class FederationTests(unittest.TestCase):
             'execution_request',
             payload={'task': 'demo'},
             http_post=fake_post,
+            http_get=lambda _url: {
+                'host_identity': {'host_id': 'host_beta'},
+                'admission': {'admitted_org_ids': ['org_beta']},
+                'service_registry': {
+                    'federation_gateway': {
+                        'identity_model': 'signed_host_service',
+                        'supports_institution_routing': True,
+                    },
+                },
+                'federation': {
+                    'enabled': True,
+                    'boundary_name': 'federation_gateway',
+                    'identity_model': 'signed_host_service',
+                },
+            },
         )
         self.assertEqual(calls['url'], 'http://127.0.0.1:19013/api/federation/receive')
         self.assertIn('envelope', calls['data'])
@@ -321,6 +336,21 @@ class FederationTests(unittest.TestCase):
                 'execution_request',
                 payload={'task': 'demo'},
                 http_post=fake_post,
+                http_get=lambda _url: {
+                    'host_identity': {'host_id': 'host_beta'},
+                    'admission': {'admitted_org_ids': ['org_beta']},
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                },
             )
 
         self.assertEqual(ctx.exception.peer_host_id, 'host_beta')
@@ -394,6 +424,116 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(suspended_snapshot['trusted_peer_ids'], [])
             self.assertEqual(suspended_snapshot['all_peer_count'], 1)
             self.assertFalse(suspended_snapshot['send_enabled'])
+
+    def test_preflight_delivery_validates_peer_manifest(self):
+        from federation import FederationAuthority, FederationPeer
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        authority = FederationAuthority(
+            host,
+            signing_secret='alpha-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        transport='https',
+                        endpoint_url='http://127.0.0.1:19017',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                        admitted_org_ids=['org_beta'],
+                    ),
+                },
+            },
+        )
+
+        manifest = authority.preflight_delivery(
+            'host_beta',
+            'org_beta',
+            http_get=lambda _url: {
+                'host_identity': {
+                    'host_id': 'host_beta',
+                    'role': 'institution_host',
+                },
+                'admission': {
+                    'admitted_org_ids': ['org_beta'],
+                },
+                'service_registry': {
+                    'federation_gateway': {
+                        'identity_model': 'signed_host_service',
+                        'supports_institution_routing': True,
+                    },
+                },
+                'federation': {
+                    'enabled': True,
+                    'boundary_name': 'federation_gateway',
+                    'identity_model': 'signed_host_service',
+                },
+            },
+        )
+        self.assertEqual(manifest['host_identity']['host_id'], 'host_beta')
+
+    def test_preflight_delivery_rejects_manifest_without_target_org(self):
+        from federation import FederationAuthority, FederationDeliveryError, FederationPeer
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        authority = FederationAuthority(
+            host,
+            signing_secret='alpha-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        transport='https',
+                        endpoint_url='http://127.0.0.1:19018',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                        admitted_org_ids=['org_beta'],
+                    ),
+                },
+            },
+        )
+
+        with self.assertRaises(FederationDeliveryError):
+            authority.preflight_delivery(
+                'host_beta',
+                'org_gamma',
+                http_get=lambda _url: {
+                    'host_identity': {
+                        'host_id': 'host_beta',
+                        'role': 'institution_host',
+                    },
+                    'admission': {
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                },
+            )
 
     def test_snapshot_reports_disabled_without_signing_secret(self):
         from federation import FederationAuthority

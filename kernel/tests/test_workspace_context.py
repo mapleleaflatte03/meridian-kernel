@@ -263,6 +263,39 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(snap['management_mode'], 'workspace_api_file_backed')
             self.assertTrue(snap['mutation_enabled'])
 
+    def test_federation_manifest_surfaces_host_admission_and_service_registry(self):
+        from runtime_host import default_host_identity
+
+        self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
+        self.workspace.WORKSPACE_ORG_ID = 'org_a'
+        self.workspace.load_orgs = lambda: {
+            'organizations': {
+                'org_a': {'id': 'org_a', 'slug': 'a', 'name': 'A', 'lifecycle_state': 'active'},
+            }
+        }
+        ctx = self.workspace._resolve_workspace_context()
+        host = default_host_identity(
+            host_id='host_alpha',
+            role='control_host',
+            federation_enabled=True,
+            peer_transport='https',
+            supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+        )
+        manifest = self.workspace._federation_manifest(
+            ctx,
+            host_identity=host,
+            admission_registry={
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'institutions': {'org_a': {'status': 'admitted'}},
+                'admitted_org_ids': ['org_a'],
+            },
+        )
+        self.assertEqual(manifest['host_identity']['host_id'], 'host_alpha')
+        self.assertEqual(manifest['admission']['bound_org_id'], ctx.org_id)
+        self.assertIn('federation_gateway', manifest['service_registry'])
+        self.assertEqual(manifest['federation']['boundary_name'], 'federation_gateway')
+
     def test_mutate_federation_peer_upserts_registry(self):
         from runtime_host import default_host_identity
         import tempfile

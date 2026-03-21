@@ -21,6 +21,7 @@ Endpoints:
   GET  /api/admission             -> Host admission state
   GET  /api/federation            -> Federation gateway state
   GET  /api/federation/peers      -> Federation peer registry state
+  GET  /api/federation/manifest   -> Public host federation manifest
   GET  /api/runtimes              -> Runtime registry and contract status
   GET  /api/runtimes/<id>         -> Single runtime record
   GET  /api/court                 -> Court records
@@ -338,6 +339,42 @@ def _federation_snapshot(bound_org_id, host_identity=None, admission_registry=No
     )
     snapshot.update(_federation_management_state(host_identity))
     return snapshot
+
+
+def _federation_manifest(context, host_identity=None, admission_registry=None):
+    if host_identity is None or admission_registry is None:
+        host_identity, admission_registry = _runtime_host_state(context.org_id)
+    admission_management = _admission_management_state(host_identity)
+    runtime_core = runtime_core_snapshot(
+        context,
+        additional_institutions_allowed=bool(
+            admission_management['mutation_enabled']
+            or len(admission_registry.get('admitted_org_ids', [])) > 1
+        ),
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+        admission_management_mode=admission_management['management_mode'],
+        admission_mutation_enabled=admission_management['mutation_enabled'],
+        admission_mutation_disabled_reason=admission_management['mutation_disabled_reason'],
+    )
+    federation = _federation_snapshot(
+        context.org_id,
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+    )
+    return {
+        'manifest_version': 1,
+        'generated_at': _now(),
+        'host_identity': runtime_core['host_identity'],
+        'institution_context': runtime_core['institution_context'],
+        'admission': runtime_core['admission'],
+        'service_registry': runtime_core['service_registry'],
+        'federation': {
+            key: value
+            for key, value in federation.items()
+            if key not in ('peers', 'trusted_peers', 'trusted_peer_ids')
+        },
+    }
 
 
 def _admission_management_state(host_identity):
@@ -1215,7 +1252,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
     def _require_auth(self, path):
         # Session validate is a passive introspection endpoint — the token is the proof.
         protected = (path == '/' or path.startswith('/workspace') or path.startswith('/api/')) \
-            and path != '/api/session/validate'
+            and path not in ('/api/session/validate', '/api/federation/manifest')
         if not protected:
             return True
         if self._is_authorized():
@@ -1347,6 +1384,13 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             host_identity, admission_registry = _runtime_host_state(org_id)
             return self._json(_federation_snapshot(
                 org_id,
+                host_identity=host_identity,
+                admission_registry=admission_registry,
+            ))
+        elif path == '/api/federation/manifest':
+            host_identity, admission_registry = _runtime_host_state(org_id)
+            return self._json(_federation_manifest(
+                inst_ctx,
                 host_identity=host_identity,
                 admission_registry=admission_registry,
             ))

@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Tests for the InstitutionContext runtime primitive."""
+import json
+import os
+import sys
+import tempfile
+import unittest
+
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, ROOT)
+
+
+def _make_org(org_id='org_1', slug='test', name='Test Org', status='active',
+              lifecycle_state='active', owner_id='user_1'):
+    return {
+        'id': org_id, 'slug': slug, 'name': name,
+        'status': status, 'lifecycle_state': lifecycle_state,
+        'owner_id': owner_id, 'members': [{'user_id': owner_id, 'role': 'owner'}],
+    }
+
+
+class ServiceBoundaryTests(unittest.TestCase):
+
+    def test_valid_boundary_creation(self):
+        from institution_context import ServiceBoundary
+        b = ServiceBoundary('test', 'session', 'institution_bound', 'desc')
+        self.assertEqual(b.name, 'test')
+        self.assertEqual(b.identity_model, 'session')
+        self.assertEqual(b.scope, 'institution_bound')
+        self.assertEqual(b.description, 'desc')
+
+    def test_rejects_invalid_identity_model(self):
+        from institution_context import ServiceBoundary
+        with self.assertRaises(ValueError):
+            ServiceBoundary('test', 'magic_token', 'institution_bound')
+
+    def test_rejects_invalid_scope(self):
+        from institution_context import ServiceBoundary
+        with self.assertRaises(ValueError):
+            ServiceBoundary('test', 'session', 'galactic')
+
+    def test_to_dict(self):
+        from institution_context import ServiceBoundary
+        b = ServiceBoundary('ws', 'session', 'institution_bound', 'Workspace')
+        d = b.to_dict()
+        self.assertEqual(d['name'], 'ws')
+        self.assertEqual(d['identity_model'], 'session')
+        self.assertEqual(d['scope'], 'institution_bound')
+        self.assertEqual(d['description'], 'Workspace')
+
+    def test_to_dict_omits_empty_description(self):
+        from institution_context import ServiceBoundary
+        b = ServiceBoundary('ws', 'session', 'institution_bound')
+        d = b.to_dict()
+        self.assertNotIn('description', d)
+
+    def test_all_identity_models_accepted(self):
+        from institution_context import ServiceBoundary, IDENTITY_MODELS
+        for model in IDENTITY_MODELS:
+            b = ServiceBoundary('test', model, 'institution_bound')
+            self.assertEqual(b.identity_model, model)
+
+    def test_all_scopes_accepted(self):
+        from institution_context import ServiceBoundary, BOUNDARY_SCOPES
+        for scope in BOUNDARY_SCOPES:
+            b = ServiceBoundary('test', 'session', scope)
+            self.assertEqual(b.scope, scope)
+
+
+class InstitutionContextCreationTests(unittest.TestCase):
+
+    def test_bind_active_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'configured_org', WORKSPACE_BOUNDARY)
+        self.assertTrue(ctx.is_admitted)
+        self.assertEqual(ctx.org_id, 'org_1')
+        self.assertEqual(ctx.context_source, 'configured_org')
+        self.assertEqual(ctx.identity_model, 'session')
+        self.assertEqual(ctx.scope, 'institution_bound')
+
+    def test_bind_rejects_none_org_id(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        with self.assertRaises(RuntimeError):
+            InstitutionContext.bind(None, None, 'test', WORKSPACE_BOUNDARY)
+
+    def test_bind_rejects_none_org_record(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        with self.assertRaises(RuntimeError):
+            InstitutionContext.bind('org_1', None, 'test', WORKSPACE_BOUNDARY)
+
+    def test_bind_rejects_suspended_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org(status='suspended')
+        with self.assertRaises(RuntimeError) as cm:
+            InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        self.assertIn('suspended', str(cm.exception))
+
+    def test_bind_rejects_dissolved_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org(lifecycle_state='dissolved')
+        with self.assertRaises(RuntimeError) as cm:
+            InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        self.assertIn('dissolved', str(cm.exception))
+
+
+class InstitutionContextAdmissionTests(unittest.TestCase):
+
+    def test_admits_own_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        self.assertTrue(ctx.admits_org('org_1'))
+
+    def test_rejects_different_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        self.assertFalse(ctx.admits_org('org_other'))
+
+    def test_founding_service_admits_only_bound_org(self):
+        from institution_context import InstitutionContext, MCP_SERVICE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', MCP_SERVICE_BOUNDARY)
+        self.assertTrue(ctx.admits_org('org_1'))
+        self.assertFalse(ctx.admits_org('org_other'))
+
+    def test_unscoped_admits_nobody(self):
+        from institution_context import InstitutionContext, ServiceBoundary
+        boundary = ServiceBoundary('internal', 'daemon', 'unscoped')
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', boundary)
+        self.assertFalse(ctx.admits_org('org_1'))
+        self.assertFalse(ctx.admits_org('org_other'))
+
+
+class InstitutionContextCrossOrgTests(unittest.TestCase):
+
+    def test_reject_cross_org_raises_for_different_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        with self.assertRaises(ValueError) as cm:
+            ctx.reject_cross_org('org_other')
+        self.assertIn('org_other', str(cm.exception))
+        self.assertIn('org_1', str(cm.exception))
+
+    def test_reject_cross_org_passes_for_same_org(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        ctx.reject_cross_org('org_1')  # should not raise
+
+    def test_reject_cross_org_passes_for_none(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'test', WORKSPACE_BOUNDARY)
+        ctx.reject_cross_org(None)  # should not raise
+
+
+class InstitutionContextSerializationTests(unittest.TestCase):
+
+    def test_to_dict_contains_all_fields(self):
+        from institution_context import InstitutionContext, WORKSPACE_BOUNDARY
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'configured_org', WORKSPACE_BOUNDARY)
+        d = ctx.to_dict()
+        self.assertEqual(d['org_id'], 'org_1')
+        self.assertEqual(d['institution_name'], 'Test Org')
+        self.assertEqual(d['institution_slug'], 'test')
+        self.assertEqual(d['context_source'], 'configured_org')
+        self.assertEqual(d['identity_model'], 'session')
+        self.assertEqual(d['boundary_scope'], 'institution_bound')
+        self.assertEqual(d['boundary_name'], 'workspace')
+        self.assertTrue(d['is_admitted'])
+        self.assertEqual(d['lifecycle_state'], 'active')
+
+
+class InstitutionContextResolveTests(unittest.TestCase):
+    """Tests for InstitutionContext.resolve() which loads from the org registry."""
+
+    def setUp(self):
+        import institution_context as mod
+        self._orig_load_orgs = mod.load_orgs
+        self._orig_get_org = mod.get_org
+
+    def tearDown(self):
+        import institution_context as mod
+        mod.load_orgs = self._orig_load_orgs
+        mod.get_org = self._orig_get_org
+
+    def test_resolve_with_configured_org_id(self):
+        import institution_context as mod
+        org = _make_org()
+        mod.get_org = lambda oid: org if oid == 'org_1' else None
+        ctx = mod.InstitutionContext.resolve(mod.WORKSPACE_BOUNDARY, configured_org_id='org_1')
+        self.assertEqual(ctx.org_id, 'org_1')
+        self.assertEqual(ctx.context_source, 'configured_org')
+
+    def test_resolve_configured_org_not_found(self):
+        import institution_context as mod
+        mod.get_org = lambda oid: None
+        with self.assertRaises(RuntimeError) as cm:
+            mod.InstitutionContext.resolve(mod.WORKSPACE_BOUNDARY, configured_org_id='org_missing')
+        self.assertIn('not found', str(cm.exception))
+
+    def test_resolve_founding_default(self):
+        import institution_context as mod
+        org = _make_org()
+        mod.load_orgs = lambda: {'organizations': {'org_1': org}}
+        ctx = mod.InstitutionContext.resolve(mod.WORKSPACE_BOUNDARY)
+        self.assertEqual(ctx.org_id, 'org_1')
+        self.assertEqual(ctx.context_source, 'founding_default')
+
+    def test_resolve_no_orgs_raises(self):
+        import institution_context as mod
+        mod.load_orgs = lambda: {'organizations': {}}
+        with self.assertRaises(RuntimeError) as cm:
+            mod.InstitutionContext.resolve(mod.WORKSPACE_BOUNDARY)
+        self.assertIn('No institution registered', str(cm.exception))
+
+
+class PredefinedBoundaryTests(unittest.TestCase):
+    """Verify the predefined boundary declarations have correct values."""
+
+    def test_workspace_boundary(self):
+        from institution_context import WORKSPACE_BOUNDARY
+        self.assertEqual(WORKSPACE_BOUNDARY.identity_model, 'session')
+        self.assertEqual(WORKSPACE_BOUNDARY.scope, 'institution_bound')
+
+    def test_mcp_service_boundary(self):
+        from institution_context import MCP_SERVICE_BOUNDARY
+        self.assertEqual(MCP_SERVICE_BOUNDARY.identity_model, 'x402_payment')
+        self.assertEqual(MCP_SERVICE_BOUNDARY.scope, 'founding_service_only')
+
+    def test_payment_monitor_boundary(self):
+        from institution_context import PAYMENT_MONITOR_BOUNDARY
+        self.assertEqual(PAYMENT_MONITOR_BOUNDARY.identity_model, 'daemon')
+        self.assertEqual(PAYMENT_MONITOR_BOUNDARY.scope, 'founding_service_only')
+
+    def test_cli_boundary(self):
+        from institution_context import CLI_BOUNDARY
+        self.assertEqual(CLI_BOUNDARY.identity_model, 'credential')
+        self.assertEqual(CLI_BOUNDARY.scope, 'institution_bound')
+
+
+if __name__ == '__main__':
+    unittest.main()

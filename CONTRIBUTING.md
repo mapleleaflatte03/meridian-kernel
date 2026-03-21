@@ -7,11 +7,12 @@ Thank you for considering a contribution to the Meridian Constitutional Kernel. 
 ```bash
 git clone https://github.com/mapleleaflatte03/meridian-kernel.git
 cd meridian-kernel
-python -m pytest tests/ -v
-python -m meridian.quickstart
+python3 economy/tests/test_economy.py
+python3 quickstart.py --init-only
 ```
 
-The kernel requires **Python 3.11+** and uses only the standard library. There are no external dependencies to install.
+The kernel requires **Python 3.9+** and uses only the standard library. There are no external dependencies to install.
+The built-in local demo path is the supported contributor entrypoint today; external runtime adapters are still partial or planned.
 
 ## Development Setup
 
@@ -19,16 +20,17 @@ The kernel requires **Python 3.11+** and uses only the standard library. There a
 2. **Create a branch** from `main` for your work.
 3. **Run the test suite** before making changes to confirm a clean baseline:
    ```bash
-   python -m pytest tests/ -v
+   python3 economy/tests/test_economy.py
    ```
 4. **Run the quickstart demo** to see the five primitives in action:
    ```bash
-   python -m meridian.quickstart
+   python3 quickstart.py --init-only
+   python3 kernel/phase_machine.py status
    ```
 
 ## Code Style
 
-- **Python 3.11+**, standard library only. No external dependencies.
+- **Python 3.9+**, standard library only. No external dependencies.
 - Follow [PEP 8](https://peps.python.org/pep-0008/) for formatting.
 - Use type hints for all public function signatures.
 - Prefer explicit over clever. The kernel is a governance layer; readability is a safety property.
@@ -47,7 +49,11 @@ The kernel requires **Python 3.11+** and uses only the standard library. There a
 1. Open an issue first for non-trivial changes so the approach can be discussed before you invest time.
 2. Keep PRs focused. One logical change per PR.
 3. Add or update tests for any behavioral change.
-4. Ensure `python -m pytest tests/ -v` passes with no failures.
+4. Ensure the verified local checks pass with no failures:
+   ```bash
+   python3 economy/tests/test_economy.py
+   python3 quickstart.py --init-only
+   ```
 5. Fill out the pull request template completely.
 
 ### Commit Message Convention

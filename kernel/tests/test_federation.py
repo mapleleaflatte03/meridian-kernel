@@ -239,6 +239,9 @@ class FederationTests(unittest.TestCase):
         self.assertEqual(calls['data']['payload'], {'task': 'demo'})
         self.assertEqual(result['response'], {'accepted': True})
         self.assertEqual(result['peer']['host_id'], 'host_beta')
+        self.assertEqual(result['claims']['target_host_id'], 'host_beta')
+        self.assertEqual(result['claims']['target_institution_id'], 'org_beta')
+        self.assertEqual(result['claims']['message_type'], 'execution_request')
 
     def test_deliver_rejects_peer_without_endpoint_url(self):
         from federation import FederationAuthority, FederationDeliveryError, FederationPeer
@@ -267,7 +270,7 @@ class FederationTests(unittest.TestCase):
             },
         )
 
-        with self.assertRaises(FederationDeliveryError):
+        with self.assertRaises(FederationDeliveryError) as ctx:
             authority.deliver(
                 'host_beta',
                 'org_alpha',
@@ -275,6 +278,122 @@ class FederationTests(unittest.TestCase):
                 'execution_request',
                 payload={'task': 'demo'},
             )
+        self.assertEqual(ctx.exception.peer_host_id, '')
+        self.assertEqual(ctx.exception.response, None)
+
+    def test_deliver_failure_carries_claims(self):
+        from federation import FederationAuthority, FederationDeliveryError, FederationPeer
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        authority = FederationAuthority(
+            host,
+            signing_secret='alpha-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        transport='https',
+                        endpoint_url='http://127.0.0.1:19013',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                        admitted_org_ids=['org_beta'],
+                    ),
+                },
+            },
+        )
+
+        def fake_post(_url, _data):
+            raise RuntimeError('network down')
+
+        with self.assertRaises(FederationDeliveryError) as ctx:
+            authority.deliver(
+                'host_beta',
+                'org_alpha',
+                'org_beta',
+                'execution_request',
+                payload={'task': 'demo'},
+                http_post=fake_post,
+            )
+
+        self.assertEqual(ctx.exception.peer_host_id, 'host_beta')
+        self.assertTrue(ctx.exception.envelope)
+        self.assertEqual(ctx.exception.claims.target_host_id, 'host_beta')
+        self.assertEqual(ctx.exception.claims.target_institution_id, 'org_beta')
+        self.assertEqual(ctx.exception.claims.message_type, 'execution_request')
+
+    def test_upsert_peer_registry_entry_round_trips_file_backed_registry(self):
+        from federation import load_peer_registry, upsert_peer_registry_entry
+        from runtime_host import default_host_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            peers_path = os.path.join(tmp, 'federation_peers.json')
+            host = default_host_identity(host_id='host_alpha')
+            registry = upsert_peer_registry_entry(
+                peers_path,
+                'host_beta',
+                host_identity=host,
+                label='Beta Host',
+                endpoint_url='http://127.0.0.1:19014',
+                shared_secret='beta-secret',
+                admitted_org_ids=['org_beta', 'org_beta'],
+            )
+            self.assertEqual(registry['host_id'], 'host_alpha')
+            self.assertEqual(registry['trusted_peer_ids'], ['host_beta'])
+
+            reloaded = load_peer_registry(peers_path, host_identity=host)
+            peer = reloaded['peers']['host_beta']
+            self.assertEqual(peer.label, 'Beta Host')
+            self.assertEqual(peer.receive_url, 'http://127.0.0.1:19014/api/federation/receive')
+            self.assertEqual(peer.admitted_org_ids, ['org_beta'])
+
+    def test_set_peer_trust_state_updates_snapshot_and_send_enabled(self):
+        from federation import (
+            FederationAuthority,
+            set_peer_trust_state,
+            upsert_peer_registry_entry,
+        )
+        from runtime_host import default_host_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            peers_path = os.path.join(tmp, 'federation_peers.json')
+            host = default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+            )
+            registry = upsert_peer_registry_entry(
+                peers_path,
+                'host_beta',
+                host_identity=host,
+                endpoint_url='http://127.0.0.1:19015',
+                shared_secret='beta-secret',
+                admitted_org_ids=['org_beta'],
+            )
+            authority = FederationAuthority(host, signing_secret='alpha-secret', peer_registry=registry)
+            self.assertTrue(authority.snapshot(bound_org_id='org_alpha')['send_enabled'])
+
+            suspended = set_peer_trust_state(
+                peers_path,
+                'host_beta',
+                'suspended',
+                host_identity=host,
+            )
+            suspended_snapshot = FederationAuthority(
+                host,
+                signing_secret='alpha-secret',
+                peer_registry=suspended,
+            ).snapshot(bound_org_id='org_alpha')
+            self.assertEqual(suspended_snapshot['trusted_peer_ids'], [])
+            self.assertEqual(suspended_snapshot['all_peer_count'], 1)
+            self.assertFalse(suspended_snapshot['send_enabled'])
 
     def test_snapshot_reports_disabled_without_signing_secret(self):
         from federation import FederationAuthority

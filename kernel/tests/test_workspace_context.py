@@ -34,6 +34,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_load_workspace_credentials = self.workspace._load_workspace_credentials
         self.orig_load_host_identity = self.workspace.load_host_identity
         self.orig_load_admission_registry = self.workspace.load_admission_registry
+        self.orig_runtime_host_state = self.workspace._runtime_host_state
+        self.orig_federation_authority = self.workspace._federation_authority
+        self.orig_log_event = self.workspace.log_event
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -46,6 +49,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace._load_workspace_credentials = self.orig_load_workspace_credentials
         self.workspace.load_host_identity = self.orig_load_host_identity
         self.workspace.load_admission_registry = self.orig_load_admission_registry
+        self.workspace._runtime_host_state = self.orig_runtime_host_state
+        self.workspace._federation_authority = self.orig_federation_authority
+        self.workspace.log_event = self.orig_log_event
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -157,6 +163,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/authority/kill-switch']['allowed'])
         self.assertTrue(permissions['/api/institution/charter']['allowed'])
         self.assertFalse(permissions['/api/treasury/contribute']['allowed'])
+        self.assertTrue(permissions['/api/federation/send']['allowed'])
 
     def test_api_status_exposes_runtime_core(self):
         from runtime_host import default_host_identity
@@ -338,6 +345,120 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(claims.source_host_id, 'host_alpha')
             self.assertTrue(snapshot['enabled'])
             self.assertEqual(snapshot['replay_protection']['entries'], 1)
+
+    def test_deliver_federation_envelope_logs_sender_audit(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+
+        class FakeAuthority:
+            def deliver(self, *args, **kwargs):
+                return {
+                    'peer': {'host_id': 'host_beta', 'transport': 'https'},
+                    'envelope': 'signed-envelope',
+                    'claims': {
+                        'envelope_id': 'fed_demo',
+                        'source_host_id': 'host_alpha',
+                        'source_institution_id': 'org_a',
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_b',
+                        'nonce': 'nonce_demo',
+                        'boundary_name': 'federation_gateway',
+                        'message_type': 'execution_request',
+                    },
+                    'response': {'accepted': True},
+                }
+
+            def snapshot(self, *, bound_org_id='', admission_registry=None):
+                return {
+                    'enabled': True,
+                    'bound_org_id': bound_org_id,
+                    'admitted_org_ids': list((admission_registry or {}).get('admitted_org_ids', [])),
+                }
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        delivery, snapshot = self.workspace._deliver_federation_envelope(
+            'org_a',
+            'host_beta',
+            'org_b',
+            'execution_request',
+            payload={'task': 'demo'},
+            actor_type='user',
+            actor_id='user_owner',
+            session_id='ses_demo',
+        )
+
+        self.assertEqual(delivery['claims']['envelope_id'], 'fed_demo')
+        self.assertEqual(snapshot['bound_org_id'], 'org_a')
+        self.assertEqual(len(audit_events), 1)
+        event = audit_events[0]
+        self.assertEqual(event['args'][1], 'user_owner')
+        self.assertEqual(event['args'][2], 'federation_envelope_sent')
+        self.assertEqual(event['kwargs']['actor_type'], 'user')
+        self.assertEqual(event['kwargs']['session_id'], 'ses_demo')
+        self.assertEqual(event['kwargs']['details']['envelope_id'], 'fed_demo')
+        self.assertEqual(event['kwargs']['details']['target_host_id'], 'host_beta')
+
+    def test_deliver_federation_envelope_logs_delivery_failure(self):
+        from federation import FederationDeliveryError, FederationEnvelopeClaims
+        from runtime_host import default_host_identity
+
+        audit_events = []
+
+        class FakeAuthority:
+            def deliver(self, *args, **kwargs):
+                raise FederationDeliveryError(
+                    'Peer returned HTTP 503',
+                    peer_host_id='host_beta',
+                    envelope='signed-envelope',
+                    claims=FederationEnvelopeClaims(
+                        envelope_id='fed_demo',
+                        source_host_id='host_alpha',
+                        source_institution_id='org_a',
+                        target_host_id='host_beta',
+                        target_institution_id='org_b',
+                        boundary_name='federation_gateway',
+                        message_type='execution_request',
+                        nonce='nonce_demo',
+                    ),
+                )
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        with self.assertRaises(FederationDeliveryError):
+            self.workspace._deliver_federation_envelope(
+                'org_a',
+                'host_beta',
+                'org_b',
+                'execution_request',
+                payload={'task': 'demo'},
+                actor_type='user',
+                actor_id='user_owner',
+                session_id='ses_demo',
+            )
+
+        self.assertEqual(len(audit_events), 1)
+        event = audit_events[0]
+        self.assertEqual(event['args'][2], 'federation_envelope_delivery_failed')
+        self.assertEqual(event['kwargs']['details']['envelope_id'], 'fed_demo')
+        self.assertEqual(event['kwargs']['details']['error'], 'Peer returned HTTP 503')
 
 
 if __name__ == '__main__':

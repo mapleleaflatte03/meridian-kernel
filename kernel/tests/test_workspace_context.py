@@ -206,6 +206,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(status['runtime_core']['service_registry']['workspace']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['service_registry']['federation_gateway']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['admission']['additional_institutions_allowed'])
+        self.assertEqual(status['runtime_core']['admission']['management_mode'], 'workspace_api_file_backed')
+        self.assertTrue(status['runtime_core']['admission']['mutation_enabled'])
         self.assertEqual(status['runtime_core']['host_identity']['host_id'], 'host_alpha')
         self.assertEqual(status['runtime_core']['admission']['admitted_org_ids'], ['org_a', 'org_b'])
         self.assertIn('federation', status['runtime_core'])
@@ -250,6 +252,47 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(snap['peer_count'], 1)
             self.assertEqual(snap['trusted_peer_ids'], ['host_beta'])
             self.assertEqual(snap['admitted_org_ids'], ['org_a', 'org_b'])
+
+    def test_mutate_admission_adds_second_institution(self):
+        from runtime_host import default_host_identity
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.workspace.RUNTIME_ADMISSION_FILE = os.path.join(tmp, 'institution_admissions.json')
+            self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
+                host_id='host_alpha',
+                role='control_host',
+                federation_enabled=True,
+                peer_transport='https',
+                supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+            )
+            self.workspace.load_orgs = lambda: {
+                'organizations': {
+                    'org_a': {'id': 'org_a', 'name': 'A'},
+                    'org_b': {'id': 'org_b', 'name': 'B'},
+                }
+            }
+            snapshot = self.workspace._mutate_admission('org_a', 'admit', 'org_b')
+            self.assertEqual(snapshot['management_mode'], 'workspace_api_file_backed')
+            self.assertEqual(snapshot['admitted_org_ids'], ['org_a', 'org_b'])
+            self.assertEqual(snapshot['institutions']['org_b']['status'], 'admitted')
+
+    def test_mutate_admission_rejects_revoking_bound_org(self):
+        from runtime_host import default_host_identity
+        self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
+            host_id='host_alpha',
+            role='control_host',
+            federation_enabled=True,
+            peer_transport='https',
+            supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+        )
+        self.workspace.load_orgs = lambda: {
+            'organizations': {
+                'org_a': {'id': 'org_a', 'name': 'A'},
+            }
+        }
+        with self.assertRaises(PermissionError):
+            self.workspace._mutate_admission('org_a', 'revoke', 'org_a')
 
     def test_accept_federation_request_consumes_envelope(self):
         from federation import FederationAuthority

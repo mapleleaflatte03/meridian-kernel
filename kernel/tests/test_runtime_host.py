@@ -89,6 +89,63 @@ class RuntimeHostTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ensure_org_admitted('org_a', {'institutions': {'org_a': {'status': 'suspended'}}})
 
+    def test_set_admission_state_persists_registry(self):
+        from runtime_host import default_host_identity, set_admission_state
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'institution_admissions.json')
+            host = default_host_identity(host_id='host_alpha')
+            registry = set_admission_state(
+                path,
+                'org_b',
+                'admitted',
+                bound_org_id='org_a',
+                host_identity=host,
+                details={'updated_by': 'user_owner'},
+            )
+            self.assertEqual(registry['host_id'], 'host_alpha')
+            self.assertEqual(sorted(registry['admitted_org_ids']), ['org_a', 'org_b'])
+            self.assertEqual(registry['institutions']['org_b']['status'], 'admitted')
+            self.assertEqual(registry['institutions']['org_b']['updated_by'], 'user_owner')
+
+    def test_set_admission_state_rejects_invalid_status(self):
+        from runtime_host import default_host_identity, set_admission_state
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError):
+                set_admission_state(
+                    os.path.join(tmp, 'institution_admissions.json'),
+                    'org_b',
+                    'unknown',
+                    host_identity=default_host_identity(host_id='host_alpha'),
+                )
+
+    def test_set_admission_state_materializes_file_from_bound_org(self):
+        from runtime_host import default_host_identity, set_admission_state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'institution_admissions.json')
+            host = default_host_identity(host_id='host_alpha')
+            registry = set_admission_state(
+                path,
+                'org_b',
+                'admitted',
+                bound_org_id='org_a',
+                host_identity=host,
+            )
+            self.assertEqual(registry['source'], 'file')
+            self.assertEqual(registry['admitted_org_ids'], ['org_a', 'org_b'])
+            self.assertEqual(registry['institutions']['org_b']['status'], 'admitted')
+
+    def test_set_admission_state_updates_existing_entry(self):
+        from runtime_host import default_host_identity, set_admission_state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'institution_admissions.json')
+            host = default_host_identity(host_id='host_alpha')
+            set_admission_state(path, 'org_a', 'admitted', host_identity=host)
+            registry = set_admission_state(path, 'org_a', 'suspended', host_identity=host)
+            self.assertEqual(registry['institutions']['org_a']['status'], 'suspended')
+            self.assertEqual(registry['admitted_org_ids'], [])
+
 
 if __name__ == '__main__':
     unittest.main()

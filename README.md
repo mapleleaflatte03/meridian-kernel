@@ -105,7 +105,12 @@ institution. Add `MERIDIAN_WORKSPACE_USER_ID=<user_id>` or `user_id:` in the
 credentials file if you want mutation audit and role checks to bind to a real
 institution member instead of a generic Basic-auth username. `/api/context`
 also exposes the effective mutation permission snapshot for that bound actor.
-This remains a process-bound reference surface, not general multi-org routing.
+`/api/context` and `/api/status` now also expose `runtime_core`, which surfaces
+the bound institution context, the current boundary identity model, the known
+boundary registry, and the admission model for the current process. This
+remains a process-bound reference surface, not general multi-org routing. The
+current admission model is `single_process_per_institution`: bind a different
+institution with another process, not by hopping orgs inside one process.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

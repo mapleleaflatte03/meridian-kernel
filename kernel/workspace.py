@@ -101,6 +101,11 @@ from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
                    get_restrictions, remediate, _load_records, VIOLATION_TYPES)
 from session import SessionAuthority
+from institution_context import (
+    InstitutionContext,
+    WORKSPACE_BOUNDARY,
+    runtime_core_snapshot,
+)
 
 # Process-level session authority (tokens do not survive restarts unless
 # MERIDIAN_SESSION_SECRET is set in the environment).
@@ -188,21 +193,12 @@ def _load_workspace_credentials():
     return user, password, org_id, user_id
 
 
-def _get_founding_org():
-    """Return (org_id, org) for the first registered institution.
-
-    This is a single-institution reference implementation.  The workspace
-    serves one org — the first one in organizations.json.  Multi-org
-    routing requires an auth model that does not exist yet.
-    """
-    orgs = load_orgs()
-    for oid, org in orgs['organizations'].items():
-        return oid, org
-    return None, None
-
-
 def _resolve_workspace_context():
-    """Bind this workspace process to exactly one institution."""
+    """Bind this workspace process to exactly one institution.
+
+    Returns an InstitutionContext backed by the WORKSPACE_BOUNDARY declaration.
+    Resolution order: explicit --org-id > credential org scope > founding default.
+    """
     configured_org_id = WORKSPACE_ORG_ID
     cred_user, cred_password, credential_org_id, _credential_user_id = _load_workspace_credentials()
     credential_scope_active = bool(cred_user and cred_password and credential_org_id)
@@ -215,14 +211,13 @@ def _resolve_workspace_context():
         org = load_orgs().get('organizations', {}).get(configured_org_id)
         if not org:
             raise RuntimeError(f'Configured workspace org not found: {configured_org_id}')
-        return configured_org_id, org, 'configured_org'
+        return InstitutionContext.bind(configured_org_id, org, 'configured_org', WORKSPACE_BOUNDARY)
     if credential_scope_active:
         org = load_orgs().get('organizations', {}).get(credential_org_id)
         if not org:
             raise RuntimeError(f'Credential-scoped workspace org not found: {credential_org_id}')
-        return credential_org_id, org, 'credentials_org'
-    org_id, org = _get_founding_org()
-    return org_id, org, 'founding_default'
+        return InstitutionContext.bind(credential_org_id, org, 'credentials_org', WORKSPACE_BOUNDARY)
+    return InstitutionContext.resolve(WORKSPACE_BOUNDARY)
 
 
 def _requested_org_override(parsed_url, headers):
@@ -404,11 +399,18 @@ def _scoped_registry(org_id):
 
 # -- API data builders --------------------------------------------------------
 
-def api_status(org_id=None, context_source='founding_default'):
-    if org_id is None:
-        org_id, org, context_source = _resolve_workspace_context()
+def api_status(org_id=None, context_source='founding_default', institution_context=None):
+    if institution_context is not None:
+        inst_ctx = institution_context
+    elif org_id is None:
+        inst_ctx = _resolve_workspace_context()
     else:
         org = load_orgs().get('organizations', {}).get(org_id)
+        inst_ctx = InstitutionContext.bind(org_id, org, context_source, WORKSPACE_BOUNDARY)
+
+    org_id = inst_ctx.org_id
+    org = inst_ctx.org
+    context_source = inst_ctx.context_source
 
     reg = _scoped_registry(org_id)
     queue = _load_queue(org_id)
@@ -457,6 +459,10 @@ def api_status(org_id=None, context_source='founding_default'):
             'auth': auth_context,
             'permissions': _permission_snapshot(auth_context),
         },
+        'runtime_core': runtime_core_snapshot(
+            inst_ctx,
+            additional_institutions_allowed=True,
+        ),
         'institution': {
             'id': org_id,
             'name': org.get('name', ''),
@@ -900,7 +906,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         if not self._require_auth(path):
             return
         try:
-            org_id, org, context_source = _resolve_workspace_context()
+            inst_ctx = _resolve_workspace_context()
+            org_id = inst_ctx.org_id
+            org = inst_ctx.org
+            context_source = inst_ctx.context_source
             request_context = _enforce_request_context(parsed, self.headers, org_id)
             session_claims = self._session_claims_from_request(expected_org_id=org_id)
             if session_claims:
@@ -921,15 +930,17 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         if path == '/' or path == '/workspace':
             return self._html(DASHBOARD_HTML)
         elif path == '/api/status':
-            return self._json(api_status(org_id, context_source=context_source))
+            return self._json(api_status(institution_context=inst_ctx))
         elif path == '/api/context':
             return self._json({
                 **request_context,
                 'auth': auth_context,
                 'permissions': _permission_snapshot(auth_context),
-                'source': context_source,
-                'institution_name': org.get('name', '') if org else '',
-                'institution_slug': org.get('slug', '') if org else '',
+                'institution': inst_ctx.to_dict(),
+                'runtime_core': runtime_core_snapshot(
+                    inst_ctx,
+                    additional_institutions_allowed=True,
+                ),
             })
         elif path == '/api/institution':
             return self._json(org or {})
@@ -1018,7 +1029,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         if not self._require_auth(path):
             return
         try:
-            org_id, org, _context_source = _resolve_workspace_context()
+            inst_ctx = _resolve_workspace_context()
+            org_id = inst_ctx.org_id
             _enforce_request_context(parsed, self.headers, org_id)
             session_claims = self._session_claims_from_request(expected_org_id=org_id)
             if session_claims:
@@ -1211,7 +1223,8 @@ def main():
     if args.org_id:
         WORKSPACE_ORG_ID = args.org_id
 
-    org_id, org, context_source = _resolve_workspace_context()
+    inst_ctx = _resolve_workspace_context()
+    org_id, org, context_source = inst_ctx.org_id, inst_ctx.org, inst_ctx.context_source
 
     server = HTTPServer(('127.0.0.1', args.port), WorkspaceHandler)
     print(f'Governed Workspace running at http://127.0.0.1:{args.port}')

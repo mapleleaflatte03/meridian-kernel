@@ -231,6 +231,15 @@ Basic-auth credentials and bound institution agree explicitly. Add
 authorization and audit attribution to resolve through a real institution
 member role instead of a generic Basic-auth username. `/api/context` now
 returns the effective mutation permission snapshot for that bound actor.
+`/api/context` and `/api/status` also expose `runtime_core`, which answers
+three runtime-core questions directly in surfaced state:
+- what institution this process is acting for
+- what identity model governs the current boundary
+- how additional institutions are admitted without cross-org bleed
+
+In the OSS reference workspace, the current admission mode is
+`single_process_per_institution`: a second institution is admitted by binding a
+separate process, not by turning on request-level multi-org routing.
 Production deployments would build their own control plane
 or adapter bridge on top of the Python primitives.  The demo JSON API is a
 reference surface, not a full remote governance adapter API.

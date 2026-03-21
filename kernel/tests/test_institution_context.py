@@ -175,6 +175,51 @@ class InstitutionContextSerializationTests(unittest.TestCase):
         self.assertTrue(d['is_admitted'])
         self.assertEqual(d['lifecycle_state'], 'active')
 
+    def test_describe_boundary_marks_routable(self):
+        from institution_context import describe_boundary, WORKSPACE_BOUNDARY
+        d = describe_boundary(WORKSPACE_BOUNDARY)
+        self.assertTrue(d['supports_institution_routing'])
+        self.assertTrue(d['requires_admitted_institution'])
+
+    def test_service_boundary_registry_contains_known_boundaries(self):
+        from institution_context import service_boundary_registry
+        registry = service_boundary_registry()
+        self.assertIn('workspace', registry)
+        self.assertIn('mcp_service', registry)
+        self.assertIn('payment_monitor', registry)
+        self.assertIn('subscriptions', registry)
+        self.assertIn('accounting', registry)
+        self.assertIn('cli', registry)
+        self.assertTrue(registry['workspace']['supports_institution_routing'])
+        self.assertFalse(registry['mcp_service']['supports_institution_routing'])
+
+    def test_runtime_core_snapshot_for_process_bound_admission(self):
+        from institution_context import (
+            InstitutionContext,
+            WORKSPACE_BOUNDARY,
+            runtime_core_snapshot,
+        )
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'configured_org', WORKSPACE_BOUNDARY)
+        snap = runtime_core_snapshot(ctx, additional_institutions_allowed=True)
+        self.assertEqual(snap['institution_context']['org_id'], 'org_1')
+        self.assertEqual(snap['current_boundary']['name'], 'workspace')
+        self.assertEqual(snap['admission']['mode'], 'single_process_per_institution')
+        self.assertTrue(snap['admission']['additional_institutions_allowed'])
+
+    def test_runtime_core_snapshot_for_single_institution_deployment(self):
+        from institution_context import (
+            InstitutionContext,
+            MCP_SERVICE_BOUNDARY,
+            runtime_core_snapshot,
+        )
+        org = _make_org()
+        ctx = InstitutionContext.bind('org_1', org, 'founding_default', MCP_SERVICE_BOUNDARY)
+        snap = runtime_core_snapshot(ctx)
+        self.assertEqual(snap['admission']['mode'], 'single_institution_deployment')
+        self.assertFalse(snap['admission']['additional_institutions_allowed'])
+        self.assertIn('does not admit additional institutions', snap['admission']['second_institution_path'])
+
 
 class InstitutionContextResolveTests(unittest.TestCase):
     """Tests for InstitutionContext.resolve() which loads from the org registry."""
@@ -237,6 +282,16 @@ class PredefinedBoundaryTests(unittest.TestCase):
         from institution_context import PAYMENT_MONITOR_BOUNDARY
         self.assertEqual(PAYMENT_MONITOR_BOUNDARY.identity_model, 'daemon')
         self.assertEqual(PAYMENT_MONITOR_BOUNDARY.scope, 'founding_service_only')
+
+    def test_subscriptions_boundary(self):
+        from institution_context import SUBSCRIPTIONS_BOUNDARY
+        self.assertEqual(SUBSCRIPTIONS_BOUNDARY.identity_model, 'none')
+        self.assertEqual(SUBSCRIPTIONS_BOUNDARY.scope, 'founding_service_only')
+
+    def test_accounting_boundary(self):
+        from institution_context import ACCOUNTING_BOUNDARY
+        self.assertEqual(ACCOUNTING_BOUNDARY.identity_model, 'none')
+        self.assertEqual(ACCOUNTING_BOUNDARY.scope, 'founding_service_only')
 
     def test_cli_boundary(self):
         from institution_context import CLI_BOUNDARY

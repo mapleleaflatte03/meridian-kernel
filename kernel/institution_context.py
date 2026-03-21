@@ -1,31 +1,22 @@
 """
 Institution context — runtime primitive for institution-scoped identity.
 
-Every Meridian service boundary operates in the context of an institution.
-This module provides:
+Every Meridian service or internal boundary operates in the context of an
+institution and an identity model. This module provides:
 
   ServiceBoundary — declares what identity model a boundary uses and whether
-                    it is institution-routable or single-scope.
+                    it supports institution routing.
 
   InstitutionContext — resolves and validates which institution a process or
-                       request acts for.  Carries the boundary declaration so
-                       the full identity/scope/admission answer is available
-                       at any point in the request pipeline.
+                       request acts for. Carries the ServiceBoundary so the
+                       full identity/scope/admission answer is available at
+                       any point in the request pipeline.
 
-Usage:
-
-  from institution_context import ServiceBoundary, InstitutionContext
-
-  # Declare the boundary once at service definition time
-  BOUNDARY = ServiceBoundary(
-      name='workspace',
-      identity_model='session',
-      scope='institution_bound',
-  )
-
-  # Bind an institution at process start or per-request
-  ctx = InstitutionContext.bind(org_id, org_record, 'configured_org', BOUNDARY)
-  ctx.validate()  # raises if institution is not admitted or not active
+  Runtime-core helpers — expose a machine-readable boundary registry and
+                         runtime admission state so deployments can surface
+                         honest answers about which boundaries are routable
+                         today and how additional institutions would be
+                         admitted without cross-org bleed.
 """
 import os
 import sys
@@ -236,3 +227,84 @@ CLI_BOUNDARY = ServiceBoundary(
     'cli', 'credential', 'institution_bound',
     'CLI tools — credential-based, institution-bound per invocation',
 )
+
+SUBSCRIPTIONS_BOUNDARY = ServiceBoundary(
+    'subscriptions', 'none', 'founding_service_only',
+    'Subscription entitlement state — founding-service-only internal boundary',
+)
+
+ACCOUNTING_BOUNDARY = ServiceBoundary(
+    'accounting', 'none', 'founding_service_only',
+    'Accounting writer — founding-service-only internal ledger boundary',
+)
+
+SERVICE_BOUNDARIES = {
+    boundary.name: boundary for boundary in (
+        WORKSPACE_BOUNDARY,
+        MCP_SERVICE_BOUNDARY,
+        PAYMENT_MONITOR_BOUNDARY,
+        SUBSCRIPTIONS_BOUNDARY,
+        ACCOUNTING_BOUNDARY,
+        CLI_BOUNDARY,
+    )
+}
+
+
+def describe_boundary(boundary):
+    """Return a surfaced description of a runtime boundary."""
+    data = boundary.to_dict()
+    data['supports_institution_routing'] = boundary.scope == 'institution_bound'
+    data['requires_admitted_institution'] = boundary.scope != 'unscoped'
+    return data
+
+
+def service_boundary_registry():
+    """Return the known Meridian boundary registry as surfaced state."""
+    return {
+        name: describe_boundary(boundary)
+        for name, boundary in SERVICE_BOUNDARIES.items()
+    }
+
+
+def admission_state(context, additional_institutions_allowed=False,
+                    second_institution_path=''):
+    """Describe how this runtime admits institutions today."""
+    if not second_institution_path:
+        if additional_institutions_allowed:
+            second_institution_path = (
+                'Bind a separate process to another admitted institution via '
+                '--org-id or credential-scoped org binding. Shared request-level '
+                'org hopping remains disallowed.'
+            )
+        else:
+            second_institution_path = (
+                'This deployment does not admit additional institutions beyond '
+                'the currently bound institution.'
+            )
+    return {
+        'mode': (
+            'single_process_per_institution'
+            if additional_institutions_allowed else
+            'single_institution_deployment'
+        ),
+        'bound_org_id': context.org_id,
+        'admitted_org_ids': [context.org_id] if context.is_admitted else [],
+        'additional_institutions_allowed': bool(additional_institutions_allowed),
+        'shared_request_routing': False,
+        'second_institution_path': second_institution_path,
+    }
+
+
+def runtime_core_snapshot(context, additional_institutions_allowed=False,
+                          second_institution_path=''):
+    """Return surfaced runtime-core truth for the bound institution."""
+    return {
+        'institution_context': context.to_dict(),
+        'current_boundary': describe_boundary(context.boundary),
+        'service_registry': service_boundary_registry(),
+        'admission': admission_state(
+            context,
+            additional_institutions_allowed=additional_institutions_allowed,
+            second_institution_path=second_institution_path,
+        ),
+    }

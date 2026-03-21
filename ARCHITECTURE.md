@@ -220,8 +220,11 @@ This is the owner-facing control surface:
 - **Audit trail** — every action logged
 
 The workspace is a single-institution demo/reference surface, not a production UI.
-It serves the first registered institution — there is no multi-org routing or
-org-scoped auth.  Production deployments would build their own control plane
+It binds the process to exactly one institution, either by default founding/demo
+selection or explicitly via `--org-id`. `/api/context` reports that bound
+context, and request-level `org_id` or `X-Meridian-Org-Id` hints are only
+accepted on exact match. There is still no request-level multi-org routing or
+org-scoped auth. Production deployments would build their own control plane
 or adapter bridge on top of the Python primitives.  The demo JSON API is a
 reference surface, not a full remote governance adapter API.
 

@@ -91,6 +91,16 @@ This quickstart boots a **local demo institution** and the **reference workspace
 For a real deployment, treat the JSON API and the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md)
 as the integration boundary and build your own runtime adapter or control plane on top.
 
+You can also bind the reference workspace to one institution explicitly:
+
+```bash
+python3 kernel/workspace.py --org-id org_b7d95bae
+```
+
+`/api/context` reports the bound institution, and request-level `org_id` or
+`X-Meridian-Org-Id` hints are only accepted when they exactly match that bound
+context. This remains a process-bound reference surface, not general multi-org routing.
+
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).
 

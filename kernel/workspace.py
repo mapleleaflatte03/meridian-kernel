@@ -39,6 +39,7 @@ Endpoints:
 Run:
   python3 workspace.py                    # port 18901
   python3 workspace.py --port 18902
+  python3 workspace.py --org-id <org>    # bind this process to one institution
 
 When workspace credentials are configured, the dashboard and JSON API are
 owner-authenticated with HTTP Basic auth.
@@ -67,6 +68,7 @@ WORKSPACE_CREDENTIALS_FILE = os.environ.get(
     'MERIDIAN_WORKSPACE_CREDENTIALS_FILE',
     '/etc/caddy/.workspace_credentials',
 )
+WORKSPACE_ORG_ID = (os.environ.get('MERIDIAN_WORKSPACE_ORG_ID') or '').strip() or None
 WORKSPACE_AUTH_REQUIRED = os.environ.get('MERIDIAN_WORKSPACE_AUTH_REQUIRED', '').lower() in (
     '1', 'true', 'yes', 'on'
 )
@@ -148,6 +150,44 @@ def _get_founding_org():
     return None, None
 
 
+def _resolve_workspace_context():
+    """Bind this workspace process to exactly one institution."""
+    configured_org_id = WORKSPACE_ORG_ID
+    if configured_org_id:
+        org = load_orgs().get('organizations', {}).get(configured_org_id)
+        if not org:
+            raise RuntimeError(f'Configured workspace org not found: {configured_org_id}')
+        return configured_org_id, org, 'configured_org'
+    org_id, org = _get_founding_org()
+    return org_id, org, 'founding_default'
+
+
+def _requested_org_override(parsed_url, headers):
+    query_org_ids = [value for value in parse_qs(parsed_url.query).get('org_id', []) if value]
+    header_org_id = (headers.get('X-Meridian-Org-Id', '') or '').strip()
+    requested = set(query_org_ids + ([header_org_id] if header_org_id else []))
+    if not requested:
+        return None
+    if len(requested) > 1:
+        raise ValueError('Conflicting institution context hints in request')
+    return requested.pop()
+
+
+def _enforce_request_context(parsed_url, headers, bound_org_id):
+    requested_org_id = _requested_org_override(parsed_url, headers)
+    if requested_org_id and requested_org_id != bound_org_id:
+        raise ValueError(
+            f"Workspace is bound to institution '{bound_org_id}'. "
+            f"Request-level override '{requested_org_id}' is not allowed."
+        )
+    return {
+        'mode': 'process_bound',
+        'bound_org_id': bound_org_id,
+        'request_override': 'exact-match-only',
+        'requested_org_id': requested_org_id,
+    }
+
+
 def _scoped_registry(org_id):
     """Filter agent registry to a single institution's agents.
 
@@ -172,9 +212,9 @@ def _scoped_registry(org_id):
 
 # -- API data builders --------------------------------------------------------
 
-def api_status(org_id=None):
+def api_status(org_id=None, context_source='founding_default'):
     if org_id is None:
-        org_id, org = _get_founding_org()
+        org_id, org, context_source = _resolve_workspace_context()
     else:
         org = load_orgs().get('organizations', {}).get(org_id)
 
@@ -216,6 +256,12 @@ def api_status(org_id=None):
                           if d.get('expires_at', '') > _now()]
 
     result = {
+        'context': {
+            'mode': 'process_bound',
+            'bound_org_id': org_id,
+            'source': context_source,
+            'request_override': 'exact-match-only',
+        },
         'institution': {
             'id': org_id,
             'name': org.get('name', ''),
@@ -616,28 +662,39 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Meridian-Org-Id')
         self.end_headers()
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if not self._require_auth(path):
             return
+        try:
+            org_id, org, context_source = _resolve_workspace_context()
+            request_context = _enforce_request_context(parsed, self.headers, org_id)
+        except RuntimeError as e:
+            return self._json({'error': str(e)}, 503)
+        except ValueError as e:
+            return self._json({'error': str(e)}, 400)
 
         if path == '/' or path == '/workspace':
             return self._html(DASHBOARD_HTML)
         elif path == '/api/status':
-            org_id, _ = _get_founding_org()
-            return self._json(api_status(org_id))
+            return self._json(api_status(org_id, context_source=context_source))
+        elif path == '/api/context':
+            return self._json({
+                **request_context,
+                'source': context_source,
+                'institution_name': org.get('name', '') if org else '',
+                'institution_slug': org.get('slug', '') if org else '',
+            })
         elif path == '/api/institution':
-            _, org = _get_founding_org()
             return self._json(org or {})
         elif path == '/api/agents':
-            org_id, _ = _get_founding_org()
             reg = _scoped_registry(org_id)
             return self._json(list(reg['agents'].values()))
         elif path == '/api/authority':
-            org_id, _ = _get_founding_org()
             queue = _load_queue(org_id)
             lead_id, lead_auth = get_sprint_lead(org_id)
             return self._json({
@@ -647,25 +704,18 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'sprint_lead': {'agent_id': lead_id, 'auth': lead_auth},
             })
         elif path == '/api/treasury':
-            org_id, _ = _get_founding_org()
             return self._json(treasury_snapshot(org_id))
         elif path == '/api/treasury/wallets':
-            org_id, _ = _get_founding_org()
             return self._json(load_wallets(org_id))
         elif path == '/api/treasury/accounts':
-            org_id, _ = _get_founding_org()
             return self._json(load_treasury_accounts(org_id))
         elif path == '/api/treasury/maintainers':
-            org_id, _ = _get_founding_org()
             return self._json(load_maintainers(org_id))
         elif path == '/api/treasury/contributors':
-            org_id, _ = _get_founding_org()
             return self._json(load_contributors(org_id))
         elif path == '/api/treasury/proposals':
-            org_id, _ = _get_founding_org()
             return self._json(load_payout_proposals(org_id))
         elif path == '/api/treasury/funding-sources':
-            org_id, _ = _get_founding_org()
             return self._json(load_funding_sources(org_id))
         elif path == '/api/runtimes':
             data = load_runtimes()
@@ -691,14 +741,12 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             enriched['contract_check'] = check_contract(runtime_id)
             return self._json(enriched)
         elif path == '/api/court':
-            org_id, _ = _get_founding_org()
             records = _load_records(org_id)
             return self._json({
                 'violations': list(records['violations'].values()),
                 'appeals': list(records['appeals'].values()),
             })
         elif path == '/api/audit':
-            org_id, _ = _get_founding_org()
             events = tail_events(30, org_id=org_id)
             events.reverse()
             return self._json({'events': events})
@@ -707,10 +755,17 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if not self._require_auth(path):
             return
-        org_id, org = _get_founding_org()
+        try:
+            org_id, org, _context_source = _resolve_workspace_context()
+            _enforce_request_context(parsed, self.headers, org_id)
+        except RuntimeError as e:
+            return self._json({'error': str(e)}, 503)
+        except ValueError as e:
+            return self._json({'error': str(e)}, 400)
 
         try:
             body = self._read_body()
@@ -813,14 +868,22 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    global WORKSPACE_ORG_ID
     parser = argparse.ArgumentParser(description='Governed Workspace server')
     parser.add_argument('--port', type=int, default=18901)
+    parser.add_argument('--org-id', default=None,
+                        help='Bind this workspace process to one institution. No request-level org routing is exposed.')
     args = parser.parse_args()
+    if args.org_id:
+        WORKSPACE_ORG_ID = args.org_id
+
+    org_id, org, context_source = _resolve_workspace_context()
 
     server = HTTPServer(('127.0.0.1', args.port), WorkspaceHandler)
     print(f'Governed Workspace running at http://127.0.0.1:{args.port}')
     print(f'Dashboard: http://127.0.0.1:{args.port}/')
     print(f'API:       http://127.0.0.1:{args.port}/api/status')
+    print(f'Bound institution: {org.get("slug", "") if org else ""} ({org_id}) via {context_source}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:

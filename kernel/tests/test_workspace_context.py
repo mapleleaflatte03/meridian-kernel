@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+import importlib.util
+import os
+import unittest
+from urllib.parse import urlparse
+
+
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+WORKSPACE_PY = os.path.join(ROOT, 'workspace.py')
+
+
+def _load_workspace(name):
+    spec = importlib.util.spec_from_file_location(name, WORKSPACE_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Headers(dict):
+    def get(self, key, default=None):
+        return super().get(key, default)
+
+
+class WorkspaceContextTests(unittest.TestCase):
+    def setUp(self):
+        self.workspace = _load_workspace('kernel_workspace_context_test')
+        self.orig_workspace_org_id = self.workspace.WORKSPACE_ORG_ID
+        self.orig_get_founding_org = self.workspace._get_founding_org
+        self.orig_load_orgs = self.workspace.load_orgs
+
+    def tearDown(self):
+        self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
+        self.workspace._get_founding_org = self.orig_get_founding_org
+        self.workspace.load_orgs = self.orig_load_orgs
+
+    def test_configured_org_binds_process_context(self):
+        self.workspace.WORKSPACE_ORG_ID = 'org_b'
+        self.workspace.load_orgs = lambda: {
+            'organizations': {
+                'org_a': {'id': 'org_a', 'slug': 'a', 'name': 'A'},
+                'org_b': {'id': 'org_b', 'slug': 'b', 'name': 'B'},
+            }
+        }
+        org_id, org, source = self.workspace._resolve_workspace_context()
+        self.assertEqual(org_id, 'org_b')
+        self.assertEqual(org.get('slug'), 'b')
+        self.assertEqual(source, 'configured_org')
+
+    def test_request_override_must_match_bound_org(self):
+        with self.assertRaises(ValueError):
+            self.workspace._enforce_request_context(
+                urlparse('/api/status?org_id=org_other'),
+                _Headers(),
+                'org_a',
+            )
+
+        context = self.workspace._enforce_request_context(
+            urlparse('/api/status?org_id=org_a'),
+            _Headers({'X-Meridian-Org-Id': 'org_a'}),
+            'org_a',
+        )
+        self.assertEqual(context['requested_org_id'], 'org_a')
+        self.assertEqual(context['bound_org_id'], 'org_a')
+
+
+if __name__ == '__main__':
+    unittest.main()

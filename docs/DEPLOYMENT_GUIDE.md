@@ -170,7 +170,7 @@ Important state includes:
 - `kernel/agent_registry.json` — global agent index
 - `kernel/audit_log.jsonl` — global append-only audit trail (org-tagged)
 - `kernel/metering.jsonl` — global usage metering (org-tagged)
-- `economy/ledger.json` — per-institution economy state (founding org capsule)
+- `economy/ledger.json` — reference founding-institution economy state (materialized into the founding capsule)
 - `economy/transactions.jsonl` — per-institution transaction log
 - `economy/authority_queue.json` — per-institution approvals, delegations, kill switch
 - `economy/court_records.json` — per-institution violations, sanctions, appeals
@@ -183,6 +183,10 @@ For serious use:
 
 Planned database backends are on the roadmap, but the file-based model is the
 current contract.
+
+The runtime registry in `kernel/runtimes.json` is also file-based metadata.
+Only the built-in local kernel path is implemented today; other runtime entries
+remain declared integration targets until adapter code exists.
 
 ## 7. What Meridian Does Not Give You
 

@@ -5,6 +5,12 @@ Bootstrap Meridian Kernel platform state.
 Creates the founding organization and registers all existing agents
 into the agent registry. Safe to re-run -- skips if data already exists.
 
+Reference behavior:
+  This bootstrap path seeds the founding institution from the checked-in
+  economy/ledger.json sample state, then materializes capsule-backed
+  governance files around it.  It is the supported local reference path,
+  not a generic production multi-institution provisioning service.
+
 Usage:
   python3 bootstrap.py
 """
@@ -115,7 +121,7 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
         save_orgs(orgs)
         print('  Backfilled institution fields on founding org')
 
-    # -- 2. Register agents from economy/ledger.json --------------------------
+    # -- 2. Register agents from the reference founding ledger ----------------
     if not os.path.exists(LEDGER_FILE):
         print(f'No ledger at {LEDGER_FILE}, skipping agent registration')
         return

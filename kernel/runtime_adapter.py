@@ -8,8 +8,8 @@ Meridian is runtime-neutral. This module provides:
   - CLI for listing and inspecting runtimes
 
 Meridian does not execute agents. It governs them. Any runtime that satisfies
-the seven constitutional contract requirements can have its agents governed by
-Meridian's five primitives: Institution, Agent, Authority, Treasury, Court.
+the seven constitutional contract requirements can, in principle, have its
+agents governed by Meridian's five primitives once a real adapter exists.
 
 Constitutional contract requirements are defined in kernel/runtimes.json
 and documented in docs/RUNTIME_CONTRACT.md.
@@ -274,7 +274,7 @@ def main():
 
     elif args.command == 'check-all':
         results = check_all_contracts()
-        print(f'\n=== Contract Check: All Runtimes ===')
+        print(f'\n=== Contract Check: All Runtimes (registry metadata) ===')
         for rid, result in results.items():
             if 'error' in result:
                 print(f'  {rid}: ERROR -- {result["error"]}')

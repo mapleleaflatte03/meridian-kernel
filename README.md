@@ -151,11 +151,11 @@ python3 kernel/authority.py kill-switch off --by owner
 └───────────────────────────────────────────────────────┘
 ```
 
-The kernel doesn't run your agents. It governs them. Any runtime that satisfies the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) can have its agents governed by the same five primitives.
+The kernel doesn't run your agents. It governs them. Any runtime that satisfies the [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) can, in principle, be governed by the same five primitives once a real adapter exists.
 
 ## Runtime Adapters
 
-Meridian is runtime-neutral. One runtime is fully implemented; four more are registered as planned targets:
+Meridian is runtime-neutral in design. Today, one runtime path is actually implemented; the others are declared targets in the registry and still require adapter work:
 
 | Runtime | Protocol | Contract Status |
 |---------|----------|----------------|
@@ -166,7 +166,7 @@ Meridian is runtime-neutral. One runtime is fully implemented; four more are reg
 | `openfang_compatible` | custom | Planned (0/7) — no adapter yet |
 
 ```bash
-# Check contract compliance for all runtimes
+# Check declared contract compliance for all runtimes
 python3 kernel/runtime_adapter.py check-all
 
 # Register your own runtime
@@ -175,7 +175,7 @@ python3 kernel/runtime_adapter.py register \
   --type hosted --protocols "MCP,custom" --identity_mode api_key
 ```
 
-The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the seven integration hooks and includes a minimal integration example.
+The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the seven integration hooks and includes a minimal integration example. `check-all` reports registry metadata, not active adapter conformance.
 
 ## Composition Pattern
 

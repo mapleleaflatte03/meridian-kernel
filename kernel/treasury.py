@@ -282,6 +282,9 @@ def get_spend_summary(org_id, period_days=30):
 def contribute_owner_capital(amount_usd, note='', by='owner', org_id=None):
     """Record owner capital contribution via the accounting layer.
     Falls back to direct ledger write if accounting module is not available."""
+    # Accounting module is founding-service-only (single-institution).
+    # Route through it only for the founding org (org_id=None).
+    # Non-founding orgs use the direct capsule-path fallback below.
     if _owner_contribute_capital and org_id is None:
         return _owner_contribute_capital(amount_usd, note, actor=by)
     # Graceful fallback: write directly to ledger
@@ -518,7 +521,7 @@ def treasury_snapshot(org_id=None):
 # -- CLI ----------------------------------------------------------------------
 
 def main():
-    p = argparse.ArgumentParser(description='Treasury primitive -- financial read facade')
+    p = argparse.ArgumentParser(description='Treasury primitive -- governance facade')
     sub = p.add_subparsers(dest='command')
 
     bal = sub.add_parser('balance')

@@ -110,11 +110,11 @@ Real money tracking with enforcement.
 - **Runway** — balance minus reserve floor (negative = blocked)
 - **Budget enforcement** — `check_budget(agent, cost)` blocks when underfunded
 - **Spend tracking** — per-agent, per-org metering (runtime-reported)
-- **Revenue summary** — read facade over economy layer
+- **Revenue summary** — governance facade over the economy layer
 - **Contributor protocol** — wallet registry, payout proposals, funding sources
 
-No new state file — treasury reads from `economy/ledger.json` and
-`kernel/metering.jsonl`.
+No new database layer — treasury resolves through capsule-backed economy state
+and `kernel/metering.jsonl`.
 
 ### Court (`kernel/court.py`)
 
@@ -145,8 +145,8 @@ agent runtimes. It provides:
 
 - **Runtime registry** (`kernel/runtimes.json`) — machine-readable catalog of
   registered runtimes with protocol support, identity mode, and contract status
-- **Contract checker** — verifies each runtime against the seven constitutional
-  requirements
+- **Contract checker** — reports registry-declared compliance against the seven
+  constitutional requirements
 - **Registration** — new runtimes register themselves with contract compliance data
 - **CLI** — `runtime_adapter.py list`, `check-contract`, `check-all`
 
@@ -161,7 +161,9 @@ Currently registered runtimes:
 | `openfang_compatible` | hosted | Planned (0/7, no adapter yet) |
 
 See [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) for the full
-requirements and integration guide.
+requirements and integration guide. Today the built-in `local_kernel` path is
+the real reference adapter; other registered runtimes remain declared targets
+until adapter code exists.
 
 ## Economy Layer
 

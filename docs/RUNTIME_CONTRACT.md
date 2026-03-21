@@ -11,8 +11,9 @@ implement each one, and how to verify compliance.
 Meridian does not run agents. It governs them.
 
 Any runtime — local subprocess, hosted API, MCP server, A2A agent, LangGraph
-pipeline, or custom stack — can have its agents governed by Meridian's five
-primitives if it satisfies this contract.
+pipeline, or custom stack — can in principle have its agents governed by
+Meridian's five primitives if it satisfies this contract and a real adapter
+implements the required hooks.
 
 This is the same pattern as Unix permissions: they work regardless of which
 shell or application you use. The governance layer is separate from the
@@ -209,6 +210,10 @@ if not allowed:
 | 0/7 (unknown) | **Unknown** | Contract compliance not yet assessed. Runtime API review required. |
 
 Check compliance: `python3 kernel/runtime_adapter.py check-all`
+
+Important: `check-all` and `check-contract` are registry-backed assessments.
+They report what the runtime entry declares in `kernel/runtimes.json`; they do
+not actively probe or certify a live adapter implementation.
 
 ---
 

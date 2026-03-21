@@ -42,6 +42,13 @@ Run:
 
 When workspace credentials are configured, the dashboard and JSON API are
 owner-authenticated with HTTP Basic auth.
+
+Institution context:
+  The built-in workspace is a founding-institution reference surface.  All
+  HTTP endpoints bind to the founding org returned by _get_founding_org().
+  The underlying kernel helpers accept org_id, but exposing arbitrary org
+  selection over HTTP is intentionally deferred until an org-scoped auth
+  model exists.
 """
 import argparse
 import base64
@@ -142,6 +149,13 @@ def _get_founding_org():
 
 
 def _scoped_registry(org_id):
+    """Filter agent registry to a single institution's agents.
+
+    Currently always called with the founding org from _get_founding_org().
+    The org_id filter is real substrate behavior (not inert) — it correctly
+    excludes agents that belong to a different org_id.  Multi-org API
+    exposure is blocked until an org-scoped auth model exists.
+    """
     reg = load_registry()
     if org_id is None:
         return reg

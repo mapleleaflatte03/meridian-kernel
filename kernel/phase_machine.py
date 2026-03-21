@@ -9,7 +9,7 @@ is always computed, never stored.
 Phases:
   0  Founder-Backed Build    -- owner capital only, building
   1  Support-Backed Build    -- external support received
-  2  Manual Pilot            -- at least one real customer payment
+  2  Customer-Validated Pilot -- at least one real customer payment
   3  Customer-Backed Treasury -- revenue exceeds owner capital
   4  Treasury-Cleared Auto   -- self-sustaining (above reserve, positive flow)
   5  Surplus Contributor Pay -- surplus allows contributor payouts
@@ -48,13 +48,13 @@ PHASES = {
     },
     1: {
         'name': 'Support-Backed Build',
-        'description': 'External support/sponsorship received.',
+        'description': 'External support/sponsorship received as an optional build milestone.',
         'allowed_claims': ['We accept support to fund development'],
         'forbidden': ['Calling support "revenue"', 'Calling supporters "customers"'],
     },
     2: {
-        'name': 'Manual Pilot',
-        'description': 'At least one real customer payment received.',
+        'name': 'Customer-Validated Pilot',
+        'description': 'At least one real external customer payment received.',
         'allowed_claims': ['We have pilot customers'],
         'forbidden': ['Counting owner tests as customers'],
     },
@@ -142,12 +142,12 @@ def _check_phase_1(ledger, revenue):
 
 
 def _check_phase_2(ledger, revenue):
-    """Phase 2: at least 1 real customer order paid."""
+    """Phase 2: at least 1 real customer order paid. Support is not required first."""
     orders = revenue.get('orders', {})
     for oid, order in orders.items():
         if order.get('status') == 'paid':
             # Filter internal tests
-            client_id = order.get('client_id', '')
+            client_id = order.get('client_id') or order.get('client', '')
             if client_id in INTERNAL_TEST_IDS:
                 continue
             product = order.get('product', '')
@@ -171,13 +171,14 @@ def _check_phase_3(ledger, revenue):
     client_ids = set()
     for order in orders.values():
         if order.get('status') == 'paid':
-            cid = order.get('client_id', '')
+            cid = order.get('client_id') or order.get('client', '')
             if cid in INTERNAL_TEST_IDS:
                 continue
             if order.get('product') in ('owner-capital-contribution',):
                 continue
             paid_orders.append(order)
-            client_ids.add(cid)
+            if cid:
+                client_ids.add(cid)
 
     if len(paid_orders) < 3:
         return False, f'{len(paid_orders)} paid orders < 3 required'
@@ -245,19 +246,15 @@ def current_phase(org_id=None):
             'reason': reason,
         })
         if met:
-            highest = phase_num
-        else:
-            break  # Phases are sequential -- stop at first unmet
+            highest = max(highest, phase_num)
 
     phase_info = PHASES.get(highest, PHASES[0])
     next_phase = highest + 1 if highest < 6 else None
     next_unlock = None
-    if next_phase is not None and next_phase <= 6:
-        # Find the first unmet check
-        for c in checks:
-            if not c['met']:
-                next_unlock = c['reason']
-                break
+    if highest < 1 and not checks[1]['met'] and not checks[2]['met']:
+        next_unlock = 'Record first external support contribution or first real customer payment'
+    elif next_phase is not None and next_phase <= 6:
+        next_unlock = checks[next_phase]['reason']
 
     return highest, {
         'phase': highest,

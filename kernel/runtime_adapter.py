@@ -4,7 +4,7 @@ Runtime Adapter primitive for Meridian Kernel.
 
 Meridian is runtime-neutral. This module provides:
   - A machine-readable registry of governed runtimes (kernel/runtimes.json)
-  - A constitutional contract checker for each runtime
+  - A registry-based constitutional contract assessment for each runtime
   - CLI for listing and inspecting runtimes
 
 Meridian does not execute agents. It governs them. Any runtime that satisfies
@@ -61,7 +61,10 @@ def get_runtime(runtime_id):
 
 def check_contract(runtime_id):
     """
-    Check whether a runtime satisfies the Meridian constitutional contract.
+    Assess a runtime's declared Meridian constitutional contract compliance.
+
+    This is a registry-backed assessment, not an active conformance probe.
+    It reports what the runtime entry declares in kernel/runtimes.json.
 
     Returns a dict:
       {
@@ -101,22 +104,34 @@ def check_contract(runtime_id):
         status = 'non_compliant'
 
     if status == 'compliant':
-        verdict = f'Runtime {runtime_id!r} satisfies all {score} constitutional contract requirements.'
+        verdict = (
+            f"Registry metadata says runtime {runtime_id!r} satisfies all "
+            f"{score} constitutional contract requirements."
+        )
     elif status == 'partial':
-        verdict = (f'Runtime {runtime_id!r} satisfies {score}/{len(requirements)} requirements. '
-                   f'Gaps: {", ".join(gaps + unknown)}. Adapter work required before full governance.')
+        verdict = (
+            f"Registry metadata says runtime {runtime_id!r} satisfies "
+            f"{score}/{len(requirements)} requirements. "
+            f'Gaps: {", ".join(gaps + unknown)}. Active adapter verification is still required.'
+        )
     elif status == 'unknown':
-        verdict = (f'Runtime {runtime_id!r} compliance is unknown for all requirements. '
-                   'Runtime API review required before an adapter can be built.')
+        verdict = (
+            f"Runtime {runtime_id!r} has no declared compliance data. "
+            'Runtime API review is required before an adapter can be built.'
+        )
     else:
         unmet = gaps + unknown
-        verdict = (f'Runtime {runtime_id!r} satisfies only {score}/{len(requirements)} requirements. '
-                   f'Not governable without significant adapter work. '
-                   f'Unmet/unknown: {", ".join(unmet)}.')
+        verdict = (
+            f"Registry metadata says runtime {runtime_id!r} satisfies only "
+            f"{score}/{len(requirements)} requirements. "
+            f'Not governable without significant adapter work. '
+            f'Unmet/unknown: {", ".join(unmet)}.'
+        )
 
     return {
         'runtime_id': runtime_id,
         'label': runtime.get('label', runtime_id),
+        'assessment_basis': 'registry_metadata',
         'satisfied': satisfied,
         'gaps': gaps,
         'unknown': unknown,

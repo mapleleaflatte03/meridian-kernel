@@ -218,9 +218,9 @@ This is the owner-facing control surface:
 - **Audit trail** — every action logged
 
 The workspace is a demo/reference surface, not a production UI.
-Production deployments would build their own control plane on top of the
-JSON API. External runtimes can call the JSON API directly for governance
-checks instead of importing Python modules.
+Production deployments would build their own control plane or adapter bridge
+on top of the Python primitives. The demo JSON API is a reference surface,
+not a full remote governance adapter API.
 
 For the concrete handoff from local demo to real deployment, see
 [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

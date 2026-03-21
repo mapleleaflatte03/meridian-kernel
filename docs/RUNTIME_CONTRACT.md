@@ -291,8 +291,10 @@ adapter.post_action_record('research', 'web_search',
 
 This adapter pattern works for any runtime that can call Python functions.
 For runtimes that cannot import Python directly (e.g., separate processes,
-containerized runtimes, remote agents), the Meridian workspace JSON API
-provides equivalent endpoints.
+containerized runtimes, remote agents), you need a thin bridge or control
+plane that exposes equivalent governance checks. The current demo workspace
+JSON API is a reference surface; it does not yet expose dedicated remote
+endpoints for every governance hook shown above.
 
 ---
 

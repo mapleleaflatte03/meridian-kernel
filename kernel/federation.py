@@ -22,6 +22,8 @@ import hashlib
 import hmac
 import json
 import os
+import urllib.error
+import urllib.request
 import uuid
 
 
@@ -80,18 +82,23 @@ class FederationReplayError(FederationValidationError):
     """Envelope nonce was already consumed."""
 
 
+class FederationDeliveryError(FederationError):
+    """Outbound delivery to a trusted peer failed."""
+
+
 class FederationPeer:
     __slots__ = (
         'host_id',
         'label',
         'transport',
+        'endpoint_url',
         'trust_state',
         'shared_secret',
         'admitted_org_ids',
     )
 
-    def __init__(self, host_id, label='', transport='https', trust_state='trusted',
-                 shared_secret='', admitted_org_ids=None):
+    def __init__(self, host_id, label='', transport='https', endpoint_url='',
+                 trust_state='trusted', shared_secret='', admitted_org_ids=None):
         if trust_state not in TRUST_STATES:
             raise ValueError(
                 f'Unknown trust_state {trust_state!r}. Must be one of {TRUST_STATES}'
@@ -99,6 +106,7 @@ class FederationPeer:
         self.host_id = host_id
         self.label = label or host_id
         self.transport = transport or 'https'
+        self.endpoint_url = endpoint_url.rstrip('/')
         self.trust_state = trust_state
         self.shared_secret = shared_secret or ''
         self.admitted_org_ids = list(admitted_org_ids or [])
@@ -108,12 +116,19 @@ class FederationPeer:
             'host_id': self.host_id,
             'label': self.label,
             'transport': self.transport,
+            'endpoint_url': self.endpoint_url,
             'trust_state': self.trust_state,
             'admitted_org_ids': list(self.admitted_org_ids),
         }
         if not redact_secret:
             data['shared_secret'] = self.shared_secret
         return data
+
+    @property
+    def receive_url(self):
+        if not self.endpoint_url:
+            return ''
+        return self.endpoint_url + '/api/federation/receive'
 
 
 class ReplayStore:
@@ -229,6 +244,7 @@ def load_peer_registry(file_path, *, host_identity=None):
             host_id=host_id,
             label=(data.get('label') or data.get('name') or host_id).strip(),
             transport=(data.get('transport') or 'https').strip(),
+            endpoint_url=(data.get('endpoint_url') or data.get('base_url') or '').strip(),
             trust_state=(data.get('trust_state') or 'trusted').strip(),
             shared_secret=(data.get('shared_secret') or '').strip(),
             admitted_org_ids=data.get('admitted_org_ids', []),
@@ -440,6 +456,53 @@ class FederationAuthority:
         self.replay_store.record(claims.replay_key)
         return claims
 
+    def deliver(self, peer_host_id, source_institution_id, target_institution_id,
+                message_type, payload=None, *, actor_type='host_service',
+                actor_id='', session_id='', warrant_id='', commitment_id='',
+                ttl_seconds=None, http_post=None):
+        self.ensure_enabled()
+        peer = self.peer_registry.get('peers', {}).get(peer_host_id)
+        if not peer:
+            raise FederationDeliveryError(f"Peer host '{peer_host_id}' is not in peer registry")
+        if peer.trust_state != 'trusted':
+            raise FederationDeliveryError(
+                f"Peer host '{peer_host_id}' is not trusted (state={peer.trust_state})"
+            )
+        if not peer.receive_url:
+            raise FederationDeliveryError(
+                f"Peer host '{peer_host_id}' does not declare endpoint_url"
+            )
+        envelope = self.issue(
+            source_institution_id,
+            peer.host_id,
+            target_institution_id,
+            message_type,
+            payload=payload,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            session_id=session_id,
+            ttl_seconds=ttl_seconds,
+            warrant_id=warrant_id,
+            commitment_id=commitment_id,
+        )
+        sender = http_post or _default_http_post_json
+        try:
+            response = sender(peer.receive_url, {
+                'envelope': envelope,
+                'payload': payload,
+            })
+        except FederationError:
+            raise
+        except Exception as exc:
+            raise FederationDeliveryError(
+                f"Failed delivering federation envelope to '{peer.host_id}': {exc}"
+            ) from exc
+        return {
+            'peer': peer.to_dict(),
+            'envelope': envelope,
+            'response': response,
+        }
+
     def snapshot(self, *, bound_org_id='', admission_registry=None):
         enabled, reason = self._enabled_state()
         peers = self.peer_registry.get('peers', {})
@@ -456,6 +519,7 @@ class FederationAuthority:
             'identity_model': 'signed_host_service',
             'boundary_name': 'federation_gateway',
             'peer_transport': self.host_identity.peer_transport,
+            'send_enabled': enabled,
             'registry_source': self.peer_registry.get('source', 'none'),
             'peer_count': len(trusted_peers),
             'trusted_peer_ids': list(self.peer_registry.get('trusted_peer_ids', [])),
@@ -467,3 +531,24 @@ class FederationAuthority:
                 'configured': bool(self._signing_secret),
             },
         }
+
+
+def _default_http_post_json(url, data):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            body = response.read().decode('utf-8')
+            if not body:
+                return {}
+            return json.loads(body)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        message = body or str(exc)
+        raise FederationDeliveryError(
+            f'Peer returned HTTP {exc.code}: {message}'
+        ) from exc

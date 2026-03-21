@@ -225,6 +225,7 @@ class WorkspaceContextTests(unittest.TestCase):
                         'host_beta': {
                             'label': 'Beta Host',
                             'transport': 'https',
+                            'endpoint_url': 'http://127.0.0.1:19014',
                             'trust_state': 'trusted',
                             'shared_secret': 'beta-secret',
                             'admitted_org_ids': ['org_b'],
@@ -245,6 +246,7 @@ class WorkspaceContextTests(unittest.TestCase):
                 admission_registry={'admitted_org_ids': ['org_a', 'org_b']},
             )
             self.assertTrue(snap['enabled'])
+            self.assertTrue(snap['send_enabled'])
             self.assertEqual(snap['peer_count'], 1)
             self.assertEqual(snap['trusted_peer_ids'], ['host_beta'])
             self.assertEqual(snap['admitted_org_ids'], ['org_a', 'org_b'])

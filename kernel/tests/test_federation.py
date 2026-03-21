@@ -121,6 +121,7 @@ class FederationTests(unittest.TestCase):
                         'host_alpha': {
                             'label': 'Alpha Host',
                             'transport': 'https',
+                            'endpoint_url': 'http://127.0.0.1:19011',
                             'trust_state': 'trusted',
                             'shared_secret': 'alpha-secret',
                             'admitted_org_ids': ['org_alpha'],
@@ -160,6 +161,120 @@ class FederationTests(unittest.TestCase):
             )
             self.assertEqual(claims.source_host_id, 'host_alpha')
             self.assertEqual(claims.message_type, 'settlement_notice')
+
+    def test_load_peer_registry_includes_endpoint_url(self):
+        from federation import load_peer_registry
+        from runtime_host import default_host_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            peers_path = os.path.join(tmp, 'federation_peers.json')
+            with open(peers_path, 'w') as f:
+                json.dump({
+                    'host_id': 'host_alpha',
+                    'peers': {
+                        'host_beta': {
+                            'label': 'Beta Host',
+                            'transport': 'https',
+                            'base_url': 'http://127.0.0.1:19012',
+                            'trust_state': 'trusted',
+                            'shared_secret': 'beta-secret',
+                        }
+                    },
+                }, f)
+
+            registry = load_peer_registry(
+                peers_path,
+                host_identity=default_host_identity(host_id='host_alpha'),
+            )
+            peer = registry['peers']['host_beta']
+            self.assertEqual(peer.endpoint_url, 'http://127.0.0.1:19012')
+            self.assertEqual(peer.receive_url, 'http://127.0.0.1:19012/api/federation/receive')
+
+    def test_deliver_posts_to_trusted_peer_endpoint(self):
+        from federation import FederationAuthority, FederationPeer
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        authority = FederationAuthority(
+            host,
+            signing_secret='alpha-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        transport='https',
+                        endpoint_url='http://127.0.0.1:19013',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                        admitted_org_ids=['org_beta'],
+                    ),
+                },
+            },
+        )
+
+        calls = {}
+
+        def fake_post(url, data):
+            calls['url'] = url
+            calls['data'] = data
+            return {'accepted': True}
+
+        result = authority.deliver(
+            'host_beta',
+            'org_alpha',
+            'org_beta',
+            'execution_request',
+            payload={'task': 'demo'},
+            http_post=fake_post,
+        )
+        self.assertEqual(calls['url'], 'http://127.0.0.1:19013/api/federation/receive')
+        self.assertIn('envelope', calls['data'])
+        self.assertEqual(calls['data']['payload'], {'task': 'demo'})
+        self.assertEqual(result['response'], {'accepted': True})
+        self.assertEqual(result['peer']['host_id'], 'host_beta')
+
+    def test_deliver_rejects_peer_without_endpoint_url(self):
+        from federation import FederationAuthority, FederationDeliveryError, FederationPeer
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        authority = FederationAuthority(
+            host,
+            signing_secret='alpha-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        transport='https',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                    ),
+                },
+            },
+        )
+
+        with self.assertRaises(FederationDeliveryError):
+            authority.deliver(
+                'host_beta',
+                'org_alpha',
+                'org_beta',
+                'execution_request',
+                payload={'task': 'demo'},
+            )
 
     def test_snapshot_reports_disabled_without_signing_secret(self):
         from federation import FederationAuthority

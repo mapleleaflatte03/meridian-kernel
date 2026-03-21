@@ -1031,18 +1031,20 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json({'error': 'Invalid JSON'}, 400)
 
         by = auth_context.get('actor_id') or 'owner'  # server-enforced — never trust client-supplied actor identity
+        _sid = auth_context.get('session_id')  # session traceability for audit
 
         try:
             if path == '/api/authority/kill-switch':
                 if body.get('engage'):
                     engage_kill_switch(by, body.get('reason', ''), org_id=org_id)
                     log_event(org_id, by, 'kill_switch_engaged', outcome='success',
-                              details={'by': by, 'reason': body.get('reason')})
+                              details={'by': by, 'reason': body.get('reason')},
+                              session_id=_sid)
                     return self._json({'message': 'Kill switch ENGAGED'})
                 else:
                     disengage_kill_switch(by, org_id=org_id)
                     log_event(org_id, by, 'kill_switch_disengaged', outcome='success',
-                              details={'by': by})
+                              details={'by': by}, session_id=_sid)
                     return self._json({'message': 'Kill switch disengaged'})
 
             elif path == '/api/authority/approve':
@@ -1050,7 +1052,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 decide_approval(body['approval_id'], decision,
                                by, body.get('reason', ''), org_id=org_id)
                 log_event(org_id, by, 'approval_decided', resource=body['approval_id'],
-                          outcome='success', details={'decision': decision, 'reason': body.get('reason', '')})
+                          outcome='success', details={'decision': decision, 'reason': body.get('reason', '')},
+                          session_id=_sid)
                 return self._json({'message': f'Approval {body["approval_id"]}: {decision}'})
 
             elif path == '/api/authority/request':
@@ -1066,7 +1069,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             elif path == '/api/authority/revoke':
                 revoke_delegation(body['delegation_id'], org_id=org_id)
                 log_event(org_id, by, 'delegation_revoked', resource=body['delegation_id'],
-                          outcome='success')
+                          outcome='success', session_id=_sid)
                 return self._json({'message': f'Delegation revoked: {body["delegation_id"]}'})
 
             elif path == '/api/court/file':
@@ -1075,13 +1078,15 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                                      body.get('policy_ref', ''))
                 log_event(org_id, by, 'violation_filed', resource=vid,
                           outcome='success',
-                          details={'agent': body['agent'], 'type': body['type'], 'severity': body['severity']})
+                          details={'agent': body['agent'], 'type': body['type'], 'severity': body['severity']},
+                          session_id=_sid)
                 return self._json({'message': f'Violation filed: {vid}', 'violation_id': vid})
 
             elif path == '/api/court/resolve':
                 resolve_violation(body['violation_id'], body['note'], org_id=org_id)
                 log_event(org_id, by, 'violation_resolved', resource=body['violation_id'],
-                          outcome='success', details={'note': body['note']})
+                          outcome='success', details={'note': body['note']},
+                          session_id=_sid)
                 return self._json({'message': f'Violation resolved: {body["violation_id"]}'})
 
             elif path == '/api/court/appeal':
@@ -1091,13 +1096,15 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             elif path == '/api/court/decide-appeal':
                 decide_appeal(body['appeal_id'], body['decision'], by, org_id=org_id)
                 log_event(org_id, by, 'appeal_decided', resource=body['appeal_id'],
-                          outcome='success', details={'decision': body['decision']})
+                          outcome='success', details={'decision': body['decision']},
+                          session_id=_sid)
                 return self._json({'message': f'Appeal {body["appeal_id"]}: {body["decision"]}'})
 
             elif path == '/api/court/auto-review':
                 vids = auto_review(org_id=org_id)
                 log_event(org_id, by, 'court_auto_review', outcome='success',
-                          details={'violations': vids, 'count': len(vids)})
+                          details={'violations': vids, 'count': len(vids)},
+                          session_id=_sid)
                 return self._json({'message': f'Auto-review: {len(vids)} violation(s) created',
                                    'violations': vids})
 
@@ -1105,14 +1112,16 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 lifted = remediate(body['agent_id'], by,
                                    body.get('note', ''), org_id=org_id)
                 log_event(org_id, by, 'court_remediation', resource=body['agent_id'],
-                          outcome='success', details={'lifted': lifted, 'note': body.get('note', '')})
+                          outcome='success', details={'lifted': lifted, 'note': body.get('note', '')},
+                          session_id=_sid)
                 return self._json({'message': f'Remediation complete: lifted {lifted}',
                                    'lifted': lifted})
 
             elif path == '/api/treasury/contribute':
                 result = contribute_owner_capital(body['amount'], body.get('note', ''),
                                                   by, org_id=org_id)
-                log_event(org_id, by, 'treasury_owner_capital', outcome='success', details=result)
+                log_event(org_id, by, 'treasury_owner_capital', outcome='success',
+                          details=result, session_id=_sid)
                 return self._json({
                     'message': f'Owner capital recorded: +${result["amount_usd"]:.2f}',
                     'snapshot': treasury_snapshot(org_id),
@@ -1122,7 +1131,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 result = set_reserve_floor_policy(body['amount'], body.get('note', ''),
                                                   by, org_id=org_id)
                 log_event(org_id, by, 'treasury_reserve_floor_updated',
-                          outcome='success', details=result)
+                          outcome='success', details=result, session_id=_sid)
                 return self._json({
                     'message': 'Reserve floor updated',
                     'snapshot': treasury_snapshot(org_id),
@@ -1140,7 +1149,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 claims = _session_authority.validate(token)
                 log_event(org_id, by, 'session_issued', outcome='success',
                           details={'session_id': claims.session_id,
-                                   'user_id': user_id, 'role': role})
+                                   'user_id': user_id, 'role': role},
+                          session_id=_sid)
                 return self._json({
                     'token': token,
                     'session_id': claims.session_id,
@@ -1156,18 +1166,20 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     return self._json({'error': 'session_id is required'}, 400)
                 _session_authority.revoke(session_id)
                 log_event(org_id, by, 'session_revoked', outcome='success',
-                          details={'session_id': session_id})
+                          details={'session_id': session_id},
+                          session_id=_sid)
                 return self._json({'message': f'Session revoked: {session_id}'})
 
             elif path == '/api/institution/charter':
                 set_charter(org_id, body['text'])
-                log_event(org_id, by, 'charter_set', outcome='success')
+                log_event(org_id, by, 'charter_set', outcome='success',
+                          session_id=_sid)
                 return self._json({'message': 'Charter saved'})
 
             elif path == '/api/institution/lifecycle':
                 org_transition_lifecycle(org_id, body['state'])
                 log_event(org_id, by, 'lifecycle_transitioned', outcome='success',
-                          details={'state': body['state']})
+                          details={'state': body['state']}, session_id=_sid)
                 return self._json({'message': f'Lifecycle transitioned to {body["state"]}'})
 
             else:

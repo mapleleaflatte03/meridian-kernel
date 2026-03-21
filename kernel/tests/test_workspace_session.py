@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for session integration in the workspace."""
 import importlib.util
+import json
 import os
+import tempfile
 import unittest
 from urllib.parse import urlparse
 
@@ -171,6 +173,52 @@ class WorkspaceSessionTokenFlowTests(unittest.TestCase):
         ctx = self.ws._resolve_auth_context_from_session(claims, 'org_a')
         with self.assertRaises(PermissionError):
             self.ws._enforce_mutation_authorization(ctx, 'org_a', '/api/authority/kill-switch')
+
+
+class AuditSessionTraceabilityTests(unittest.TestCase):
+    """Verify audit.log_event records session_id when provided."""
+
+    def test_log_event_includes_session_id_when_provided(self):
+        ws = _load_workspace('kernel_workspace_audit_session_test')
+        # Use a temporary audit file to avoid polluting the real one
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl',
+                                         delete=False) as f:
+            audit_path = f.name
+        orig_audit_file = ws.AUDIT_FILE if hasattr(ws, 'AUDIT_FILE') else None
+        # Patch the audit module's file path via the workspace's import
+        import audit as audit_mod
+        orig_path = audit_mod.AUDIT_FILE
+        audit_mod.AUDIT_FILE = audit_path
+        try:
+            eid = ws.log_event('org_a', 'user_owner', 'test_action',
+                               outcome='success', session_id='ses_abc123')
+            with open(audit_path) as f:
+                events = [json.loads(line) for line in f if line.strip()]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]['session_id'], 'ses_abc123')
+            self.assertEqual(events[0]['id'], eid)
+        finally:
+            audit_mod.AUDIT_FILE = orig_path
+            os.unlink(audit_path)
+
+    def test_log_event_omits_session_id_when_not_provided(self):
+        ws = _load_workspace('kernel_workspace_audit_no_session_test')
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl',
+                                         delete=False) as f:
+            audit_path = f.name
+        import audit as audit_mod
+        orig_path = audit_mod.AUDIT_FILE
+        audit_mod.AUDIT_FILE = audit_path
+        try:
+            ws.log_event('org_a', 'user_owner', 'test_action',
+                         outcome='success')
+            with open(audit_path) as f:
+                events = [json.loads(line) for line in f if line.strip()]
+            self.assertEqual(len(events), 1)
+            self.assertNotIn('session_id', events[0])
+        finally:
+            audit_mod.AUDIT_FILE = orig_path
+            os.unlink(audit_path)
 
 
 if __name__ == '__main__':

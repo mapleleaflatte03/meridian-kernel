@@ -77,6 +77,7 @@ def _require_writable(path, org_id=None):
 
 ORDER_STATES = ['proposed', 'accepted', 'in_progress', 'delivered', 'invoiced', 'paid']
 ADVANCE_MAP  = {s: ORDER_STATES[i+1] for i, s in enumerate(ORDER_STATES[:-1])}
+NON_CUSTOMER_PRODUCTS = {'owner-capital-contribution'}
 
 def now_ts():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -152,6 +153,26 @@ def load_transactions(org_id=None):
     return entries
 
 
+def is_customer_order(order):
+    return order.get('product') not in NON_CUSTOMER_PRODUCTS and order.get('payment_kind') != 'owner_capital'
+
+
+def customer_client_ids(revenue_data):
+    return {
+        order['client']
+        for order in revenue_data.get('orders', {}).values()
+        if is_customer_order(order)
+    }
+
+
+def customer_orders(revenue_data):
+    return {
+        oid: order
+        for oid, order in revenue_data.get('orders', {}).items()
+        if is_customer_order(order)
+    }
+
+
 def reclassified_order_ids(transactions=None, org_id=None):
     transactions = transactions if transactions is not None else load_transactions(org_id)
     return {
@@ -162,6 +183,25 @@ def reclassified_order_ids(transactions=None, org_id=None):
         and tx.get('corrected_type') != 'customer_payment'
         and tx.get('order_id')
     }
+
+
+def recent_customer_payment_metrics(since_days=7, transactions=None, org_id=None):
+    transactions = transactions if transactions is not None else load_transactions(org_id)
+    cutoff = (
+        datetime.datetime.utcnow() - datetime.timedelta(days=since_days)
+    ).strftime('%Y-%m-%dT%H:%M:%SZ')
+    reclassified = reclassified_order_ids(transactions, org_id=org_id)
+    total = 0
+    payments = 0
+    revenue = 0.0
+    for tx in transactions:
+        if tx.get('ts', '') < cutoff:
+            continue
+        total += 1
+        if tx.get('type') == 'customer_payment' and tx.get('order_id') not in reclassified:
+            payments += 1
+            revenue += tx.get('amount', 0)
+    return {'total': total, 'payments': payments, 'revenue_usd': revenue}
 
 
 def _ensure_processed_payment_keys(ledger):

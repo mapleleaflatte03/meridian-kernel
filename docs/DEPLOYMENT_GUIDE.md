@@ -177,11 +177,11 @@ Important state includes:
 - `kernel/agent_registry.json` — global agent index
 - `kernel/audit_log.jsonl` — global append-only audit trail (org-tagged)
 - `kernel/metering.jsonl` — global usage metering (org-tagged)
-- `economy/ledger.json` — reference founding-institution economy state (materialized into the founding capsule)
-- `economy/transactions.jsonl` — per-institution transaction log
+- `economy/capsules/<org_id>/ledger.json` — per-institution economy state (REP, AUTH, CASH per agent)
+- `economy/capsules/<org_id>/transactions.jsonl` — per-institution transaction log
+- `economy/capsules/<org_id>/revenue.json` — per-institution revenue state
 - `economy/authority_queue.json` — per-institution approvals, delegations, kill switch
 - `economy/court_records.json` — per-institution violations, sanctions, appeals
-- `economy/revenue.json` — per-institution revenue state
 
 For serious use:
 - back these up

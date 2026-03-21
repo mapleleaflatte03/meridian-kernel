@@ -62,7 +62,7 @@ Transfers between treasury accounts require:
 
 ## 5. Reconciliation
 
-The authoritative treasury balance is `economy/ledger.json` field `treasury.cash_usd`.
+The authoritative treasury balance is the institution's capsule `ledger.json` field `treasury.cash_usd` (resolved via `capsule_path(org_id, 'ledger.json')`).
 
 Reconciliation rules:
 - `treasury_accounts.json` balances are policy/allocation records, not authoritative

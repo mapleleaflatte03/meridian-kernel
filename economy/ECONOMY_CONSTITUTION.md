@@ -86,8 +86,8 @@ After each epoch:
 1. The manager reads the ledger and run results
 2. Score each agent that participated
 3. Apply AUTH decay to agents that did NOT produce accepted output
-4. Write transactions to `economy/transactions.jsonl`
-5. Update `economy/ledger.json`
+4. Write transactions to the institution's capsule `transactions.jsonl`
+5. Update the institution's capsule `ledger.json`
 
 ---
 

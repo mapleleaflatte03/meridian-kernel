@@ -212,7 +212,9 @@ All state is JSON/JSONL on the local filesystem. No database required.
 |------|----------|-------|
 | `kernel/organizations.json` | Institutions with charters and policies | Global |
 | `kernel/agent_registry.json` | Agents with scores, budgets, risk states | Global |
-| `economy/ledger.json` | Economy state (REP, AUTH, CASH per agent) | Per-institution (capsule) |
+| `economy/capsules/<org_id>/ledger.json` | Economy state (REP, AUTH, CASH per agent) | Per-institution (capsule) |
+| `economy/capsules/<org_id>/revenue.json` | Revenue orders, clients, receivables | Per-institution (capsule) |
+| `economy/capsules/<org_id>/transactions.jsonl` | Transaction log | Per-institution (capsule) |
 | `economy/authority_queue.json` | Pending approvals, delegations, kill switch | Per-institution (capsule) |
 | `economy/court_records.json` | Violations, sanctions, appeals | Per-institution (capsule) |
 | `kernel/audit_log.jsonl` | Append-only audit trail | Global (org-tagged) |

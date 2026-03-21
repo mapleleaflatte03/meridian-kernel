@@ -2,9 +2,11 @@
 """
 Treasury primitive for Meridian Kernel.
 
-Read facade over economy/ledger.json treasury section + economy/revenue.py +
-kernel/metering.py. Does NOT duplicate ledger writes -- reads from
-authoritative sources.
+Governance facade over the institution's capsule ledger, revenue state, and
+metering data.  Reads resolve through capsule_path(org_id, ...) which
+defaults to economy/ for the founding institution.  Write operations
+(contribute, set-reserve-floor) delegate to the accounting layer when
+available and fall back to direct capsule-path writes otherwise.
 
 Usage:
   python3 treasury.py balance

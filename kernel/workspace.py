@@ -232,7 +232,7 @@ def api_status(org_id=None):
     }
 
     if _ci_vertical_available:
-        result['ci_vertical'] = _ci_vertical_status(reg, lead_id)
+        result['ci_vertical'] = _ci_vertical_status(reg, lead_id, org_id=org_id)
 
     if _phase_machine_available:
         try:
@@ -251,13 +251,13 @@ def api_status(org_id=None):
     return result
 
 
-def _ci_vertical_status(reg, lead_id):
+def _ci_vertical_status(reg, lead_id, org_id=None):
     """Build CI vertical constitutional gate status."""
-    phases, blocked_phases = _phase_gate_snapshot(reg)
+    phases, blocked_phases = _phase_gate_snapshot(reg, org_id=org_id)
     all_clear = all(p['clear'] for p in phases)
 
     return {
-        'preflight': 'CLEAR' if (all_clear and not is_kill_switch_engaged()) else 'BLOCKED',
+        'preflight': 'CLEAR' if (all_clear and not is_kill_switch_engaged(org_id=org_id)) else 'BLOCKED',
         'blocked_phases': blocked_phases,
         'phases': phases,
     }

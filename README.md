@@ -131,6 +131,10 @@ current process. This remains a process-bound reference surface, not general
 multi-org routing. The current admission model is `single_process_per_institution`:
 admit institutions at the host level, then bind a different institution with
 another process instead of hopping orgs inside one process.
+`/api/admission` now exposes that host-level admission state directly, and the
+reference workspace can mutate the file-backed admission registry via
+`POST /api/admission/admit`, `/api/admission/suspend`, and
+`/api/admission/revoke` when the bound actor has owner authority.
 The same `runtime_core` surface now also exposes the `federation_gateway`
 boundary state: whether the host has federation enabled, which peer hosts are
 trusted, and whether replay protection is file-backed or memory-only.

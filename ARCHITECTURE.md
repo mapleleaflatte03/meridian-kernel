@@ -269,6 +269,10 @@ three runtime-core questions directly in surfaced state:
 In the OSS reference workspace, the current admission mode is
 `single_process_per_institution`: a second institution is admitted by binding a
 separate process, not by turning on request-level multi-org routing.
+`/api/admission` now exposes that host admission state directly, and
+owner-authenticated `POST /api/admission/admit|suspend|revoke` calls are the
+explicit file-backed path for admitting, pausing, or revoking institutions on
+the current host.
 The federation gateway is now a real boundary in the service registry, but it
 remains a host-service primitive. It proves signed cross-host identity and
 replay protection, not broad multi-host execution parity.

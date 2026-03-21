@@ -50,9 +50,18 @@
         "audit": "jsonl",
         "court": "violation_file"
       },
-      "adapter_available": false,
-      "status": "registered",
-      "notes": "Registered as a known runtime type. No Meridian adapter implemented yet. Requires cost attribution hook and budget gate to satisfy treasury contract fully. Adapter planned."
+      "adapter_available": true,
+      "status": "reference_adapter",
+      "adapter_proof": {
+        "type": "reference_library",
+        "module": "adapters.openclaw_compatible",
+        "verification": [
+          "python3 kernel/tests/test_openclaw_adapter.py",
+          "python3 kernel/runtime_adapter.py check-proof --runtime_id openclaw_compatible"
+        ],
+        "notes": "Kernel-side reference adapter library implemented and tested. A real OpenClaw deployment still needs to route runtime events through this adapter."
+      },
+      "notes": "OpenClaw-compatible runtime now has a tested kernel-side reference adapter. Public proof exists at the adapter-library level; a live deployment still needs runtime-side wiring for end-to-end governance."
     },
     "openfang_compatible": {
       "id": "openfang_compatible",
@@ -150,5 +159,5 @@
     "partial": 4,
     "non_compliant": 0
   },
-  "updatedAt": "2026-03-20T00:00:00Z"
+  "updatedAt": "2026-03-21T18:19:41Z"
 }

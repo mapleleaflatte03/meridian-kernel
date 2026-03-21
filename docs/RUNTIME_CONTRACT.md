@@ -204,16 +204,20 @@ if not allowed:
 
 | Score | Status | Meaning |
 |-------|--------|---------|
-| 7/7 | **Compliant** | Runtime is fully governable. All five primitives apply. |
+| 7/7 native | **Compliant** | Runtime natively exposes all constitutional hooks. |
+| 7/7 with tested kernel adapter | **Reference adapter** | A kernel-side adapter library covers the full contract, but a live deployment still needs to route runtime events through it. |
 | 4-6/7 | **Partial** | Runtime can be partially governed. Adapter work needed for full coverage. |
 | 1-3/7 | **Non-compliant** | Not governable without significant adapter work. |
 | 0/7 (unknown) | **Unknown** | Contract compliance not yet assessed. Runtime API review required. |
 
 Check compliance: `python3 kernel/runtime_adapter.py check-all`
+Check adapter proof: `python3 kernel/runtime_adapter.py check-proof --runtime_id <id>`
 
 Important: `check-all` and `check-contract` are registry-backed assessments.
-They report what the runtime entry declares in `kernel/runtimes.json`; they do
-not actively probe or certify a live adapter implementation.
+They report what the runtime entry declares in `kernel/runtimes.json` plus any
+tested kernel-side reference adapter hooks. They do not actively probe or
+certify a live deployment unless that runtime is actually wired through the
+adapter.
 
 ---
 

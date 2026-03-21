@@ -45,9 +45,10 @@ What is real today:
 - the reference workspace and JSON API
 - the `runtime_core` surface that exposes institution context, boundary identity model, service registry, and admission mode
 - one real built-in reference runtime path: `local_kernel`
+- one tested kernel-side reference adapter library: `openclaw_compatible`
 
 What is not yet broadly proven:
-- external runtime adapters such as OpenClaw-, MCP-, or A2A-style integrations
+- live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
 - live multi-institution routing inside one deployed service boundary
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
@@ -192,12 +193,12 @@ The kernel doesn't run your agents. It governs them. Any runtime that satisfies 
 
 ## Runtime Adapters
 
-Meridian is runtime-neutral in design. Today, one runtime path is actually implemented; the others are declared targets in the registry and still require adapter work:
+Meridian is runtime-neutral in design. Today, one runtime path is built in and one external family has a tested kernel-side reference adapter; the others remain declared targets:
 
 | Runtime | Protocol | Contract Status |
 |---------|----------|----------------|
 | `local_kernel` | custom | Compliant (7/7) — built-in reference |
-| `openclaw_compatible` | custom | Registered (5/7 partial) — no adapter yet |
+| `openclaw_compatible` | custom | Reference adapter (7/7 via tested kernel-side library) |
 | `mcp_generic` | MCP | Planned (2/7) — no adapter yet |
 | `a2a_generic` | A2A | Planned (1/7) — no adapter yet |
 | `openfang_compatible` | custom | Planned (0/7) — no adapter yet |
@@ -206,13 +207,16 @@ Meridian is runtime-neutral in design. Today, one runtime path is actually imple
 # Check declared contract compliance for all runtimes
 python3 kernel/runtime_adapter.py check-all
 
+# Inspect kernel-side proof for a specific adapter
+python3 kernel/runtime_adapter.py check-proof --runtime_id openclaw_compatible
+
 # Register your own runtime
 python3 kernel/runtime_adapter.py register \
   --id my_runtime --label "My Runtime" \
   --type hosted --protocols "MCP,custom" --identity_mode api_key
 ```
 
-The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the seven integration hooks and includes a minimal integration example. `check-all` reports registry metadata, not active adapter conformance.
+The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the seven integration hooks and includes a minimal integration example. `check-all` reports registry metadata plus any tested kernel-side reference adapter hooks; it still does not certify a live deployment unless the runtime actually routes events through that adapter.
 
 ## Composition Pattern
 

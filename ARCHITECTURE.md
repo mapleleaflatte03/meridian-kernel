@@ -42,9 +42,11 @@ deliberately narrow:
 - `runtime_core` now surfaces institution context, boundary identity model,
   service registry, and admission mode as machine-readable state
 - one built-in runtime path (`local_kernel`) is the real reference adapter
+- one external runtime family (`openclaw_compatible`) now has a tested
+  kernel-side reference adapter library
 
 What is not yet broadly proven in public code:
-- external OpenClaw-compatible adapter enforcement
+- live end-to-end OpenClaw-compatible deployment wiring
 - general MCP middleware enforcement
 - general A2A adapter enforcement
 - live multi-institution routing inside one deployed service boundary
@@ -175,15 +177,17 @@ Currently registered runtimes:
 | Runtime | Type | Contract Status |
 |---------|------|----------------|
 | `local_kernel` | local | Compliant (7/7) |
-| `openclaw_compatible` | hosted | Registered (5/7 partial, no adapter yet) |
+| `openclaw_compatible` | hosted | Reference adapter (7/7 via tested kernel-side library) |
 | `mcp_generic` | mcp_app | Planned (2/7, no adapter yet) |
 | `a2a_generic` | a2a_agent | Planned (1/7, no adapter yet) |
 | `openfang_compatible` | hosted | Planned (0/7, no adapter yet) |
 
 See [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) for the full
 requirements and integration guide. Today the built-in `local_kernel` path is
-the real reference adapter; other registered runtimes remain declared targets
-until adapter code exists.
+the real reference runtime path, and `openclaw_compatible` now has a tested
+kernel-side reference adapter library. That is real public adapter proof, but
+it is still not the same thing as a live deployment proving runtime-side event
+routing end-to-end.
 
 ## Economy Layer
 

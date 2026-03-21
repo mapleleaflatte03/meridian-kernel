@@ -18,11 +18,13 @@ Usage:
   python3 runtime_adapter.py list
   python3 runtime_adapter.py show --runtime_id mcp_generic
   python3 runtime_adapter.py check-contract --runtime_id openclaw_compatible
+  python3 runtime_adapter.py check-proof --runtime_id openclaw_compatible
   python3 runtime_adapter.py register --id my_runtime --label "My Runtime" \
       --type hosted --protocols "MCP,A2A" --identity_mode api_key
 """
 import argparse
 import datetime
+import importlib
 import json
 import os
 import sys
@@ -57,6 +59,61 @@ def get_runtime(runtime_id):
     return load_runtimes().get('runtimes', {}).get(runtime_id)
 
 
+def _load_adapter_module(runtime):
+    proof = runtime.get('adapter_proof', {})
+    module_name = proof.get('module')
+    if not module_name:
+        return None
+    return importlib.import_module(module_name)
+
+
+def get_adapter_proof(runtime_id):
+    runtime = get_runtime(runtime_id)
+    if not runtime:
+        return {'runtime_id': runtime_id, 'status': 'missing_runtime'}
+
+    proof = runtime.get('adapter_proof', {})
+    module_name = proof.get('module')
+    if not module_name:
+        return {
+            'runtime_id': runtime_id,
+            'status': 'no_adapter',
+            'available': False,
+            'implemented_hooks': [],
+            'assessment_basis': 'registry_metadata',
+        }
+
+    try:
+        module = _load_adapter_module(runtime)
+    except Exception as e:
+        return {
+            'runtime_id': runtime_id,
+            'status': 'import_error',
+            'available': False,
+            'implemented_hooks': [],
+            'assessment_basis': 'registry_metadata',
+            'error': str(e),
+        }
+
+    if hasattr(module, 'adapter_proof'):
+        data = module.adapter_proof()
+    else:
+        data = {
+            'type': proof.get('type', 'reference_library'),
+            'runtime_id': runtime_id,
+            'implemented_hooks': list(getattr(module, 'SUPPORTED_HOOKS', [])),
+            'notes': proof.get('notes', ''),
+        }
+    return {
+        'runtime_id': runtime_id,
+        'status': 'available',
+        'available': True,
+        'assessment_basis': 'reference_adapter_library',
+        'module': module_name,
+        **data,
+    }
+
+
 # -- Contract checking --------------------------------------------------------
 
 def check_contract(runtime_id):
@@ -89,12 +146,31 @@ def check_contract(runtime_id):
     thresholds = data.get('compliance_thresholds', {'compliant': 7, 'partial': 4})
     compliance = runtime.get('contract_compliance', {})
 
-    satisfied = [r for r in requirements if compliance.get(r) is True]
-    gaps = [r for r in requirements if compliance.get(r) is False]
-    unknown = [r for r in requirements if compliance.get(r) is None]
+    native_satisfied = [r for r in requirements if compliance.get(r) is True]
+    adapter_support = set()
+    adapter_meta = get_adapter_proof(runtime_id)
+    if adapter_meta.get('available'):
+        adapter_support = set(adapter_meta.get('implemented_hooks', []))
+
+    effective = {}
+    for requirement in requirements:
+        native = compliance.get(requirement)
+        if native is True:
+            effective[requirement] = True
+        elif requirement in adapter_support:
+            effective[requirement] = True
+        else:
+            effective[requirement] = native
+
+    satisfied = [r for r in requirements if effective.get(r) is True]
+    gaps = [r for r in requirements if effective.get(r) is False]
+    unknown = [r for r in requirements if effective.get(r) is None]
+    adapter_supplied = [r for r in requirements if r in adapter_support and compliance.get(r) is not True]
 
     score = len(satisfied)
-    if score >= thresholds.get('compliant', 7):
+    if score >= thresholds.get('compliant', 7) and adapter_supplied:
+        status = 'reference_adapter'
+    elif score >= thresholds.get('compliant', 7):
         status = 'compliant'
     elif score >= thresholds.get('partial', 4):
         status = 'partial'
@@ -103,7 +179,13 @@ def check_contract(runtime_id):
     else:
         status = 'non_compliant'
 
-    if status == 'compliant':
+    if status == 'reference_adapter':
+        verdict = (
+            f"Runtime {runtime_id!r} now has a tested kernel-side reference adapter "
+            f"covering {score}/{len(requirements)} constitutional requirements. "
+            'A real deployment still has to route runtime events through that adapter.'
+        )
+    elif status == 'compliant':
         verdict = (
             f"Registry metadata says runtime {runtime_id!r} satisfies all "
             f"{score} constitutional contract requirements."
@@ -131,7 +213,13 @@ def check_contract(runtime_id):
     return {
         'runtime_id': runtime_id,
         'label': runtime.get('label', runtime_id),
-        'assessment_basis': 'registry_metadata',
+        'assessment_basis': (
+            'declared_runtime_plus_reference_adapter'
+            if adapter_supplied else
+            'registry_metadata'
+        ),
+        'native_satisfied': native_satisfied,
+        'adapter_supplied': adapter_supplied,
         'satisfied': satisfied,
         'gaps': gaps,
         'unknown': unknown,
@@ -139,6 +227,7 @@ def check_contract(runtime_id):
         'total': len(requirements),
         'status': status,
         'verdict': verdict,
+        'adapter_proof': adapter_meta,
     }
 
 
@@ -218,6 +307,9 @@ def main():
     cc = sub.add_parser('check-contract')
     cc.add_argument('--runtime_id', required=True)
 
+    cp = sub.add_parser('check-proof')
+    cp.add_argument('--runtime_id', required=True)
+
     sub.add_parser('check-all')
 
     reg = sub.add_parser('register')
@@ -263,6 +355,10 @@ def main():
         print(f'\n=== Contract Check: {args.runtime_id} ===')
         print(f'Status:    {status}')
         print(f'Score:     {result["score"]}/{result["total"]}')
+        if result['native_satisfied']:
+            print(f'Native:    {", ".join(result["native_satisfied"])}')
+        if result['adapter_supplied']:
+            print(f'Adapter:   {", ".join(result["adapter_supplied"])}')
         if result['satisfied']:
             print(f'Satisfied: {", ".join(result["satisfied"])}')
         if result['gaps']:
@@ -270,7 +366,12 @@ def main():
         if result['unknown']:
             print(f'Unknown:   {", ".join(result["unknown"])}')
         print(f'Verdict:   {result["verdict"]}')
-        sys.exit(0 if result['status'] == 'compliant' else 1)
+        sys.exit(0 if result['status'] in ('compliant', 'reference_adapter') else 1)
+
+    elif args.command == 'check-proof':
+        result = get_adapter_proof(args.runtime_id)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result.get('available') else 1)
 
     elif args.command == 'check-all':
         results = check_all_contracts()

@@ -32,6 +32,26 @@ This separation means:
 The [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) defines the
 seven integration hooks that make a runtime governable.
 
+## Current Proof Boundary
+
+Meridian is runtime-neutral in design, but the current public proof is still
+deliberately narrow:
+
+- the five kernel primitives are real
+- the reference workspace is real
+- `runtime_core` now surfaces institution context, boundary identity model,
+  service registry, and admission mode as machine-readable state
+- one built-in runtime path (`local_kernel`) is the real reference adapter
+
+What is not yet broadly proven in public code:
+- external OpenClaw-compatible adapter enforcement
+- general MCP middleware enforcement
+- general A2A adapter enforcement
+- live multi-institution routing inside one deployed service boundary
+
+That means the thesis is larger than the current adapter proof, by design.
+The code now says that honestly instead of implying otherwise.
+
 ## System Diagram
 
 ```

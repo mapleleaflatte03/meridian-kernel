@@ -36,6 +36,22 @@ In this world, the execution layer fragments — every team, vendor, and platfor
 
 If you run AI agents that spend money, make decisions, or produce work product, you need governance primitives. Not just prompts.
 
+## Public Proof Today
+
+The public proof is intentionally narrower than the full thesis.
+
+What is real today:
+- the five kernel primitives
+- the reference workspace and JSON API
+- the `runtime_core` surface that exposes institution context, boundary identity model, service registry, and admission mode
+- one real built-in reference runtime path: `local_kernel`
+
+What is not yet broadly proven:
+- external runtime adapters such as OpenClaw-, MCP-, or A2A-style integrations
+- live multi-institution routing inside one deployed service boundary
+
+The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
+
 ---
 
 ## What Is Open

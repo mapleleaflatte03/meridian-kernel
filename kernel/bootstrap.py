@@ -180,17 +180,23 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
 
     registered = 0
     for ledger_key, agent_def in agent_defs.items():
-        # Check if already registered (by name match)
+        # Check if already registered — match by economy_key+org_id (stable),
+        # fall back to name+org_id for agents created before economy_key existed.
         already_exists = False
         for existing in registry['agents'].values():
-            if existing['name'] == agent_def['name'] and existing['org_id'] == founding_org_id:
+            if existing.get('org_id') != founding_org_id:
+                continue
+            if existing.get('economy_key') == ledger_key or existing['name'] == agent_def['name']:
                 already_exists = True
+                # Ensure economy_key is set (backfill for pre-economy_key agents)
+                if existing.get('economy_key') != ledger_key:
+                    existing['economy_key'] = ledger_key
                 # Sync scores from ledger
                 ledger_agent = ledger['agents'].get(ledger_key, {})
                 existing['reputation_units'] = ledger_agent.get('reputation_units', existing['reputation_units'])
                 existing['authority_units'] = ledger_agent.get('authority_units', existing['authority_units'])
                 existing['last_active_at'] = ledger_agent.get('last_scored_at', existing['last_active_at'])
-                print(f'  Agent {agent_def["name"]} already registered, synced scores')
+                print(f'  Agent {existing["name"]} already registered (economy_key={ledger_key}), synced scores')
                 break
 
         if not already_exists:
@@ -202,6 +208,7 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
                 'org_id': founding_org_id,
                 'name': agent_def['name'],
                 'role': agent_def['role'],
+                'economy_key': ledger_key,
                 'purpose': agent_def['purpose'],
                 'model_policy': {
                     'allowed_models': [],
@@ -256,7 +263,8 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
 
     # Map economy_key for each agent
     economy_key_map = {
-        'Manager': 'main', 'Atlas': 'atlas', 'Sentinel': 'sentinel',
+        'Manager': 'main', 'Leviathann': 'main',
+        'Atlas': 'atlas', 'Sentinel': 'sentinel',
         'Forge': 'forge', 'Quill': 'quill', 'Aegis': 'aegis', 'Pulse': 'pulse',
     }
     for agent in registry['agents'].values():

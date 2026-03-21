@@ -684,7 +684,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'appeals': list(records['appeals'].values()),
             })
         elif path == '/api/audit':
-            events = tail_events(30)
+            org_id, _ = _get_founding_org()
+            events = tail_events(30, org_id=org_id)
             events.reverse()
             return self._json({'events': events})
         else:

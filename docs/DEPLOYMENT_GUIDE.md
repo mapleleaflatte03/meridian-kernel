@@ -166,14 +166,15 @@ replace your deployment's full security model.
 Meridian uses JSON / JSONL files by default.
 
 Important state includes:
-- `kernel/organizations.json`
-- `kernel/agent_registry.json`
-- `kernel/authority_queue.json`
-- `kernel/court_records.json`
-- `kernel/audit_log.jsonl`
-- `kernel/metering.jsonl`
-- `economy/ledger.json`
-- `economy/transactions.jsonl`
+- `kernel/organizations.json` — global institution index
+- `kernel/agent_registry.json` — global agent index
+- `kernel/audit_log.jsonl` — global append-only audit trail (org-tagged)
+- `kernel/metering.jsonl` — global usage metering (org-tagged)
+- `economy/ledger.json` — per-institution economy state (founding org capsule)
+- `economy/transactions.jsonl` — per-institution transaction log
+- `economy/authority_queue.json` — per-institution approvals, delegations, kill switch
+- `economy/court_records.json` — per-institution violations, sanctions, appeals
+- `economy/revenue.json` — per-institution revenue state
 
 For serious use:
 - back these up

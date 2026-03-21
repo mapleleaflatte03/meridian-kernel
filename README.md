@@ -99,7 +99,9 @@ python3 kernel/workspace.py --org-id org_b7d95bae
 
 `/api/context` reports the bound institution, and request-level `org_id` or
 `X-Meridian-Org-Id` hints are only accepted when they exactly match that bound
-context. This remains a process-bound reference surface, not general multi-org routing.
+context. It also reports the workspace auth scope; `MERIDIAN_WORKSPACE_AUTH_ORG_ID`
+or an `org_id:` line in the credentials file can pin HTTP Basic auth to the same
+institution. This remains a process-bound reference surface, not general multi-org routing.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

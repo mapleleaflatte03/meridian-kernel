@@ -71,6 +71,10 @@ Important:
 - if you expose it outside localhost, set `MERIDIAN_WORKSPACE_USER` and
   `MERIDIAN_WORKSPACE_PASS` (or point `MERIDIAN_WORKSPACE_CREDENTIALS_FILE`
   at a credentials file) so the workspace self-protects with HTTP Basic auth
+- if you want auth and institution binding to agree explicitly, add
+  `MERIDIAN_WORKSPACE_AUTH_ORG_ID=<org_id>` or an `org_id:` line in the
+  credentials file; the process will refuse to start if that auth scope does
+  not match the bound institution
 - production teams should usually still front it with their own auth/reverse proxy
 - many teams will build their own operator UI on top of the JSON API instead
 

@@ -33,6 +33,9 @@ Endpoints:
   POST /api/court/remediate       -> Lift lingering sanctions after review
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
+  POST /api/session/issue         -> Issue session token (requires auth)
+  GET  /api/session/validate      -> Validate session token
+  POST /api/session/revoke        -> Revoke a session
   POST /api/institution/charter   -> Set charter
   POST /api/institution/lifecycle -> Transition lifecycle
 
@@ -42,7 +45,8 @@ Run:
   python3 workspace.py --org-id <org>    # bind this process to one institution
 
 When workspace credentials are configured, the dashboard and JSON API are
-owner-authenticated with HTTP Basic auth.
+owner-authenticated with HTTP Basic auth.  Session tokens (Authorization:
+Bearer) are also accepted as an alternative auth path.
 
 Institution context:
   The built-in workspace is a founding-institution reference surface.  All
@@ -96,6 +100,11 @@ from runtime_adapter import load_runtimes, get_runtime, check_all_contracts
 from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
                    get_restrictions, remediate, _load_records, VIOLATION_TYPES)
+from session import SessionAuthority
+
+# Process-level session authority (tokens do not survive restarts unless
+# MERIDIAN_SESSION_SECRET is set in the environment).
+_session_authority = SessionAuthority()
 
 # Optional: CI vertical import from the example vertical if present
 _ci_vertical_available = False
@@ -141,6 +150,8 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/treasury/reserve-floor': 'owner',
     '/api/institution/charter': 'admin',
     '/api/institution/lifecycle': 'owner',
+    '/api/session/issue': 'member',
+    '/api/session/revoke': 'admin',
 }
 
 
@@ -286,6 +297,30 @@ def _resolve_auth_context(bound_org_id):
         'role': role,
         'actor_id': actor_id,
         'actor_source': actor_source or 'basic_user',
+    }
+
+
+def _resolve_auth_context_from_session(claims, bound_org_id):
+    """Build auth context from validated session claims.
+
+    The session records the role at issuance, but we re-check live membership
+    so that removed or downgraded members lose access immediately.
+    """
+    if claims.org_id != bound_org_id:
+        raise ValueError(
+            f"Session is bound to institution '{claims.org_id}', "
+            f"but workspace is bound to '{bound_org_id}'"
+        )
+    current_role = _member_role(bound_org_id, claims.user_id)
+    return {
+        'enabled': True,
+        'mode': 'session_bound',
+        'org_id': bound_org_id,
+        'user_id': claims.user_id,
+        'role': current_role,
+        'actor_id': claims.user_id,
+        'actor_source': 'session',
+        'session_id': claims.session_id,
     }
 
 
@@ -791,10 +826,15 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             self.wfile.write(message.encode())
 
     def _is_authorized(self):
+        header = self.headers.get('Authorization', '')
+        # Bearer (session) auth — always available
+        if header.startswith('Bearer '):
+            token = header.split(' ', 1)[1].strip()
+            return _session_authority.validate(token) is not None
+        # Basic auth
         user, password, _credential_org_id, _credential_user_id = _load_workspace_credentials()
         if not user or not password:
             return False
-        header = self.headers.get('Authorization', '')
         if not header.startswith('Basic '):
             return False
         try:
@@ -810,6 +850,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         protected = path == '/' or path.startswith('/workspace') or path.startswith('/api/')
         if not protected:
             return True
+        if self._is_authorized():
+            return True
         user, password, _credential_org_id, _credential_user_id = _load_workspace_credentials()
         if not user or not password:
             if WORKSPACE_AUTH_REQUIRED:
@@ -817,10 +859,16 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                                           is_api=path.startswith('/api/'))
                 return False
             return True
-        if self._is_authorized():
-            return True
         self._unauthorized(is_api=path.startswith('/api/'))
         return False
+
+    def _session_claims_from_request(self, expected_org_id=None):
+        """Extract and validate session claims from a Bearer token."""
+        header = self.headers.get('Authorization', '')
+        if not header.startswith('Bearer '):
+            return None
+        token = header.split(' ', 1)[1].strip()
+        return _session_authority.validate(token, expected_org_id=expected_org_id)
 
     def _read_body(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -835,7 +883,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Meridian-Org-Id')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Meridian-Org-Id')
         self.end_headers()
 
     def do_GET(self):
@@ -846,7 +894,11 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         try:
             org_id, org, context_source = _resolve_workspace_context()
             request_context = _enforce_request_context(parsed, self.headers, org_id)
-            auth_context = _resolve_auth_context(org_id)
+            session_claims = self._session_claims_from_request(expected_org_id=org_id)
+            if session_claims:
+                auth_context = _resolve_auth_context_from_session(session_claims, org_id)
+            else:
+                auth_context = _resolve_auth_context(org_id)
         except RuntimeError as e:
             return self._json({'error': str(e)}, 503)
         except ValueError as e:
@@ -916,6 +968,22 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             enriched = dict(rt)
             enriched['contract_check'] = check_contract(runtime_id)
             return self._json(enriched)
+        elif path == '/api/session/validate':
+            qs = parse_qs(parsed.query)
+            token = None
+            token_list = qs.get('token', [])
+            if token_list:
+                token = token_list[0]
+            else:
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Bearer '):
+                    token = auth_header.split(' ', 1)[1].strip()
+            if not token:
+                return self._json({'error': 'No token provided — pass ?token= or Authorization: Bearer'}, 400)
+            claims = _session_authority.validate(token, expected_org_id=org_id)
+            if claims is None:
+                return self._json({'valid': False})
+            return self._json({'valid': True, 'claims': claims.to_dict()})
         elif path == '/api/court':
             records = _load_records(org_id)
             return self._json({
@@ -938,7 +1006,11 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         try:
             org_id, org, _context_source = _resolve_workspace_context()
             _enforce_request_context(parsed, self.headers, org_id)
-            auth_context = _resolve_auth_context(org_id)
+            session_claims = self._session_claims_from_request(expected_org_id=org_id)
+            if session_claims:
+                auth_context = _resolve_auth_context_from_session(session_claims, org_id)
+            else:
+                auth_context = _resolve_auth_context(org_id)
             _enforce_mutation_authorization(auth_context, org_id, path)
         except RuntimeError as e:
             return self._json({'error': str(e)}, 503)
@@ -1049,6 +1121,37 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     'message': 'Reserve floor updated',
                     'snapshot': treasury_snapshot(org_id),
                 })
+
+            elif path == '/api/session/issue':
+                user_id = auth_context.get('user_id')
+                role = auth_context.get('role')
+                if not user_id or not role:
+                    return self._json({
+                        'error': 'Cannot issue session: actor is not a member of this institution'
+                    }, 403)
+                ttl = body.get('ttl_seconds')
+                token = _session_authority.issue(org_id, user_id, role, ttl_seconds=ttl)
+                claims = _session_authority.validate(token)
+                log_event(org_id, by, 'session_issued', outcome='success',
+                          details={'session_id': claims.session_id,
+                                   'user_id': user_id, 'role': role})
+                return self._json({
+                    'token': token,
+                    'session_id': claims.session_id,
+                    'org_id': org_id,
+                    'user_id': user_id,
+                    'role': role,
+                    'expires_at': claims.expires_at,
+                })
+
+            elif path == '/api/session/revoke':
+                session_id = body.get('session_id')
+                if not session_id:
+                    return self._json({'error': 'session_id is required'}, 400)
+                _session_authority.revoke(session_id)
+                log_event(org_id, by, 'session_revoked', outcome='success',
+                          details={'session_id': session_id})
+                return self._json({'message': f'Session revoked: {session_id}'})
 
             elif path == '/api/institution/charter':
                 set_charter(org_id, body['text'])

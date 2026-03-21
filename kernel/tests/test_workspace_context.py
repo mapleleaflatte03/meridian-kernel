@@ -257,8 +257,64 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertTrue(snap['enabled'])
             self.assertTrue(snap['send_enabled'])
             self.assertEqual(snap['peer_count'], 1)
+            self.assertEqual(snap['all_peer_count'], 1)
             self.assertEqual(snap['trusted_peer_ids'], ['host_beta'])
             self.assertEqual(snap['admitted_org_ids'], ['org_a', 'org_b'])
+            self.assertEqual(snap['management_mode'], 'workspace_api_file_backed')
+            self.assertTrue(snap['mutation_enabled'])
+
+    def test_mutate_federation_peer_upserts_registry(self):
+        from runtime_host import default_host_identity
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.workspace.FEDERATION_PEERS_FILE = os.path.join(tmp, 'federation_peers.json')
+            self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
+                host_id='host_alpha',
+                role='control_host',
+                federation_enabled=True,
+                peer_transport='https',
+                supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+            )
+            self.workspace.load_admission_registry = lambda *args, **kwargs: {
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'institutions': {'org_a': {'status': 'admitted'}},
+                'admitted_org_ids': ['org_a'],
+            }
+            snapshot = self.workspace._mutate_federation_peer('org_a', 'upsert', {
+                'peer_host_id': 'host_beta',
+                'label': 'Beta Host',
+                'endpoint_url': 'http://127.0.0.1:19016',
+                'shared_secret': 'beta-secret',
+                'admitted_org_ids': ['org_b'],
+            })
+            self.assertEqual(snapshot['management_mode'], 'workspace_api_file_backed')
+            self.assertEqual(snapshot['peer_count'], 1)
+            self.assertEqual(snapshot['trusted_peer_ids'], ['host_beta'])
+            self.assertTrue(any(peer['host_id'] == 'host_beta' for peer in snapshot['peers']))
+
+    def test_mutate_federation_peer_rejects_self_host(self):
+        from runtime_host import default_host_identity
+
+        self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
+            host_id='host_alpha',
+            role='control_host',
+            federation_enabled=True,
+            peer_transport='https',
+            supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+        )
+        self.workspace.load_admission_registry = lambda *args, **kwargs: {
+            'source': 'file',
+            'host_id': 'host_alpha',
+            'institutions': {'org_a': {'status': 'admitted'}},
+            'admitted_org_ids': ['org_a'],
+        }
+        with self.assertRaises(PermissionError):
+            self.workspace._mutate_federation_peer('org_a', 'upsert', {
+                'peer_host_id': 'host_alpha',
+                'shared_secret': 'alpha-secret',
+            })
 
     def test_mutate_admission_adds_second_institution(self):
         from runtime_host import default_host_identity

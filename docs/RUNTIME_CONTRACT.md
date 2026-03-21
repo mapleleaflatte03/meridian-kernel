@@ -269,7 +269,8 @@ class MeridianAdapter:
         )
         log_event(
             self.org_id, self.agent_id, action_type,
-            resource=resource, outcome=outcome, details=details or {}
+            resource=resource, outcome=outcome, details=details or {},
+            session_id=self.session_id if hasattr(self, 'session_id') else None
         )
 
 

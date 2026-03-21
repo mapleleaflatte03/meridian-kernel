@@ -78,6 +78,11 @@ Important:
 - if you want mutation audit and role checks to bind to a real institution
   member, also add `MERIDIAN_WORKSPACE_USER_ID=<user_id>` or `user_id:` in the
   credentials file
+- for programmatic access, issue a session token via `POST /api/session/issue`
+  (authenticates with Basic, returns a Bearer token scoped to the institution);
+  subsequent requests use `Authorization: Bearer <token>` instead of Basic
+- set `MERIDIAN_SESSION_SECRET` to make session tokens survive process restarts;
+  revocations are automatically persisted to a file alongside the workspace
 - production teams should usually still front it with their own auth/reverse proxy
 - many teams will build their own operator UI on top of the JSON API instead
 
@@ -161,6 +166,11 @@ Mutation endpoints include:
 - `/api/treasury/reserve-floor`
 - `/api/institution/charter`
 - `/api/institution/lifecycle`
+
+Session endpoints (available when auth is enabled):
+- `POST /api/session/issue` — authenticate with Basic, receive a Bearer token
+- `POST /api/session/revoke` — revoke a session token (admin+)
+- `GET  /api/session/validate` — introspect a Bearer token (no auth required)
 
 For production use, do not expose the workspace unauthenticated. The built-in
 workspace can self-protect with HTTP Basic auth when credentials are configured,

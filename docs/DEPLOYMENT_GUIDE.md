@@ -75,6 +75,9 @@ Important:
   `MERIDIAN_WORKSPACE_AUTH_ORG_ID=<org_id>` or an `org_id:` line in the
   credentials file; the process will refuse to start if that auth scope does
   not match the bound institution
+- if you want mutation audit and role checks to bind to a real institution
+  member, also add `MERIDIAN_WORKSPACE_USER_ID=<user_id>` or `user_id:` in the
+  credentials file
 - production teams should usually still front it with their own auth/reverse proxy
 - many teams will build their own operator UI on top of the JSON API instead
 

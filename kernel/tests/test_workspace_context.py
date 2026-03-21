@@ -93,9 +93,49 @@ class WorkspaceContextTests(unittest.TestCase):
 
     def test_auth_context_prefers_explicit_user_id(self):
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_meridian_owner')
+        self.workspace.load_orgs = lambda: {
+            'organizations': {
+                'org_a': {
+                    'id': 'org_a',
+                    'slug': 'a',
+                    'name': 'A',
+                    'owner_id': 'user_meridian_owner',
+                    'members': [{'user_id': 'user_meridian_owner', 'role': 'owner'}],
+                },
+            }
+        }
         auth = self.workspace._resolve_auth_context('org_a')
         self.assertEqual(auth['actor_id'], 'user_meridian_owner')
         self.assertEqual(auth['actor_source'], 'credentials')
+        self.assertEqual(auth['role'], 'owner')
+
+    def test_auth_context_resolves_owner_alias_role(self):
+        self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', None)
+        self.workspace.load_orgs = lambda: {
+            'organizations': {
+                'org_a': {
+                    'id': 'org_a',
+                    'slug': 'a',
+                    'name': 'A',
+                    'owner_id': 'user_owner',
+                    'members': [{'user_id': 'user_owner', 'role': 'owner'}],
+                },
+            }
+        }
+        auth = self.workspace._resolve_auth_context('org_a')
+        self.assertEqual(auth['user_id'], 'user_owner')
+        self.assertEqual(auth['role'], 'owner')
+        self.assertEqual(auth['actor_source'], 'owner_alias')
+
+    def test_mutation_authorization_requires_admin_for_kill_switch(self):
+        auth = {'enabled': True, 'role': 'member'}
+        with self.assertRaises(PermissionError):
+            self.workspace._enforce_mutation_authorization(auth, 'org_a', '/api/authority/kill-switch')
+
+    def test_mutation_authorization_allows_member_request(self):
+        auth = {'enabled': True, 'role': 'member'}
+        required = self.workspace._enforce_mutation_authorization(auth, 'org_a', '/api/authority/request')
+        self.assertEqual(required, 'member')
 
 
 if __name__ == '__main__':

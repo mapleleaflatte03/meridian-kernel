@@ -101,7 +101,10 @@ python3 kernel/workspace.py --org-id org_b7d95bae
 `X-Meridian-Org-Id` hints are only accepted when they exactly match that bound
 context. It also reports the workspace auth scope; `MERIDIAN_WORKSPACE_AUTH_ORG_ID`
 or an `org_id:` line in the credentials file can pin HTTP Basic auth to the same
-institution. This remains a process-bound reference surface, not general multi-org routing.
+institution. Add `MERIDIAN_WORKSPACE_USER_ID=<user_id>` or `user_id:` in the
+credentials file if you want mutation audit and role checks to bind to a real
+institution member instead of a generic Basic-auth username. This remains a
+process-bound reference surface, not general multi-org routing.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

@@ -226,7 +226,10 @@ context, and request-level `org_id` or `X-Meridian-Org-Id` hints are only
 accepted on exact match. There is still no request-level multi-org routing or
 org-scoped auth. The optional workspace auth scope can also be pinned with
 `MERIDIAN_WORKSPACE_AUTH_ORG_ID` or `org_id:` in the credentials file so
-Basic-auth credentials and bound institution agree explicitly. Production deployments would build their own control plane
+Basic-auth credentials and bound institution agree explicitly. Add
+`MERIDIAN_WORKSPACE_USER_ID` or `user_id:` as well if you want mutation
+authorization and audit attribution to resolve through a real institution
+member role instead of a generic Basic-auth username. Production deployments would build their own control plane
 or adapter bridge on top of the Python primitives.  The demo JSON API is a
 reference surface, not a full remote governance adapter API.
 

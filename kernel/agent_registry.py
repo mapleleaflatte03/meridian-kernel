@@ -41,6 +41,9 @@ VALID_LIFECYCLE_STATES = ('provisioned', 'active', 'quarantined', 'decommissione
 INCIDENT_ELEVATED_THRESHOLD = 3
 INCIDENT_CRITICAL_THRESHOLD = 5
 
+_economy_key_index_cache = None
+_economy_key_index_mtime = -1
+
 
 def _now():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -57,6 +60,9 @@ def save_registry(data):
     data['updatedAt'] = _now()
     with open(REGISTRY_FILE, 'w') as f:
         json.dump(data, f, indent=2)
+
+    global _economy_key_index_cache
+    _economy_key_index_cache = None
 
 
 def _org_matches(agent, org_id=None):
@@ -248,10 +254,32 @@ def record_incident(agent_id):
 
 def get_agents_by_economy_key(economy_key, org_id=None):
     """Lookup all agents matching an economy ledger key, optionally scoped to an institution."""
-    data = load_registry()
+    global _economy_key_index_cache, _economy_key_index_mtime
+
+    try:
+        current_mtime = os.path.getmtime(REGISTRY_FILE)
+    except OSError:
+        current_mtime = 0
+
+    # Capture local reference to avoid concurrent modification (TOCTOU) by save_registry
+    local_cache = _economy_key_index_cache
+    local_mtime = _economy_key_index_mtime
+
+    if local_cache is None or current_mtime != local_mtime:
+        data = load_registry()
+        local_cache = {}
+        for agent in data['agents'].values():
+            ekey = agent.get('economy_key')
+            if ekey not in local_cache:
+                local_cache[ekey] = []
+            local_cache[ekey].append(agent)
+        _economy_key_index_cache = local_cache
+        _economy_key_index_mtime = current_mtime
+
+    candidates = local_cache.get(economy_key, [])
     matches = []
-    for agent in data['agents'].values():
-        if agent.get('economy_key') == economy_key and _org_matches(agent, org_id):
+    for agent in candidates:
+        if _org_matches(agent, org_id):
             matches.append(agent)
     return matches
 

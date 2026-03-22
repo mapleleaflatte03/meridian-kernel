@@ -224,7 +224,14 @@ class FederationTests(unittest.TestCase):
         def fake_post(url, data):
             calls['url'] = url
             calls['data'] = data
-            return {'accepted': True}
+            return {
+                'accepted': True,
+                'receipt': {
+                    'receipt_id': 'fedrcpt_demo',
+                    'receiver_host_id': 'host_beta',
+                    'receiver_institution_id': 'org_beta',
+                },
+            }
 
         result = authority.deliver(
             'host_beta',
@@ -252,7 +259,8 @@ class FederationTests(unittest.TestCase):
         self.assertEqual(calls['url'], 'http://127.0.0.1:19013/api/federation/receive')
         self.assertIn('envelope', calls['data'])
         self.assertEqual(calls['data']['payload'], {'task': 'demo'})
-        self.assertEqual(result['response'], {'accepted': True})
+        self.assertTrue(result['response']['accepted'])
+        self.assertEqual(result['response']['receipt']['receipt_id'], 'fedrcpt_demo')
         self.assertEqual(result['peer']['host_id'], 'host_beta')
         self.assertEqual(result['claims']['target_host_id'], 'host_beta')
         self.assertEqual(result['claims']['target_institution_id'], 'org_beta')

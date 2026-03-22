@@ -300,6 +300,24 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertIn('federation_gateway', manifest['service_registry'])
         self.assertEqual(manifest['federation']['boundary_name'], 'federation_gateway')
 
+    def test_federation_receipt_is_bound_to_receiver_host_and_org(self):
+        from federation import FederationEnvelopeClaims
+
+        receipt = self.workspace._federation_receipt(
+            'org_a',
+            'host_alpha',
+            FederationEnvelopeClaims(
+                envelope_id='fed_demo',
+                message_type='execution_request',
+                boundary_name='federation_gateway',
+            ),
+        )
+        self.assertEqual(receipt['envelope_id'], 'fed_demo')
+        self.assertEqual(receipt['receiver_host_id'], 'host_alpha')
+        self.assertEqual(receipt['receiver_institution_id'], 'org_a')
+        self.assertEqual(receipt['identity_model'], 'signed_host_service')
+        self.assertTrue(receipt['receipt_id'].startswith('fedrcpt_'))
+
     def test_mutate_federation_peer_upserts_registry(self):
         from runtime_host import default_host_identity
         import tempfile
@@ -523,7 +541,14 @@ class WorkspaceContextTests(unittest.TestCase):
                         'boundary_name': 'federation_gateway',
                         'message_type': 'execution_request',
                     },
-                    'response': {'accepted': True},
+                    'response': {
+                        'accepted': True,
+                        'receipt': {
+                            'receipt_id': 'fedrcpt_demo',
+                            'receiver_host_id': 'host_beta',
+                            'receiver_institution_id': 'org_b',
+                        },
+                    },
                 }
 
             def snapshot(self, *, bound_org_id='', admission_registry=None):
@@ -564,6 +589,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(event['kwargs']['session_id'], 'ses_demo')
         self.assertEqual(event['kwargs']['details']['envelope_id'], 'fed_demo')
         self.assertEqual(event['kwargs']['details']['target_host_id'], 'host_beta')
+        self.assertEqual(event['kwargs']['details']['receipt_id'], 'fedrcpt_demo')
+        self.assertEqual(event['kwargs']['details']['receiver_host_id'], 'host_beta')
 
     def test_deliver_federation_envelope_logs_delivery_failure(self):
         from federation import FederationDeliveryError, FederationEnvelopeClaims

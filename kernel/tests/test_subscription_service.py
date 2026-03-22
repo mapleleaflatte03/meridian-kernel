@@ -75,6 +75,8 @@ class SubscriptionServiceTests(unittest.TestCase):
         summary_b = self.service.subscription_summary(self.org_b)
         self.assertEqual(summary_a['subscriber_count'], 1)
         self.assertEqual(summary_b['subscriber_count'], 1)
+        self.assertEqual(summary_a['verified_paid_subscription_count'], 0)
+        self.assertEqual(summary_b['verified_paid_subscription_count'], 0)
 
     def test_verify_payment_requires_evidence_and_records_delivery(self):
         with mock.patch.object(self.service._revenue_mod, 'find_customer_payment_evidence', return_value={

@@ -184,25 +184,37 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
     }
 
     registered = 0
+
+    # Precompute existing agents for the founding org to allow O(1) lookups.
+    # We match by economy_key+org_id or name+org_id.
+    existing_by_economy_key = {}
+    existing_by_name = {}
+    for existing in registry['agents'].values():
+        if existing.get('org_id') == founding_org_id:
+            ekey = existing.get('economy_key')
+            if ekey:
+                existing_by_economy_key[ekey] = existing
+            name = existing.get('name')
+            if name:
+                existing_by_name[name] = existing
+
     for ledger_key, agent_def in agent_defs.items():
         # Check if already registered — match by economy_key+org_id (stable),
         # fall back to name+org_id for agents created before economy_key existed.
         already_exists = False
-        for existing in registry['agents'].values():
-            if existing.get('org_id') != founding_org_id:
-                continue
-            if existing.get('economy_key') == ledger_key or existing['name'] == agent_def['name']:
-                already_exists = True
-                # Ensure economy_key is set (backfill for pre-economy_key agents)
-                if existing.get('economy_key') != ledger_key:
-                    existing['economy_key'] = ledger_key
-                # Sync scores from ledger
-                ledger_agent = ledger['agents'].get(ledger_key, {})
-                existing['reputation_units'] = ledger_agent.get('reputation_units', existing['reputation_units'])
-                existing['authority_units'] = ledger_agent.get('authority_units', existing['authority_units'])
-                existing['last_active_at'] = ledger_agent.get('last_scored_at', existing['last_active_at'])
-                print(f'  Agent {existing["name"]} already registered (economy_key={ledger_key}), synced scores')
-                break
+        existing = existing_by_economy_key.get(ledger_key) or existing_by_name.get(agent_def['name'])
+
+        if existing:
+            already_exists = True
+            # Ensure economy_key is set (backfill for pre-economy_key agents)
+            if existing.get('economy_key') != ledger_key:
+                existing['economy_key'] = ledger_key
+            # Sync scores from ledger
+            ledger_agent = ledger['agents'].get(ledger_key, {})
+            existing['reputation_units'] = ledger_agent.get('reputation_units', existing['reputation_units'])
+            existing['authority_units'] = ledger_agent.get('authority_units', existing['authority_units'])
+            existing['last_active_at'] = ledger_agent.get('last_scored_at', existing['last_active_at'])
+            print(f'  Agent {existing["name"]} already registered (economy_key={ledger_key}), synced scores')
 
         if not already_exists:
             agent_id = f'agent_{agent_def["name"].lower()}'

@@ -156,6 +156,12 @@ counts, and the reference workspace can mutate those records through
 `/api/commitments/settle` when the bound actor has admin authority.
 Federation delivery can now validate an accepted `commitment_id` on the sender
 side and append delivery references to the capsule-backed commitment record.
+`/api/cases` now exposes first inter-institution case records and summary
+counts, and the reference workspace can mutate those records through
+`POST /api/cases/open`, `/api/cases/stay`, and `/api/cases/resolve`.
+Commitment breach can now open a linked local case record, but this is still
+the start of the cross-institution court program rather than the full network
+dispute system.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

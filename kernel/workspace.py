@@ -27,6 +27,7 @@ Endpoints:
   GET  /api/court                 -> Court records
   GET  /api/warrants              -> Warrant records and summary
   GET  /api/commitments           -> Commitment records and summary
+  GET  /api/cases                 -> Inter-institution cases and summary
   POST /api/authority/kill-switch -> Engage/disengage kill switch
   POST /api/authority/approve     -> Decide an approval
   POST /api/authority/request     -> Request approval
@@ -46,6 +47,9 @@ Endpoints:
   POST /api/commitments/reject    -> Reject a commitment
   POST /api/commitments/breach    -> Mark a commitment as breached
   POST /api/commitments/settle    -> Mark a commitment as settled
+  POST /api/cases/open            -> Open an inter-institution case
+  POST /api/cases/stay            -> Stay an inter-institution case
+  POST /api/cases/resolve         -> Resolve an inter-institution case
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
   POST /api/session/issue         -> Issue session token (requires auth)
@@ -164,6 +168,14 @@ from commitments import (
     settle_commitment,
     validate_commitment_for_delivery,
 )
+from cases import (
+    case_summary,
+    ensure_case_for_commitment_breach,
+    list_cases,
+    open_case,
+    resolve_case,
+    stay_case,
+)
 from federation import (
     FederationAuthority,
     ReplayStore,
@@ -247,6 +259,9 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/commitments/reject': 'admin',
     '/api/commitments/breach': 'admin',
     '/api/commitments/settle': 'admin',
+    '/api/cases/open': 'admin',
+    '/api/cases/stay': 'admin',
+    '/api/cases/resolve': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/admission/admit': 'owner',
@@ -1002,6 +1017,32 @@ def _commitment_snapshot(org_id):
     }
 
 
+def _case_management_state():
+    return {
+        'management_mode': 'workspace_api_file_backed',
+        'mutation_enabled': True,
+        'mutation_disabled_reason': '',
+    }
+
+
+def _case_snapshot(org_id):
+    return {
+        'bound_org_id': org_id,
+        **_case_management_state(),
+        **case_summary(org_id),
+        'cases': list_cases(org_id),
+    }
+
+
+def _maybe_open_case_for_commitment_breach(commitment_record, actor_id, *, org_id, note=''):
+    return ensure_case_for_commitment_breach(
+        commitment_record,
+        actor_id,
+        org_id=org_id,
+        note=note,
+    )
+
+
 def _scoped_registry(org_id):
     """Filter agent registry to a single institution's agents.
 
@@ -1123,6 +1164,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
         },
         'warrants': _warrant_summary(org_id),
         'commitments': _commitment_snapshot(org_id),
+        'cases': _case_snapshot(org_id),
         'remediations': remediations,
         'timestamp': _now(),
     }
@@ -1702,6 +1744,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             })
         elif path == '/api/commitments':
             return self._json(_commitment_snapshot(org_id))
+        elif path == '/api/cases':
+            return self._json(_case_snapshot(org_id))
         elif path == '/api/audit':
             events = tail_events(30, org_id=org_id)
             events.reverse()
@@ -2085,10 +2129,103 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     details={'status': commitment['status']},
                     session_id=_sid,
                 )
+                case_record = None
+                if decision == 'breach' and body.get('open_case', True):
+                    case_record, created = _maybe_open_case_for_commitment_breach(
+                        commitment,
+                        by,
+                        org_id=org_id,
+                        note=body.get('case_note') or body.get('note', ''),
+                    )
+                    if created:
+                        log_event(
+                            org_id,
+                            by,
+                            'case_opened',
+                            outcome='success',
+                            resource=case_record['case_id'],
+                            details={
+                                'claim_type': case_record['claim_type'],
+                                'linked_commitment_id': commitment_id,
+                            },
+                            session_id=_sid,
+                        )
                 return self._json({
                     'message': f"Commitment {decision_past[decision]}: {commitment_id}",
                     'commitment': commitment,
                     'summary': _commitment_summary(org_id),
+                    'case': case_record,
+                })
+
+            elif path == '/api/cases/open':
+                claim_type = (body.get('claim_type') or '').strip()
+                if not claim_type:
+                    return self._json({'error': 'claim_type is required'}, 400)
+                case_record = open_case(
+                    org_id,
+                    claim_type,
+                    by,
+                    target_host_id=(body.get('target_host_id') or '').strip(),
+                    target_institution_id=(
+                        body.get('target_institution_id')
+                        or body.get('target_org_id')
+                        or ''
+                    ).strip(),
+                    linked_commitment_id=(body.get('linked_commitment_id') or '').strip(),
+                    linked_warrant_id=(body.get('linked_warrant_id') or '').strip(),
+                    evidence_refs=body.get('evidence_refs') or [],
+                    note=body.get('note', ''),
+                    metadata=body.get('metadata'),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'case_opened',
+                    outcome='success',
+                    resource=case_record['case_id'],
+                    details={
+                        'claim_type': claim_type,
+                        'linked_commitment_id': case_record.get('linked_commitment_id', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Case opened: {case_record['case_id']}",
+                    'case': case_record,
+                    'summary': _case_snapshot(org_id),
+                })
+
+            elif path in ('/api/cases/stay', '/api/cases/resolve'):
+                case_id = (body.get('case_id') or '').strip()
+                if not case_id:
+                    return self._json({'error': 'case_id is required'}, 400)
+                decision = path.rsplit('/', 1)[-1]
+                event_name = {
+                    'stay': 'case_stayed',
+                    'resolve': 'case_resolved',
+                }[decision]
+                case_record = {
+                    'stay': stay_case,
+                    'resolve': resolve_case,
+                }[decision](
+                    case_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    event_name,
+                    outcome='success',
+                    resource=case_id,
+                    details={'status': case_record['status']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Case {case_record['status']}: {case_id}",
+                    'case': case_record,
+                    'summary': _case_snapshot(org_id),
                 })
 
             elif path == '/api/federation/send':

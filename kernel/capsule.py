@@ -34,6 +34,7 @@ CAPSULE_FILES = (
     'authority_queue.json',
     'court_records.json',
     'commitments.json',
+    'cases.json',
     'warrants.json',
     'wallets.json',
     'treasury_accounts.json',
@@ -192,6 +193,17 @@ _EMPTY_COMMITMENTS = {
     'commitments': {},
     'states': ['proposed', 'accepted', 'rejected', 'breached', 'settled'],
 }
+_EMPTY_CASES = {
+    'cases': {},
+    'states': ['open', 'stayed', 'resolved'],
+    'claim_types': [
+        'non_delivery',
+        'fraudulent_proof',
+        'breach_of_commitment',
+        'invalid_settlement_notice',
+        'misrouted_execution',
+    ],
+}
 _EMPTY_WARRANTS = {
     'warrants': {},
     'action_classes': [
@@ -311,6 +323,7 @@ _CAPSULE_DEFAULTS = {
     'authority_queue.json': _EMPTY_AUTHORITY_QUEUE,
     'court_records.json': _EMPTY_COURT_RECORDS,
     'commitments.json': _EMPTY_COMMITMENTS,
+    'cases.json': _EMPTY_CASES,
     'warrants.json': _EMPTY_WARRANTS,
     'wallets.json': _EMPTY_WALLETS,
     'treasury_accounts.json': _EMPTY_TREASURY_ACCOUNTS,

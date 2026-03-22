@@ -94,6 +94,20 @@ Today that proof is also deliberately narrow:
 This is the first real commitment primitive in public code. It is not yet the
 full cross-institution commitments, payout, and breach-handling program.
 
+## Inter-Institution Case Surface
+
+Meridian now also has a first public case record for cross-institution dispute
+handling. Today that proof is still intentionally narrow:
+
+- cases are institution-scoped and capsule-backed
+- cases bind a target host and target institution explicitly
+- workspace APIs can open, stay, resolve, and inspect cases
+- commitment breach can auto-open a linked local case record
+
+This is the first public court-network object beyond warrants and commitment
+records. It is not yet the full peer suspension, witness-host, or settlement
+freeze program.
+
 ## System Diagram
 
 ```

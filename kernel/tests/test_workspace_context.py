@@ -43,6 +43,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_list_commitments = self.workspace.list_commitments
         self.orig_validate_commitment_for_delivery = self.workspace.validate_commitment_for_delivery
         self.orig_record_delivery_ref = self.workspace.record_delivery_ref
+        self.orig_case_summary = self.workspace.case_summary
+        self.orig_list_cases = self.workspace.list_cases
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -64,6 +66,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.list_commitments = self.orig_list_commitments
         self.workspace.validate_commitment_for_delivery = self.orig_validate_commitment_for_delivery
         self.workspace.record_delivery_ref = self.orig_record_delivery_ref
+        self.workspace.case_summary = self.orig_case_summary
+        self.workspace.list_cases = self.orig_list_cases
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -179,6 +183,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/warrants/approve']['allowed'])
         self.assertTrue(permissions['/api/commitments/propose']['allowed'])
         self.assertTrue(permissions['/api/commitments/accept']['allowed'])
+        self.assertTrue(permissions['/api/cases/open']['allowed'])
+        self.assertTrue(permissions['/api/cases/resolve']['allowed'])
         self.assertTrue(permissions['/api/federation/send']['allowed'])
         self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
         self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
@@ -229,6 +235,19 @@ class WorkspaceContextTests(unittest.TestCase):
             'settled': 0,
             'delivery_refs_total': 0,
         }
+        self.workspace.list_cases = lambda org_id=None, **_kwargs: [
+            {
+                'case_id': 'case_demo',
+                'status': 'open',
+                'claim_type': 'breach_of_commitment',
+            }
+        ]
+        self.workspace.case_summary = lambda org_id=None: {
+            'total': 1,
+            'open': 1,
+            'stayed': 0,
+            'resolved': 0,
+        }
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
         self.workspace.get_pending_approvals = lambda org_id=None: []
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
@@ -268,6 +287,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(status['commitments']['accepted'], 1)
         self.assertEqual(status['commitments']['management_mode'], 'workspace_api_file_backed')
         self.assertTrue(status['commitments']['mutation_enabled'])
+        self.assertEqual(status['cases']['total'], 1)
+        self.assertEqual(status['cases']['open'], 1)
+        self.assertEqual(status['cases']['management_mode'], 'workspace_api_file_backed')
         self.assertIn('federation', status['runtime_core'])
 
     def test_federation_snapshot_surfaces_trusted_peers(self):

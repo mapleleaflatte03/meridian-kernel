@@ -396,6 +396,51 @@ class WorkspaceContextTests(unittest.TestCase):
                 self.org = {'id': org_id, 'name': 'Org A'}
                 self.context_source = 'configured_org'
 
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_gamma',
+                    'host_role': 'witness_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_gamma',
+                    'host_role': 'witness_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_gamma',
+                    'host_role': 'witness_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
         captured = {}
         handler = object.__new__(self.workspace.WorkspaceHandler)
         handler.path = '/api/subscriptions'
@@ -748,6 +793,79 @@ class WorkspaceContextTests(unittest.TestCase):
             snapshot['inbox_summary']['message_type_counts']['execution_request'],
             1,
         )
+
+    def test_witness_host_surfaces_read_only_runtime_truth(self):
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_gamma',
+            role='witness_host',
+            federation_enabled=True,
+            peer_transport='https',
+            supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+        )
+        admission_registry = {
+            'source': 'file',
+            'host_id': 'host_gamma',
+            'institutions': {
+                'org_a': {'status': 'admitted'},
+                'org_b': {'status': 'admitted'},
+            },
+            'admitted_org_ids': ['org_a', 'org_b'],
+        }
+        self.workspace.summarize_inbox_entries = lambda org_id: {
+            'org_id': org_id,
+            'total': 2,
+            'received': 2,
+            'processed': 0,
+            'message_type_counts': {'execution_request': 1, 'settlement_notice': 1},
+            'state_counts': {'received': 2},
+            'updatedAt': '2026-03-22T00:00:00Z',
+        }
+
+        admission = self.workspace._admission_snapshot('org_a', host_identity=host, admission_registry=admission_registry)
+        federation = self.workspace._federation_snapshot(
+            'org_a',
+            host_identity=host,
+            admission_registry=admission_registry,
+            peer_registry={
+                'host_id': 'host_gamma',
+                'peers': {},
+                'trusted_peer_ids': [],
+            },
+        )
+        ctx = self.workspace.InstitutionContext.bind(
+            'org_a',
+            {
+                'id': 'org_a',
+                'name': 'Org A',
+                'slug': 'org-a',
+                'status': 'active',
+                'lifecycle_state': 'active',
+            },
+            'configured_org',
+            self.workspace.WORKSPACE_BOUNDARY,
+        )
+        manifest = self.workspace._federation_manifest(
+            ctx,
+            host_identity=host,
+            admission_registry=admission_registry,
+        )
+
+        self.assertEqual(admission['host_role'], 'witness_host')
+        self.assertEqual(admission['management_mode'], 'witness_read_only')
+        self.assertFalse(admission['mutation_enabled'])
+        self.assertEqual(admission['mutation_disabled_reason'], 'witness_host_read_only')
+        self.assertEqual(admission['admitted_org_ids'], ['org_a', 'org_b'])
+        self.assertEqual(federation['management_mode'], 'witness_read_only')
+        self.assertFalse(federation['mutation_enabled'])
+        self.assertEqual(federation['mutation_disabled_reason'], 'witness_host_read_only')
+        self.assertEqual(federation['inbox_summary']['total'], 2)
+        self.assertEqual(manifest['admission']['management_mode'], 'witness_read_only')
+        self.assertFalse(manifest['admission']['mutation_enabled'])
+        self.assertEqual(manifest['federation']['management_mode'], 'witness_read_only')
+        self.assertFalse(manifest['federation']['mutation_enabled'])
+        self.assertEqual(manifest['host_identity']['role'], 'witness_host')
 
     def test_process_received_settlement_notice_marks_inbox_processed(self):
         from federation import FederationEnvelopeClaims

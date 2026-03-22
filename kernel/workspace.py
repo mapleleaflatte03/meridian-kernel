@@ -1809,6 +1809,26 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                                  commitment_id='', claims_commitment_id='',
                                  ttl_seconds=None):
     host_identity, admission_registry = _runtime_host_state(bound_org_id)
+    if getattr(host_identity, 'role', '') == 'witness_host':
+        message = (
+            f"Federation send is disabled on host '{host_identity.host_id}' "
+            f"(witness_host_read_only)"
+        )
+        log_event(
+            bound_org_id,
+            actor_id or f'host:{host_identity.host_id}',
+            'federation_send_blocked',
+            resource=message_type,
+            outcome='blocked',
+            actor_type=actor_type or 'service',
+            details={
+                'target_host_id': target_host_id,
+                'target_institution_id': target_org_id,
+                'reason': 'witness_host_read_only',
+            },
+            session_id=session_id or None,
+        )
+        raise PermissionError(message)
     authority = _federation_authority(host_identity)
     authority.ensure_enabled()
     execution_warrant = None

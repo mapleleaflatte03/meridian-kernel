@@ -785,20 +785,6 @@ def _execution_job_view(bound_org_id, job):
     return record
 
 
-def _execution_job_state_for_warrant(warrant):
-    review_state = (warrant or {}).get('court_review_state', '')
-    execution_state = (warrant or {}).get('execution_state', '')
-    if execution_state == 'executed':
-        return 'executed'
-    if review_state in ('approved', 'auto_issued') and execution_state == 'ready':
-        return 'ready'
-    if review_state == 'stayed':
-        return 'blocked'
-    if review_state == 'revoked':
-        return 'rejected'
-    return ''
-
-
 def _federation_execution_jobs_snapshot(bound_org_id, *, limit=50):
     jobs = [
         _execution_job_view(bound_org_id, job)

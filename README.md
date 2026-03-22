@@ -47,6 +47,7 @@ What is real today:
 - one real built-in reference runtime path: `local_kernel`
 - one tested kernel-side reference adapter library: `openclaw_compatible`
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
+- one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, and sender-side federation validation when `commitment_id` is supplied
 
 What is not yet broadly proven:
 - live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
@@ -148,6 +149,13 @@ Federated `execution_request` delivery is now gated by an executable warrant on
 the sender side, and accepted receiver audit entries preserve `warrant_id`
 provenance. This is the first court-first execution gate, not the full
 cross-host constitutional autonomy program.
+`/api/commitments` now exposes first-class commitment records and summary
+counts, and the reference workspace can mutate those records through
+`POST /api/commitments/propose`, `/api/commitments/accept`,
+`/api/commitments/reject`, `/api/commitments/breach`, and
+`/api/commitments/settle` when the bound actor has admin authority.
+Federation delivery can now validate an accepted `commitment_id` on the sender
+side and append delivery references to the capsule-backed commitment record.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

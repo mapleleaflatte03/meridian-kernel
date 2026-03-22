@@ -76,6 +76,24 @@ Today that proof is deliberately narrow:
 This is the first real court-first execution gate in public code. It is not
 yet the complete payout/commitment/cross-host court program.
 
+## Commitment Primitive
+
+Meridian now also has a first-class commitment record for cross-institution
+obligations that need explicit lifecycle state before federation delivery.
+Today that proof is also deliberately narrow:
+
+- commitments are institution-scoped and capsule-backed
+- commitments bind a target host and target institution explicitly
+- workspace APIs can propose, accept, reject, breach, settle, and inspect
+  commitments
+- sender-side federation delivery can validate an accepted `commitment_id`
+  before any envelope is sent
+- successful delivery can append delivery references back onto the commitment
+  record
+
+This is the first real commitment primitive in public code. It is not yet the
+full cross-institution commitments, payout, and breach-handling program.
+
 ## System Diagram
 
 ```

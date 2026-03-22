@@ -26,6 +26,7 @@ Endpoints:
   GET  /api/runtimes/<id>         -> Single runtime record
   GET  /api/court                 -> Court records
   GET  /api/warrants              -> Warrant records and summary
+  GET  /api/commitments           -> Commitment records and summary
   POST /api/authority/kill-switch -> Engage/disengage kill switch
   POST /api/authority/approve     -> Decide an approval
   POST /api/authority/request     -> Request approval
@@ -40,6 +41,11 @@ Endpoints:
   POST /api/warrants/approve      -> Approve a warrant for execution
   POST /api/warrants/stay         -> Stay a warrant before execution
   POST /api/warrants/revoke       -> Revoke a warrant before execution
+  POST /api/commitments/propose   -> Propose a cross-institution commitment
+  POST /api/commitments/accept    -> Accept a commitment
+  POST /api/commitments/reject    -> Reject a commitment
+  POST /api/commitments/breach    -> Mark a commitment as breached
+  POST /api/commitments/settle    -> Mark a commitment as settled
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
   POST /api/session/issue         -> Issue session token (requires auth)
@@ -147,6 +153,13 @@ from warrants import (
     mark_warrant_executed,
     warrant_action_for_message,
 )
+from commitments import (
+    list_commitments,
+    propose_commitment,
+    review_commitment,
+    validate_commitment_for_federation,
+    mark_commitment_delivery,
+)
 from federation import (
     FederationAuthority,
     ReplayStore,
@@ -225,6 +238,11 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/warrants/approve': 'admin',
     '/api/warrants/stay': 'admin',
     '/api/warrants/revoke': 'admin',
+    '/api/commitments/propose': 'admin',
+    '/api/commitments/accept': 'admin',
+    '/api/commitments/reject': 'admin',
+    '/api/commitments/breach': 'admin',
+    '/api/commitments/settle': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/admission/admit': 'owner',
@@ -601,6 +619,7 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
     authority = _federation_authority(host_identity)
     authority.ensure_enabled()
     execution_warrant = None
+    linked_commitment = None
     required_action = warrant_action_for_message(message_type)
     if required_action:
         if not warrant_id:
@@ -647,6 +666,32 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                     'target_institution_id': target_org_id,
                     'warrant_id': warrant_id,
                     'required_action_class': required_action,
+                    'error': str(exc),
+                },
+                session_id=session_id or None,
+            )
+            raise
+    if commitment_id:
+        try:
+            linked_commitment = validate_commitment_for_federation(
+                commitment_id,
+                org_id=bound_org_id,
+                target_host_id=target_host_id,
+                target_org_id=target_org_id,
+                warrant_id=warrant_id,
+            )
+        except PermissionError as exc:
+            log_event(
+                bound_org_id,
+                actor_id or f'host:{host_identity.host_id}',
+                'federation_commitment_blocked',
+                resource=message_type,
+                outcome='blocked',
+                actor_type=actor_type or 'service',
+                details={
+                    'target_host_id': target_host_id,
+                    'target_institution_id': target_org_id,
+                    'commitment_id': commitment_id,
                     'error': str(exc),
                 },
                 session_id=session_id or None,
@@ -700,6 +745,21 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                 'receipt_id': receipt.get('receipt_id', ''),
                 'receiver_host_id': receipt.get('receiver_host_id', ''),
                 'receiver_institution_id': receipt.get('receiver_institution_id', ''),
+            },
+        )
+    if linked_commitment:
+        mark_commitment_delivery(
+            commitment_id,
+            org_id=bound_org_id,
+            delivery_ref={
+                'message_type': message_type,
+                'envelope_id': (claims or {}).get('envelope_id', ''),
+                'target_host_id': target_host_id,
+                'target_institution_id': target_org_id,
+                'receipt_id': receipt.get('receipt_id', ''),
+                'receiver_host_id': receipt.get('receiver_host_id', ''),
+                'receiver_institution_id': receipt.get('receiver_institution_id', ''),
+                'warrant_id': warrant_id,
             },
         )
     log_event(
@@ -899,6 +959,23 @@ def _warrant_summary(org_id):
     }
 
 
+def _commitment_summary(org_id):
+    commitments = list_commitments(org_id)
+    summary = {
+        'total': len(commitments),
+        'proposed': 0,
+        'accepted': 0,
+        'rejected': 0,
+        'breached': 0,
+        'settled': 0,
+    }
+    for record in commitments:
+        state = record.get('state', '')
+        if state in summary:
+            summary[state] += 1
+    return summary
+
+
 def _scoped_registry(org_id):
     """Filter agent registry to a single institution's agents.
 
@@ -1019,6 +1096,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             'total_appeals': len(records['appeals']),
         },
         'warrants': _warrant_summary(org_id),
+        'commitments': _commitment_summary(org_id),
         'remediations': remediations,
         'timestamp': _now(),
     }
@@ -1596,6 +1674,11 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'warrants': list_warrants(org_id),
                 'summary': _warrant_summary(org_id),
             })
+        elif path == '/api/commitments':
+            return self._json({
+                'commitments': list_commitments(org_id),
+                'summary': _commitment_summary(org_id),
+            })
         elif path == '/api/audit':
             events = tail_events(30, org_id=org_id)
             events.reverse()
@@ -1890,6 +1973,82 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 return self._json({
                     'message': f"Warrant {decision_past[decision]}: {warrant_id}",
                     'warrant': warrant,
+                })
+
+            elif path == '/api/commitments/propose':
+                target_host_id = (body.get('target_host_id') or '').strip()
+                target_org_id = (body.get('target_org_id') or '').strip()
+                commitment_type = (body.get('commitment_type') or '').strip()
+                if not target_host_id:
+                    return self._json({'error': 'target_host_id is required'}, 400)
+                if not target_org_id:
+                    return self._json({'error': 'target_org_id is required'}, 400)
+                if not commitment_type:
+                    return self._json({'error': 'commitment_type is required'}, 400)
+                commitment = propose_commitment(
+                    org_id,
+                    target_host_id,
+                    target_org_id,
+                    commitment_type,
+                    by,
+                    terms_payload=body.get('terms_payload'),
+                    warrant_id=(body.get('warrant_id') or '').strip(),
+                    note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'commitment_proposed',
+                    outcome='success',
+                    resource=commitment['commitment_id'],
+                    details={
+                        'target_host_id': target_host_id,
+                        'target_institution_id': target_org_id,
+                        'commitment_type': commitment_type,
+                        'warrant_id': commitment.get('warrant_id', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Commitment proposed: {commitment['commitment_id']}",
+                    'commitment': commitment,
+                })
+
+            elif path in (
+                '/api/commitments/accept',
+                '/api/commitments/reject',
+                '/api/commitments/breach',
+                '/api/commitments/settle',
+            ):
+                commitment_id = (body.get('commitment_id') or '').strip()
+                if not commitment_id:
+                    return self._json({'error': 'commitment_id is required'}, 400)
+                decision = path.rsplit('/', 1)[-1]
+                decision_past = {
+                    'accept': 'accepted',
+                    'reject': 'rejected',
+                    'breach': 'marked breached',
+                    'settle': 'settled',
+                }
+                commitment = review_commitment(
+                    commitment_id,
+                    decision,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    f'commitment_{decision}',
+                    outcome='success',
+                    resource=commitment_id,
+                    details={'state': commitment['state']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Commitment {decision_past[decision]}: {commitment_id}",
+                    'commitment': commitment,
                 })
 
             elif path == '/api/federation/send':

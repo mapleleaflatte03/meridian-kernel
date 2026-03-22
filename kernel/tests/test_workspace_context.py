@@ -39,6 +39,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
         self.orig_log_event = self.workspace.log_event
         self.orig_list_warrants = self.workspace.list_warrants
+        self.orig_list_commitments = self.workspace.list_commitments
+        self.orig_validate_commitment_for_federation = self.workspace.validate_commitment_for_federation
+        self.orig_mark_commitment_delivery = self.workspace.mark_commitment_delivery
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -56,6 +59,9 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
         self.workspace.log_event = self.orig_log_event
         self.workspace.list_warrants = self.orig_list_warrants
+        self.workspace.list_commitments = self.orig_list_commitments
+        self.workspace.validate_commitment_for_federation = self.orig_validate_commitment_for_federation
+        self.workspace.mark_commitment_delivery = self.orig_mark_commitment_delivery
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -169,6 +175,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertFalse(permissions['/api/treasury/contribute']['allowed'])
         self.assertTrue(permissions['/api/warrants/issue']['allowed'])
         self.assertTrue(permissions['/api/warrants/approve']['allowed'])
+        self.assertTrue(permissions['/api/commitments/propose']['allowed'])
+        self.assertTrue(permissions['/api/commitments/accept']['allowed'])
         self.assertTrue(permissions['/api/federation/send']['allowed'])
         self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
         self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
@@ -202,6 +210,12 @@ class WorkspaceContextTests(unittest.TestCase):
                 'warrant_id': 'war_demo',
                 'court_review_state': 'approved',
                 'execution_state': 'ready',
+            }
+        ]
+        self.workspace.list_commitments = lambda org_id=None, **_kwargs: [
+            {
+                'commitment_id': 'cmt_demo',
+                'state': 'accepted',
             }
         ]
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
@@ -239,6 +253,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(status['runtime_core']['admission']['admitted_org_ids'], ['org_a', 'org_b'])
         self.assertEqual(status['warrants']['total'], 1)
         self.assertEqual(status['warrants']['executable'], 1)
+        self.assertEqual(status['commitments']['total'], 1)
+        self.assertEqual(status['commitments']['accepted'], 1)
         self.assertIn('federation', status['runtime_core'])
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
@@ -711,6 +727,122 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(event['args'][2], 'federation_warrant_blocked')
         self.assertEqual(event['kwargs']['details']['required_action_class'], 'federated_execution')
         self.assertEqual(event['kwargs']['details']['target_host_id'], 'host_beta')
+
+    def test_deliver_federation_envelope_validates_and_marks_commitment(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+        marked = []
+
+        class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
+            def deliver(self, *args, **kwargs):
+                return {
+                    'peer': {'host_id': 'host_beta', 'transport': 'https'},
+                    'claims': {
+                        'envelope_id': 'fed_demo',
+                        'source_host_id': 'host_alpha',
+                        'source_institution_id': 'org_a',
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_b',
+                        'nonce': 'nonce_demo',
+                        'boundary_name': 'federation_gateway',
+                        'message_type': 'settlement_notice',
+                        'commitment_id': 'cmt_demo',
+                    },
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_demo',
+                        'receiver_host_id': 'host_beta',
+                        'receiver_institution_id': 'org_b',
+                    },
+                    'response': {'accepted': True},
+                }
+
+            def snapshot(self, *, bound_org_id='', admission_registry=None):
+                return {
+                    'enabled': True,
+                    'bound_org_id': bound_org_id,
+                    'admitted_org_ids': list((admission_registry or {}).get('admitted_org_ids', [])),
+                }
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.validate_commitment_for_federation = lambda commitment_id, **_kwargs: {
+            'commitment_id': commitment_id,
+            'state': 'accepted',
+        }
+        self.workspace.mark_commitment_delivery = lambda commitment_id, **kwargs: marked.append({
+            'commitment_id': commitment_id,
+            'kwargs': kwargs,
+        })
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        delivery, snapshot = self.workspace._deliver_federation_envelope(
+            'org_a',
+            'host_beta',
+            'org_b',
+            'settlement_notice',
+            payload={'task': 'demo'},
+            actor_type='user',
+            actor_id='user_owner',
+            session_id='ses_demo',
+            commitment_id='cmt_demo',
+        )
+
+        self.assertEqual(delivery['claims']['commitment_id'], 'cmt_demo')
+        self.assertEqual(snapshot['bound_org_id'], 'org_a')
+        self.assertEqual(len(marked), 1)
+        self.assertEqual(marked[0]['commitment_id'], 'cmt_demo')
+        self.assertEqual(marked[0]['kwargs']['delivery_ref']['receipt_id'], 'fedrcpt_demo')
+        self.assertEqual(audit_events[-1]['kwargs']['details']['commitment_id'], 'cmt_demo')
+
+    def test_deliver_federation_envelope_blocks_invalid_commitment(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+
+        class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.validate_commitment_for_federation = lambda _commitment_id, **_kwargs: (_ for _ in ()).throw(
+            PermissionError("Commitment 'cmt_demo' is not active for federation (state=rejected)")
+        )
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        with self.assertRaises(PermissionError):
+            self.workspace._deliver_federation_envelope(
+                'org_a',
+                'host_beta',
+                'org_b',
+                'settlement_notice',
+                payload={'task': 'demo'},
+                actor_type='user',
+                actor_id='user_owner',
+                session_id='ses_demo',
+                commitment_id='cmt_demo',
+            )
+
+        self.assertEqual(len(audit_events), 1)
+        event = audit_events[0]
+        self.assertEqual(event['args'][2], 'federation_commitment_blocked')
+        self.assertEqual(event['kwargs']['details']['commitment_id'], 'cmt_demo')
 
 
 if __name__ == '__main__':

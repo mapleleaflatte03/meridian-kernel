@@ -346,6 +346,61 @@ class CommitmentCapsuleTests(unittest.TestCase):
         )
         self.assertEqual(validated['commitment_id'], accepted['commitment_id'])
 
+    def test_validate_commitment_for_breach_notice_requires_breached_state(self):
+        record, _created = commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_breach_state_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            warrant_id='war_proposal_demo',
+        )
+        with self.assertRaises(PermissionError):
+            commitments.validate_commitment_for_breach_notice(
+                record['commitment_id'],
+                org_id=self.org_id,
+                target_host_id='host_alpha',
+                target_institution_id='org_alpha',
+                warrant_id='war_breach_demo',
+            )
+
+    def test_validate_commitment_for_breach_notice_uses_source_binding_and_distinct_warrant(self):
+        record, _created = commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_breach_dispatch_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            warrant_id='war_proposal_demo',
+        )
+        breached = commitments.breach_commitment(
+            record['commitment_id'],
+            'user_owner',
+            org_id=self.org_id,
+        )
+        validated = commitments.validate_commitment_for_breach_notice(
+            breached['commitment_id'],
+            org_id=self.org_id,
+            target_host_id='host_alpha',
+            target_institution_id='org_alpha',
+            warrant_id='war_breach_demo',
+        )
+        self.assertEqual(validated['commitment_id'], breached['commitment_id'])
+        with self.assertRaises(PermissionError):
+            commitments.validate_commitment_for_breach_notice(
+                breached['commitment_id'],
+                org_id=self.org_id,
+                target_host_id='host_gamma',
+                target_institution_id='org_alpha',
+                warrant_id='war_breach_demo',
+            )
+
     def test_sync_federated_commitment_proposal_rejects_source_or_target_mismatch(self):
         commitments.sync_federated_commitment_proposal(
             self.org_id,

@@ -155,6 +155,10 @@ class WarrantCapsuleTests(unittest.TestCase):
             warrants.warrant_action_for_message('execution_request'),
             'federated_execution',
         )
+        self.assertEqual(
+            warrants.warrant_action_for_message('commitment_breach_notice'),
+            'cross_institution_commitment',
+        )
         self.assertEqual(warrants.warrant_action_for_message('settlement_notice'), '')
 
 

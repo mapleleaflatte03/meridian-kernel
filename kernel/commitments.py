@@ -401,6 +401,31 @@ def validate_commitment_for_acceptance_dispatch(commitment_id, *, org_id=None,
     return record
 
 
+def validate_commitment_for_breach_notice(commitment_id, *, org_id=None,
+                                          target_host_id='', target_institution_id='',
+                                          warrant_id=''):
+    del warrant_id  # breach notices require their own warrant and do not reuse proposal warrant binding
+    record = get_commitment(commitment_id, org_id=org_id)
+    if not record:
+        raise PermissionError(f"Commitment '{commitment_id}' does not exist")
+    if _canonical_state(record) != 'breached':
+        raise PermissionError(
+            f"Commitment '{commitment_id}' is not ready for breach notice "
+            f"(state={_canonical_state(record)})"
+        )
+    if target_host_id and (record.get('source_host_id') or '') != target_host_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' source_host_id "
+            f"{record.get('source_host_id', '')!r} does not match {target_host_id!r}"
+        )
+    if target_institution_id and (record.get('source_institution_id') or '') != target_institution_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' source_institution_id "
+            f"{record.get('source_institution_id', '')!r} does not match {target_institution_id!r}"
+        )
+    return record
+
+
 def sync_federated_commitment_proposal(org_id, commitment_id, *, source_host_id='',
                                        source_institution_id='', target_host_id='',
                                        target_institution_id='', summary='',

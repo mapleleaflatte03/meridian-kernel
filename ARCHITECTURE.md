@@ -105,6 +105,9 @@ Today that proof is also deliberately narrow:
   commitment records on a peer host
 - warrant-bound `commitment_acceptance` envelopes can move the source
   commitment into `accepted` from peer-side review
+- warrant-bound `commitment_breach_notice` envelopes can move the source
+  commitment into `breached`, auto-open a linked case, and stay the linked
+  warrant without inventing peer suspension semantics
 - successful delivery can append delivery references back onto the commitment
   record
 

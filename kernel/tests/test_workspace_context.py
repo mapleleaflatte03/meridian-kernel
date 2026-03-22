@@ -379,6 +379,10 @@ class WorkspaceContextTests(unittest.TestCase):
             status['runtime_core']['service_registry']['federation_gateway']['required_warrant_actions']['commitment_acceptance'],
             'cross_institution_commitment',
         )
+        self.assertEqual(
+            status['runtime_core']['service_registry']['federation_gateway']['required_warrant_actions']['commitment_breach_notice'],
+            'cross_institution_commitment',
+        )
         self.assertTrue(status['runtime_core']['admission']['additional_institutions_allowed'])
         self.assertEqual(status['runtime_core']['admission']['management_mode'], 'workspace_api_file_backed')
         self.assertTrue(status['runtime_core']['admission']['mutation_enabled'])
@@ -1302,6 +1306,79 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['commitment']['accepted_by'], 'user_owner_beta')
         self.assertEqual(processing['inbox_entry']['state'], 'processed')
         self.assertEqual(audit_events[-1][0][2], 'federation_commitment_acceptance_recorded')
+
+    def test_process_received_commitment_breach_notice_marks_commitment_breached_and_opens_case(self):
+        from federation import FederationEnvelopeClaims
+
+        audit_events = []
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_commit_breach_demo',
+            'state': kwargs.get('state', 'received'),
+        }
+        self.workspace.get_commitment = lambda commitment_id, org_id=None: {
+            'commitment_id': commitment_id,
+            'status': 'accepted',
+            'target_host_id': 'host_beta',
+            'target_institution_id': 'org_beta',
+            'warrant_id': 'war_commit_demo',
+        }
+        self.workspace.breach_commitment = lambda commitment_id, by, **kwargs: {
+            'commitment_id': commitment_id,
+            'status': 'breached',
+            'target_host_id': 'host_beta',
+            'target_institution_id': 'org_beta',
+            'warrant_id': 'war_commit_demo',
+            'breached_by': by,
+            'review_note': kwargs.get('note', ''),
+        }
+        self.workspace._maybe_open_case_for_commitment_breach = lambda commitment, actor_id, **kwargs: ({
+            'case_id': 'case_breach_demo',
+            'claim_type': 'breach_of_commitment',
+            'status': 'open',
+            'linked_commitment_id': commitment['commitment_id'],
+            'linked_warrant_id': commitment['warrant_id'],
+        }, True)
+        self.workspace._maybe_stay_warrant_for_case = lambda *args, **kwargs: {
+            'applied': True,
+            'warrant_id': 'war_commit_demo',
+            'court_review_state': 'stayed',
+        }
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_commit_breach_demo',
+                source_host_id='host_beta',
+                source_institution_id='org_beta',
+                target_host_id='host_alpha',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_owner_beta',
+                session_id='ses_beta',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='commitment_breach_notice',
+                payload_hash='hash_demo',
+                warrant_id='war_breach_demo',
+                commitment_id='cmt_demo',
+            )
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                {'receipt_id': 'fedrcpt_commit_breach', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={'note': 'Breach recorded on beta'},
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+
+        self.assertTrue(processing['applied'])
+        self.assertEqual(processing['reason'], 'commitment_breach_notice_recorded')
+        self.assertTrue(processing['breached'])
+        self.assertEqual(processing['commitment']['breached_by'], 'user_owner_beta')
+        self.assertEqual(processing['case']['case_id'], 'case_breach_demo')
+        self.assertEqual(processing['warrant']['court_review_state'], 'stayed')
+        self.assertEqual(processing['inbox_entry']['state'], 'processed')
+        self.assertEqual(audit_events[-1][0][2], 'federation_commitment_breach_notice_recorded')
 
     def test_process_received_execution_request_creates_local_warranted_job(self):
         from federation import FederationEnvelopeClaims
@@ -2231,6 +2308,99 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(recorded[0]['kwargs']['delivery_ref']['receipt_id'], 'fedrcpt_commit_accept_demo')
         self.assertEqual(len(marked), 1)
         self.assertEqual(marked[0][0][0], 'war_accept_demo')
+
+    def test_deliver_federation_commitment_breach_notice_uses_breach_validator(self):
+        from runtime_host import default_host_identity
+
+        validated = []
+        recorded = []
+        marked = []
+
+        class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
+            def deliver(self, *args, **kwargs):
+                return {
+                    'peer': {'host_id': 'host_alpha', 'transport': 'https'},
+                    'claims': {
+                        'envelope_id': 'fed_commit_breach_demo',
+                        'source_host_id': 'host_beta',
+                        'source_institution_id': 'org_b',
+                        'target_host_id': 'host_alpha',
+                        'target_institution_id': 'org_a',
+                        'nonce': 'nonce_demo',
+                        'boundary_name': 'federation_gateway',
+                        'message_type': 'commitment_breach_notice',
+                        'warrant_id': 'war_breach_demo',
+                        'commitment_id': 'cmt_demo',
+                    },
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_commit_breach_demo',
+                        'receiver_host_id': 'host_alpha',
+                        'receiver_institution_id': 'org_a',
+                    },
+                    'response': {'accepted': True},
+                }
+
+            def snapshot(self, *, bound_org_id='', admission_registry=None):
+                return {
+                    'enabled': True,
+                    'bound_org_id': bound_org_id,
+                    'admitted_org_ids': list((admission_registry or {}).get('admitted_org_ids', [])),
+                }
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_beta', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.validate_warrant_for_execution = lambda *args, **kwargs: {
+            'warrant_id': 'war_breach_demo',
+            'execution_state': 'ready',
+        }
+        self.workspace.validate_commitment_for_proposal_dispatch = (
+            lambda *args, **kwargs: self.fail('proposal validator should not run')
+        )
+        self.workspace.validate_commitment_for_acceptance_dispatch = (
+            lambda *args, **kwargs: self.fail('acceptance validator should not run')
+        )
+        self.workspace.validate_commitment_for_breach_notice = lambda commitment_id, **kwargs: (
+            validated.append({'commitment_id': commitment_id, 'kwargs': kwargs}) or {
+                'commitment_id': commitment_id,
+                'status': 'breached',
+            }
+        )
+        self.workspace.record_delivery_ref = lambda commitment_id, **kwargs: recorded.append({
+            'commitment_id': commitment_id,
+            'kwargs': kwargs,
+        })
+        self.workspace.mark_warrant_executed = lambda *args, **kwargs: marked.append((args, kwargs))
+        self.workspace.log_event = lambda *args, **kwargs: None
+
+        delivery, snapshot = self.workspace._deliver_federation_envelope(
+            'org_b',
+            'host_alpha',
+            'org_a',
+            'commitment_breach_notice',
+            payload={'note': 'Breach recorded on beta'},
+            actor_type='user',
+            actor_id='user_owner_beta',
+            session_id='ses_beta',
+            warrant_id='war_breach_demo',
+            commitment_id='cmt_demo',
+        )
+
+        self.assertEqual(snapshot['bound_org_id'], 'org_b')
+        self.assertEqual(delivery['claims']['message_type'], 'commitment_breach_notice')
+        self.assertEqual(len(validated), 1)
+        self.assertEqual(validated[0]['commitment_id'], 'cmt_demo')
+        self.assertEqual(validated[0]['kwargs']['target_host_id'], 'host_alpha')
+        self.assertEqual(validated[0]['kwargs']['target_institution_id'], 'org_a')
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0]['kwargs']['delivery_ref']['receipt_id'], 'fedrcpt_commit_breach_demo')
+        self.assertEqual(len(marked), 1)
+        self.assertEqual(marked[0][0][0], 'war_breach_demo')
 
     def test_deliver_federation_execution_request_defers_commitment_warrant_execution(self):
         from runtime_host import default_host_identity

@@ -48,6 +48,7 @@ What is real today:
 - one tested kernel-side reference adapter library: `openclaw_compatible`
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, and sender-side federation validation when `commitment_id` is supplied
+- one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 
 What is not yet broadly proven:
 - live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
@@ -173,6 +174,16 @@ Bad federation receipts or forged delivery proofs can now auto-open those case
 records on the sender path, and a linked execution warrant is automatically
 stayed before another cross-host attempt can proceed. Contradiction handling is
 no longer just an audit log.
+`/api/payouts` now exposes a real payout proposal lifecycle through
+`POST /api/payouts/propose`, `/api/payouts/submit`, `/api/payouts/review`,
+`/api/payouts/approve`, `/api/payouts/open-dispute-window`,
+`/api/payouts/reject`, `/api/payouts/cancel`, and
+`/api/payouts/execute`.
+Execution is intentionally narrow. It requires an executable
+`payout_execution` warrant, a payout-eligible wallet, surplus above reserve,
+and a phase-5 contributor-payout gate before the reference workspace will
+write a payout execution row to the institution ledger. This is a real kernel
+primitive, not yet the full settlement-adapter ecosystem.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

@@ -18,6 +18,7 @@ Endpoints:
   GET  /api/treasury/contributors -> Contributor registry
   GET  /api/treasury/proposals    -> Payout proposals
   GET  /api/treasury/funding-sources -> Funding source records
+  GET  /api/payouts               -> Payout proposals and summary
   GET  /api/admission             -> Host admission state
   GET  /api/federation            -> Federation gateway state
   GET  /api/federation/peers      -> Federation peer registry state
@@ -52,6 +53,14 @@ Endpoints:
   POST /api/cases/resolve         -> Resolve an inter-institution case
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
+  POST /api/payouts/propose       -> Create a payout proposal draft
+  POST /api/payouts/submit        -> Submit a payout proposal for review
+  POST /api/payouts/review        -> Move a payout proposal into review
+  POST /api/payouts/approve       -> Owner-approve a payout proposal
+  POST /api/payouts/open-dispute-window -> Start the payout dispute window
+  POST /api/payouts/reject        -> Reject a payout proposal
+  POST /api/payouts/cancel        -> Cancel a payout proposal
+  POST /api/payouts/execute       -> Execute an approved payout
   POST /api/session/issue         -> Issue session token (requires auth)
   GET  /api/session/validate      -> Validate session token
   POST /api/session/revoke        -> Revoke a session
@@ -143,7 +152,12 @@ from authority import (check_authority, request_approval, decide_approval,
 from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       contribute_owner_capital, set_reserve_floor_policy,
                       load_wallets, load_treasury_accounts, load_maintainers,
-                      load_contributors, load_payout_proposals, load_funding_sources)
+                      load_contributors, load_payout_proposals, load_funding_sources,
+                      list_payout_proposals, payout_proposal_summary,
+                      create_payout_proposal, submit_payout_proposal,
+                      review_payout_proposal, approve_payout_proposal,
+                      open_payout_dispute_window, reject_payout_proposal,
+                      cancel_payout_proposal, execute_payout_proposal)
 from runtime_adapter import load_runtimes, get_runtime, check_all_contracts
 from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
@@ -270,6 +284,14 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/cases/resolve': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
+    '/api/payouts/propose': 'member',
+    '/api/payouts/submit': 'member',
+    '/api/payouts/review': 'admin',
+    '/api/payouts/approve': 'owner',
+    '/api/payouts/open-dispute-window': 'owner',
+    '/api/payouts/reject': 'admin',
+    '/api/payouts/cancel': 'member',
+    '/api/payouts/execute': 'owner',
     '/api/admission/admit': 'owner',
     '/api/admission/suspend': 'owner',
     '/api/admission/revoke': 'owner',
@@ -1115,6 +1137,18 @@ def _commitment_snapshot(org_id):
         **_commitment_management_state(),
         **_commitment_summary(org_id),
         'commitments': list_commitments(org_id),
+    }
+
+
+def _payout_snapshot(org_id):
+    return {
+        'bound_org_id': org_id,
+        'management_mode': 'workspace_api_file_backed',
+        'mutation_enabled': True,
+        'mutation_disabled_reason': '',
+        'summary': payout_proposal_summary(org_id),
+        'proposals': list_payout_proposals(org_id),
+        'policy': load_payout_proposals(org_id).get('state_machine', {}),
     }
 
 
@@ -2002,6 +2036,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(load_payout_proposals(org_id))
         elif path == '/api/treasury/funding-sources':
             return self._json(load_funding_sources(org_id))
+        elif path == '/api/payouts':
+            return self._json(_payout_snapshot(org_id))
         elif path == '/api/federation':
             host_identity, admission_registry = _runtime_host_state(org_id)
             return self._json(_federation_snapshot(
@@ -2285,6 +2321,256 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 return self._json({
                     'message': 'Reserve floor updated',
                     'snapshot': treasury_snapshot(org_id),
+                })
+
+            elif path == '/api/payouts/propose':
+                proposal = create_payout_proposal(
+                    (body.get('contributor_id') or '').strip(),
+                    body.get('amount_usd'),
+                    (body.get('contribution_type') or '').strip(),
+                    proposed_by=by,
+                    org_id=org_id,
+                    evidence=body.get('evidence'),
+                    recipient_wallet_id=(body.get('recipient_wallet_id') or '').strip(),
+                    currency=body.get('currency') or 'USDC',
+                    settlement_adapter=(body.get('settlement_adapter') or 'internal_ledger').strip(),
+                    note=body.get('note', ''),
+                    metadata=body.get('metadata'),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_proposal_created',
+                    outcome='success',
+                    resource=proposal['proposal_id'],
+                    details={
+                        'contributor_id': proposal['contributor_id'],
+                        'amount_usd': proposal['amount_usd'],
+                        'recipient_wallet_id': proposal['recipient_wallet_id'],
+                        'settlement_adapter': proposal['settlement_adapter'],
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Payout proposal created: {proposal['proposal_id']}",
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/submit':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                proposal = submit_payout_proposal(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                    owner_override=(auth_context.get('role') == 'owner'),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_proposal_submitted',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={'status': proposal['status']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout proposal submitted: {proposal_id}',
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/review':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                proposal = review_payout_proposal(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_proposal_under_review',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={'status': proposal['status']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout proposal under review: {proposal_id}',
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/approve':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                proposal = approve_payout_proposal(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_proposal_approved',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={'status': proposal['status']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout proposal approved: {proposal_id}',
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/open-dispute-window':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                proposal = open_payout_dispute_window(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                    dispute_window_hours=body.get('dispute_window_hours'),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_dispute_window_opened',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={
+                        'status': proposal['status'],
+                        'dispute_window_ends_at': proposal.get('dispute_window_ends_at', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout dispute window opened: {proposal_id}',
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/reject':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                proposal = reject_payout_proposal(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_proposal_rejected',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={'status': proposal['status']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout proposal rejected: {proposal_id}',
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/cancel':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                proposal = cancel_payout_proposal(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                    owner_override=(auth_context.get('role') == 'owner'),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_proposal_cancelled',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={'status': proposal['status']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout proposal cancelled: {proposal_id}',
+                    'proposal': proposal,
+                    'summary': payout_proposal_summary(org_id),
+                })
+
+            elif path == '/api/payouts/execute':
+                proposal_id = (body.get('proposal_id') or '').strip()
+                warrant_id = (body.get('warrant_id') or '').strip()
+                if not proposal_id:
+                    return self._json({'error': 'proposal_id is required'}, 400)
+                if not warrant_id:
+                    return self._json({'error': 'warrant_id is required'}, 400)
+                request_payload = {
+                    'proposal_id': proposal_id,
+                    'settlement_adapter': (body.get('settlement_adapter') or 'internal_ledger').strip(),
+                    'tx_hash': (body.get('tx_hash') or '').strip(),
+                }
+                validate_warrant_for_execution(
+                    warrant_id,
+                    org_id=org_id,
+                    action_class='payout_execution',
+                    boundary_name='payouts',
+                    actor_id=by,
+                    session_id=_sid or '',
+                    request_payload=request_payload,
+                )
+                proposal = execute_payout_proposal(
+                    proposal_id,
+                    by,
+                    org_id=org_id,
+                    warrant_id=warrant_id,
+                    settlement_adapter=request_payload['settlement_adapter'],
+                    tx_hash=request_payload['tx_hash'],
+                    note=body.get('note', ''),
+                    allow_early=bool(body.get('allow_early')),
+                )
+                warrant = mark_warrant_executed(
+                    warrant_id,
+                    org_id=org_id,
+                    execution_refs={
+                        **dict(proposal.get('execution_refs') or {}),
+                        'proposal_id': proposal_id,
+                    },
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_executed',
+                    outcome='success',
+                    resource=proposal_id,
+                    details={
+                        'amount_usd': proposal['amount_usd'],
+                        'recipient_wallet_id': proposal['recipient_wallet_id'],
+                        'warrant_id': warrant_id,
+                        'tx_ref': (proposal.get('execution_refs') or {}).get('tx_ref', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout executed: {proposal_id}',
+                    'proposal': proposal,
+                    'warrant': warrant,
+                    'summary': payout_proposal_summary(org_id),
                 })
 
             elif path == '/api/session/issue':

@@ -29,6 +29,7 @@ import datetime
 import json
 import os
 import sys
+import uuid
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
@@ -73,9 +74,18 @@ except Exception:
 from metering import get_spend, summary as metering_summary
 from agent_registry import check_budget as _agent_check_budget
 
+try:
+    from phase_machine import current_phase as _current_phase
+except Exception:
+    _current_phase = None
+
 
 def _now():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _parse_ts(value):
+    return datetime.datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ')
 
 
 _PROTOCOL_DEFAULTS = {
@@ -394,6 +404,17 @@ def _load_registry_file(filename, org_id=None):
         return json.load(f)
 
 
+def _save_registry_file(filename, payload, org_id=None):
+    """Persist a JSON registry file inside the institution capsule."""
+    path = _ensure_protocol_registry(filename, org_id)
+    parent = os.path.dirname(path)
+    if org_id and not os.path.isdir(parent):
+        _missing_org_error(org_id)
+    os.makedirs(parent, exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+
+
 def load_wallets(org_id=None):
     """Load wallet registry from the institution capsule."""
     return _load_registry_file('wallets.json', org_id)
@@ -422,6 +443,431 @@ def load_payout_proposals(org_id=None):
 def load_funding_sources(org_id=None):
     """Load funding sources from the institution capsule."""
     return _load_registry_file('funding_sources.json', org_id)
+
+
+def _proposal_store(org_id=None):
+    store = dict(load_payout_proposals(org_id))
+    store.setdefault('proposals', {})
+    store.setdefault('state_machine', _PROTOCOL_DEFAULTS['payout_proposals.json']['state_machine'])
+    store.setdefault('proposal_schema', _PROTOCOL_DEFAULTS['payout_proposals.json']['proposal_schema'])
+    return store
+
+
+def _save_proposal_store(store, org_id=None):
+    store = dict(store or {})
+    store['updatedAt'] = _now()
+    store.setdefault('proposals', {})
+    store.setdefault('state_machine', _PROTOCOL_DEFAULTS['payout_proposals.json']['state_machine'])
+    store.setdefault('proposal_schema', _PROTOCOL_DEFAULTS['payout_proposals.json']['proposal_schema'])
+    _save_registry_file('payout_proposals.json', store, org_id)
+
+
+def _append_transaction(org_id, entry):
+    tx_path = capsule_path(org_id, 'transactions.jsonl')
+    if org_id and not os.path.isdir(os.path.dirname(tx_path)):
+        _missing_org_error(org_id)
+    os.makedirs(os.path.dirname(tx_path), exist_ok=True)
+    row = dict(entry or {})
+    row.setdefault('ts', _now())
+    with open(tx_path, 'a') as f:
+        f.write(json.dumps(row, sort_keys=True) + '\n')
+    return row
+
+
+def _payout_contribution_types(org_id=None):
+    registry = load_contributors(org_id)
+    return registry.get('contribution_types') or _PROTOCOL_DEFAULTS['contributors.json']['contribution_types']
+
+
+def get_contributor(contributor_id, org_id=None):
+    contributor_id = (contributor_id or '').strip()
+    if not contributor_id:
+        return None
+    return load_contributors(org_id).get('contributors', {}).get(contributor_id)
+
+
+def get_payout_proposal(proposal_id, org_id=None):
+    proposal_id = (proposal_id or '').strip()
+    if not proposal_id:
+        return None
+    return _proposal_store(org_id).get('proposals', {}).get(proposal_id)
+
+
+def list_payout_proposals(org_id=None, *, status=None):
+    proposals = list(_proposal_store(org_id).get('proposals', {}).values())
+    if status:
+        proposals = [row for row in proposals if row.get('status') == status]
+    proposals.sort(
+        key=lambda row: (
+            row.get('updated_at', ''),
+            row.get('created_at', ''),
+            row.get('proposal_id', ''),
+        ),
+        reverse=True,
+    )
+    return proposals
+
+
+def payout_proposal_summary(org_id=None):
+    rows = list_payout_proposals(org_id)
+    summary = {
+        'total': len(rows),
+        'draft': 0,
+        'submitted': 0,
+        'under_review': 0,
+        'approved': 0,
+        'dispute_window': 0,
+        'executed': 0,
+        'rejected': 0,
+        'cancelled': 0,
+        'requested_usd': 0.0,
+        'executed_usd': 0.0,
+    }
+    for row in rows:
+        status = row.get('status', '')
+        if status in summary:
+            summary[status] += 1
+        amount = float(row.get('amount_usd') or 0.0)
+        summary['requested_usd'] += amount
+        if status == 'executed':
+            summary['executed_usd'] += amount
+    summary['requested_usd'] = round(summary['requested_usd'], 4)
+    summary['executed_usd'] = round(summary['executed_usd'], 4)
+    return summary
+
+
+def _normalize_payout_evidence(evidence):
+    payload = dict(evidence or {})
+    payload['pr_urls'] = [str(item).strip() for item in payload.get('pr_urls', []) if str(item).strip()]
+    payload['commit_hashes'] = [str(item).strip() for item in payload.get('commit_hashes', []) if str(item).strip()]
+    payload['issue_refs'] = [str(item).strip() for item in payload.get('issue_refs', []) if str(item).strip()]
+    payload['description'] = str(payload.get('description', '') or '').strip()
+    if not (
+        payload['pr_urls']
+        or payload['commit_hashes']
+        or payload['issue_refs']
+        or payload['description']
+    ):
+        raise ValueError('evidence must include at least one PR URL, commit hash, issue ref, or description')
+    return payload
+
+
+def _resolve_recipient_wallet(contributor_id, recipient_wallet_id='', org_id=None):
+    contributor = get_contributor(contributor_id, org_id)
+    if not contributor:
+        raise LookupError(f'Contributor not found: {contributor_id}')
+    wallet_id = (
+        (recipient_wallet_id or '').strip()
+        or (contributor.get('payout_wallet_id') or '').strip()
+    )
+    if not wallet_id:
+        raise ValueError(
+            'recipient_wallet_id is required unless the contributor record defines payout_wallet_id'
+        )
+    eligible, reason = can_receive_payout(wallet_id, org_id)
+    if not eligible:
+        raise PermissionError(reason)
+    return contributor, wallet_id
+
+
+def _require_transition(record, target_state, *, org_id=None):
+    current_state = (record.get('status') or '').strip()
+    transitions = _proposal_store(org_id).get('state_machine', {}).get('transitions', {})
+    allowed = list(transitions.get(current_state, []))
+    if target_state not in allowed:
+        raise ValueError(
+            f"Proposal '{record.get('proposal_id', '')}' cannot transition from "
+            f"{current_state!r} to {target_state!r}"
+        )
+
+
+def _payout_phase_gate(org_id=None):
+    if _current_phase is None:
+        return True, 'Phase machine unavailable; payout gate deferred to treasury reserve checks'
+    phase_num, phase_info = _current_phase(org_id)
+    if phase_num < 5:
+        return False, (
+            f"Phase {phase_num} ({phase_info.get('name', '')}) does not allow contributor payouts yet"
+        )
+    return True, f"Phase {phase_num} ({phase_info.get('name', '')}) permits contributor payouts"
+
+
+def create_payout_proposal(contributor_id, amount_usd, contribution_type, *,
+                           proposed_by, org_id=None, evidence=None,
+                           recipient_wallet_id='', currency='USDC',
+                           settlement_adapter='internal_ledger', note='',
+                           metadata=None):
+    contributor_id = (contributor_id or '').strip()
+    proposed_by = (proposed_by or '').strip()
+    contribution_type = (contribution_type or '').strip()
+    currency = (currency or 'USDC').strip().upper()
+    settlement_adapter = (settlement_adapter or 'internal_ledger').strip()
+    if not contributor_id:
+        raise ValueError('contributor_id is required')
+    if not proposed_by:
+        raise ValueError('proposed_by is required')
+    amount = round(float(amount_usd), 4)
+    if amount <= 0:
+        raise ValueError('amount_usd must be greater than 0')
+    if contribution_type not in _payout_contribution_types(org_id):
+        raise ValueError(f'Unknown contribution_type {contribution_type!r}')
+    normalized_evidence = _normalize_payout_evidence(evidence)
+    contributor, wallet_id = _resolve_recipient_wallet(
+        contributor_id,
+        recipient_wallet_id=recipient_wallet_id,
+        org_id=org_id,
+    )
+    timestamp = _now()
+    proposal_id = f'ppo_{uuid.uuid4().hex[:12]}'
+    record = {
+        'proposal_id': proposal_id,
+        'id': proposal_id,
+        'institution_id': org_id or _default_org_id(),
+        'contributor_id': contributor_id,
+        'contributor_name': contributor.get('name', ''),
+        'amount_usd': amount,
+        'currency': currency,
+        'contribution_type': contribution_type,
+        'evidence': normalized_evidence,
+        'recipient_wallet_id': wallet_id,
+        'proposed_by': proposed_by,
+        'reviewed_by': '',
+        'approved_by': '',
+        'status': 'draft',
+        'created_at': timestamp,
+        'updated_at': timestamp,
+        'submitted_at': '',
+        'reviewed_at': '',
+        'approved_at': '',
+        'dispute_window_started_at': '',
+        'dispute_window_ends_at': '',
+        'executed_at': '',
+        'executed_by': '',
+        'tx_hash': '',
+        'warrant_id': '',
+        'settlement_adapter': settlement_adapter,
+        'execution_refs': {},
+        'note': note or '',
+        'metadata': dict(metadata or {}),
+    }
+    store = _proposal_store(org_id)
+    store['proposals'][proposal_id] = record
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def submit_payout_proposal(proposal_id, actor_id, *, org_id=None, note='', owner_override=False):
+    actor_id = (actor_id or '').strip()
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    _require_transition(record, 'submitted', org_id=org_id)
+    if not owner_override and actor_id and actor_id != record.get('proposed_by'):
+        raise PermissionError('Only the proposer or owner may submit this payout proposal')
+    timestamp = _now()
+    record['status'] = 'submitted'
+    record['submitted_at'] = timestamp
+    record['updated_at'] = timestamp
+    if note:
+        record['note'] = note
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def review_payout_proposal(proposal_id, reviewer_id, *, org_id=None, note=''):
+    reviewer_id = (reviewer_id or '').strip()
+    if not reviewer_id:
+        raise ValueError('reviewer_id is required')
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    _require_transition(record, 'under_review', org_id=org_id)
+    if reviewer_id in {
+        record.get('contributor_id', ''),
+        record.get('proposed_by', ''),
+    }:
+        raise PermissionError('Reviewer must not be the contributor or proposer')
+    timestamp = _now()
+    record['status'] = 'under_review'
+    record['reviewed_by'] = reviewer_id
+    record['reviewed_at'] = timestamp
+    record['updated_at'] = timestamp
+    if note:
+        record['review_note'] = note
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def approve_payout_proposal(proposal_id, approver_id, *, org_id=None, note=''):
+    approver_id = (approver_id or '').strip()
+    if not approver_id:
+        raise ValueError('approver_id is required')
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    _require_transition(record, 'approved', org_id=org_id)
+    timestamp = _now()
+    record['status'] = 'approved'
+    record['approved_by'] = approver_id
+    record['approved_at'] = timestamp
+    record['updated_at'] = timestamp
+    if note:
+        record['approval_note'] = note
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def open_payout_dispute_window(proposal_id, actor_id, *, org_id=None, note='', dispute_window_hours=None):
+    actor_id = (actor_id or '').strip()
+    if not actor_id:
+        raise ValueError('actor_id is required')
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    _require_transition(record, 'dispute_window', org_id=org_id)
+    state_machine = store.get('state_machine', {})
+    hours = state_machine.get('dispute_window_hours', 72) if dispute_window_hours is None else float(dispute_window_hours)
+    if hours < 0:
+        raise ValueError('dispute_window_hours must be >= 0')
+    started_at = _parse_ts(_now())
+    ends_at = started_at + datetime.timedelta(hours=hours)
+    record['status'] = 'dispute_window'
+    record['updated_at'] = started_at.strftime('%Y-%m-%dT%H:%M:%SZ')
+    record['dispute_window_started_at'] = started_at.strftime('%Y-%m-%dT%H:%M:%SZ')
+    record['dispute_window_ends_at'] = ends_at.strftime('%Y-%m-%dT%H:%M:%SZ')
+    if note:
+        record['approval_note'] = note
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def reject_payout_proposal(proposal_id, actor_id, *, org_id=None, note=''):
+    actor_id = (actor_id or '').strip()
+    if not actor_id:
+        raise ValueError('actor_id is required')
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    current = record.get('status', '')
+    allowed = current in ('submitted', 'under_review', 'dispute_window')
+    if not allowed:
+        raise ValueError(f"Proposal '{proposal_id}' cannot be rejected from status {current!r}")
+    timestamp = _now()
+    record['status'] = 'rejected'
+    record['updated_at'] = timestamp
+    record['reviewed_by'] = actor_id
+    record['reviewed_at'] = timestamp
+    if note:
+        record['review_note'] = note
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def cancel_payout_proposal(proposal_id, actor_id, *, org_id=None, note='', owner_override=False):
+    actor_id = (actor_id or '').strip()
+    if not actor_id:
+        raise ValueError('actor_id is required')
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    current = record.get('status', '')
+    allowed = current in ('draft', 'submitted')
+    if not allowed:
+        raise ValueError(f"Proposal '{proposal_id}' cannot be cancelled from status {current!r}")
+    if not owner_override and actor_id != record.get('proposed_by'):
+        raise PermissionError('Only the proposer or owner may cancel this payout proposal')
+    record['status'] = 'cancelled'
+    record['updated_at'] = _now()
+    if note:
+        record['note'] = note
+    _save_proposal_store(store, org_id)
+    return record
+
+
+def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id='',
+                            settlement_adapter='', tx_hash='', note='',
+                            allow_early=False):
+    actor_id = (actor_id or '').strip()
+    if not actor_id:
+        raise ValueError('actor_id is required')
+    store = _proposal_store(org_id)
+    record = store['proposals'].get((proposal_id or '').strip())
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+    _require_transition(record, 'executed', org_id=org_id)
+    allowed, reason = _payout_phase_gate(org_id)
+    if not allowed:
+        raise PermissionError(reason)
+    ends_at = record.get('dispute_window_ends_at', '')
+    if not allow_early and ends_at:
+        if _parse_ts(ends_at) > _parse_ts(_now()):
+            raise PermissionError(
+                f"Payout proposal '{proposal_id}' is still inside dispute window until {ends_at}"
+            )
+    eligible, reason = can_receive_payout(record.get('recipient_wallet_id', ''), org_id)
+    if not eligible:
+        raise PermissionError(reason)
+    if not can_payout(float(record.get('amount_usd') or 0.0), org_id=org_id):
+        raise PermissionError(
+            f"Payout proposal '{proposal_id}' would breach treasury reserve floor"
+        )
+
+    ledger = load_ledger(org_id)
+    treasury = ledger.setdefault('treasury', {})
+    amount = round(float(record.get('amount_usd') or 0.0), 4)
+    treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) - amount, 4)
+    treasury['expenses_recorded_usd'] = round(
+        float(treasury.get('expenses_recorded_usd', 0.0)) + amount,
+        4,
+    )
+    ledger['updatedAt'] = _now()
+    ledger_path = capsule_path(org_id, 'ledger.json')
+    if org_id and not os.path.isdir(os.path.dirname(ledger_path)):
+        _missing_org_error(org_id)
+    os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
+    with open(ledger_path, 'w') as f:
+        json.dump(ledger, f, indent=2)
+
+    tx_ref = f'ptx_{uuid.uuid4().hex[:12]}'
+    settlement_adapter = (settlement_adapter or record.get('settlement_adapter') or 'internal_ledger').strip()
+    tx_row = _append_transaction(org_id, {
+        'tx_ref': tx_ref,
+        'type': 'payout_execution',
+        'proposal_id': proposal_id,
+        'contributor_id': record.get('contributor_id', ''),
+        'recipient_wallet_id': record.get('recipient_wallet_id', ''),
+        'amount_usd': amount,
+        'currency': record.get('currency', 'USDC'),
+        'settlement_adapter': settlement_adapter,
+        'tx_hash': (tx_hash or '').strip(),
+        'warrant_id': (warrant_id or '').strip(),
+        'cash_after': treasury['cash_usd'],
+        'by': actor_id,
+        'note': note or '',
+    })
+    timestamp = _now()
+    record['status'] = 'executed'
+    record['updated_at'] = timestamp
+    record['executed_at'] = timestamp
+    record['executed_by'] = actor_id
+    record['warrant_id'] = (warrant_id or '').strip()
+    record['settlement_adapter'] = settlement_adapter
+    record['tx_hash'] = (tx_hash or '').strip()
+    record['execution_refs'] = {
+        'tx_ref': tx_row['tx_ref'],
+        'settlement_adapter': settlement_adapter,
+        'tx_hash': (tx_hash or '').strip(),
+    }
+    if note:
+        record['execution_note'] = note
+    _save_proposal_store(store, org_id)
+    return record
 
 
 def get_wallet(wallet_id, org_id=None):

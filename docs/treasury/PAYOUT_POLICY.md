@@ -25,6 +25,10 @@ draft -> submitted -> under_review -> approved -> dispute_window -> executed
 | `rejected` | Proposal rejected at any review stage | Reviewer / owner |
 | `cancelled` | Proposal withdrawn by proposer | Proposer |
 
+Reference workspace surfaces:
+- `GET /api/payouts`
+- `POST /api/payouts/propose|submit|review|approve|open-dispute-window|reject|cancel|execute`
+
 ---
 
 ## 2. Evidence Requirements
@@ -57,6 +61,10 @@ Proposals without sufficient evidence are rejected at `under_review`.
 | Execute payout | Owner only (no delegation for execution in v1) |
 | Cancel proposal | Original proposer, or owner |
 | Reject proposal | Reviewer or owner |
+
+Execution also requires an executable warrant with:
+- `action_class = payout_execution`
+- `boundary_name = payouts`
 
 Self-review is not allowed. The reviewer must be a different person than the contributor.
 

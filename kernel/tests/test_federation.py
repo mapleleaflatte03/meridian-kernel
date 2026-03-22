@@ -2136,6 +2136,170 @@ class FederationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 load_peer_registry(peers_path, host_identity=default_host_identity(host_id='host_alpha'))
 
+    def test_workspace_payout_execution_is_warrant_bound_over_http(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_alpha',
+                host_id='host_alpha',
+                port=_find_free_port(),
+                signing_secret='alpha-secret',
+            )
+
+            economy_dir = os.path.join(alpha['root'], 'economy')
+            with open(os.path.join(economy_dir, 'ledger.json')) as f:
+                ledger = json.load(f)
+            ledger['treasury']['cash_usd'] = 140.0
+            ledger['treasury']['reserve_floor_usd'] = 50.0
+            ledger['treasury']['expenses_recorded_usd'] = 0.0
+            _write_json(os.path.join(economy_dir, 'ledger.json'), ledger)
+            _write_json(os.path.join(economy_dir, 'wallets.json'), {
+                'wallets': {
+                    'wallet_alpha': {
+                        'id': 'wallet_alpha',
+                        'verification_level': 3,
+                        'verification_label': 'self_custody_verified',
+                        'payout_eligible': True,
+                        'status': 'active',
+                    },
+                },
+                'verification_levels': {},
+            })
+            _write_json(os.path.join(economy_dir, 'contributors.json'), {
+                'contributors': {
+                    'contrib_alpha': {
+                        'id': 'contrib_alpha',
+                        'name': 'Contributor Alpha',
+                        'payout_wallet_id': 'wallet_alpha',
+                    },
+                },
+                'contribution_types': ['code'],
+                'registration_requirements': {},
+            })
+            _write_json(os.path.join(economy_dir, 'payout_proposals.json'), {
+                'proposals': {
+                    'ppo_ready': {
+                        'proposal_id': 'ppo_ready',
+                        'id': 'ppo_ready',
+                        'institution_id': 'org_alpha',
+                        'contributor_id': 'contrib_alpha',
+                        'contributor_name': 'Contributor Alpha',
+                        'amount_usd': 12.0,
+                        'currency': 'USDC',
+                        'contribution_type': 'code',
+                        'evidence': {'description': 'seeded integration proof'},
+                        'recipient_wallet_id': 'wallet_alpha',
+                        'proposed_by': 'user_seed',
+                        'reviewed_by': 'user_reviewer',
+                        'approved_by': 'user_owner',
+                        'status': 'dispute_window',
+                        'created_at': '2026-03-20T00:00:00Z',
+                        'updated_at': '2026-03-20T00:00:00Z',
+                        'submitted_at': '2026-03-20T00:00:00Z',
+                        'reviewed_at': '2026-03-20T00:10:00Z',
+                        'approved_at': '2026-03-20T00:20:00Z',
+                        'dispute_window_started_at': '2026-03-20T00:20:00Z',
+                        'dispute_window_ends_at': '2026-03-20T00:20:00Z',
+                        'executed_at': '',
+                        'executed_by': '',
+                        'tx_hash': '',
+                        'warrant_id': '',
+                        'settlement_adapter': 'internal_ledger',
+                        'execution_refs': {},
+                        'note': '',
+                        'metadata': {},
+                    },
+                },
+            })
+
+            with _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                token = session['token']
+                bearer_headers = {
+                    'Authorization': f'Bearer {token}',
+                    'Content-Type': 'application/json',
+                }
+
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/payouts/propose',
+                    payload={
+                        'contributor_id': 'contrib_alpha',
+                        'amount_usd': 3.0,
+                        'contribution_type': 'code',
+                        'evidence': {'description': 'fresh API proposal'},
+                        'recipient_wallet_id': 'wallet_alpha',
+                    },
+                    headers=bearer_headers,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body['proposal']['status'], 'draft')
+
+                request_payload = {
+                    'proposal_id': 'ppo_ready',
+                    'settlement_adapter': 'internal_ledger',
+                    'tx_hash': 'tx_alpha_demo',
+                }
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/warrants/issue',
+                    payload={
+                        'action_class': 'payout_execution',
+                        'boundary_name': 'payouts',
+                        'request_payload': request_payload,
+                        'risk_class': 'high',
+                    },
+                    headers=bearer_headers,
+                )
+                self.assertEqual(status, 200)
+                warrant_id = body['warrant']['warrant_id']
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/warrants/approve',
+                    payload={'warrant_id': warrant_id},
+                    headers=bearer_headers,
+                )
+                self.assertEqual(status, 200)
+
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/payouts/execute',
+                    payload={
+                        **request_payload,
+                        'warrant_id': warrant_id,
+                    },
+                    headers=bearer_headers,
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(body['proposal']['status'], 'executed')
+                self.assertEqual(body['proposal']['warrant_id'], warrant_id)
+                self.assertEqual(body['warrant']['execution_state'], 'executed')
+
+                status, payouts = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/payouts',
+                    headers={'Authorization': f'Bearer {token}'},
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(payouts['summary']['executed'], 1)
+                self.assertGreaterEqual(payouts['summary']['total'], 2)
+
+            with open(os.path.join(economy_dir, 'ledger.json')) as f:
+                ledger = json.load(f)
+            self.assertAlmostEqual(ledger['treasury']['cash_usd'], 128.0, places=2)
+            self.assertAlmostEqual(ledger['treasury']['expenses_recorded_usd'], 12.0, places=2)
+
+            tx_rows = _read_jsonl(os.path.join(economy_dir, 'transactions.jsonl'))
+            self.assertEqual(tx_rows[-1]['type'], 'payout_execution')
+            self.assertEqual(tx_rows[-1]['proposal_id'], 'ppo_ready')
+            self.assertEqual(tx_rows[-1]['tx_hash'], 'tx_alpha_demo')
+
+            audit_rows = _read_jsonl(alpha['audit_log'])
+            actions = [row.get('action') for row in audit_rows]
+            self.assertIn('payout_proposal_created', actions)
+            self.assertIn('payout_executed', actions)
+
 
 if __name__ == '__main__':
     unittest.main()

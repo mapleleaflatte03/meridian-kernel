@@ -116,6 +116,24 @@ This is the first public court-network object beyond warrants and commitment
 records. It is not yet the full peer suspension, witness-host, or settlement
 freeze program.
 
+## Payout Proposal Primitive
+
+Meridian now also has a first real payout proposal primitive for
+institution-owned contributor compensation. Today that proof is still
+deliberately narrow:
+
+- payout proposals are institution-scoped and capsule-backed
+- workspace APIs can propose, submit, review, approve, reject, cancel, open a
+  dispute window, and inspect proposal state
+- execution is warrant-bound through `action_class = payout_execution`
+- execution also enforces wallet eligibility, reserve-floor surplus, and a
+  phase-5 contributor-payout gate before funds move
+- successful execution appends a `payout_execution` row to the institution
+  transaction journal and links warrant execution refs back to the proposal
+
+This is the first public payout object in Meridian. It is not yet the full
+settlement-adapter, multi-institution payout network.
+
 ## System Diagram
 
 ```

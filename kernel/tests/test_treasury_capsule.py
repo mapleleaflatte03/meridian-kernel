@@ -169,6 +169,128 @@ class TreasuryCapsuleTests(unittest.TestCase):
             self.assertTrue(migrated_path.exists())
             self.assertIn('legacy_wallet', wallets['wallets'])
 
+    def test_payout_proposal_lifecycle_executes_against_capsule_state(self):
+        ledger_path = self.capsule_dir / 'ledger.json'
+        ledger = json.loads(ledger_path.read_text())
+        ledger['treasury']['cash_usd'] = 120.0
+        ledger['treasury']['reserve_floor_usd'] = 50.0
+        ledger_path.write_text(json.dumps(ledger, indent=2))
+
+        (self.capsule_dir / 'wallets.json').write_text(json.dumps({
+            'wallets': {
+                'wallet_exec': {
+                    'id': 'wallet_exec',
+                    'verification_level': 3,
+                    'verification_label': 'self_custody_verified',
+                    'payout_eligible': True,
+                    'status': 'active',
+                }
+            },
+            'verification_levels': {},
+        }, indent=2))
+        (self.capsule_dir / 'contributors.json').write_text(json.dumps({
+            'contributors': {
+                'contrib_exec': {
+                    'id': 'contrib_exec',
+                    'name': 'Contributor Exec',
+                    'payout_wallet_id': 'wallet_exec',
+                }
+            },
+            'contribution_types': ['code'],
+            'registration_requirements': {},
+        }, indent=2))
+
+        proposal = treasury.create_payout_proposal(
+            'contrib_exec',
+            12.0,
+            'code',
+            proposed_by='user:proposer',
+            org_id=self.org_id,
+            evidence={'pr_urls': ['https://example.test/pr/1']},
+        )
+        proposal = treasury.submit_payout_proposal(
+            proposal['proposal_id'],
+            'user:proposer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.review_payout_proposal(
+            proposal['proposal_id'],
+            'user:reviewer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.approve_payout_proposal(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+        )
+        proposal = treasury.open_payout_dispute_window(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+            dispute_window_hours=0,
+        )
+        proposal = treasury.execute_payout_proposal(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+            warrant_id='war_exec_123',
+            tx_hash='tx_demo_hash',
+        )
+
+        self.assertEqual(proposal['status'], 'executed')
+        self.assertEqual(proposal['warrant_id'], 'war_exec_123')
+        self.assertEqual(proposal['tx_hash'], 'tx_demo_hash')
+        self.assertTrue(proposal['execution_refs']['tx_ref'].startswith('ptx_'))
+
+        summary = treasury.payout_proposal_summary(self.org_id)
+        self.assertEqual(summary['executed'], 1)
+        self.assertEqual(summary['requested_usd'], 12.0)
+        self.assertEqual(summary['executed_usd'], 12.0)
+
+        ledger = json.loads(ledger_path.read_text())
+        self.assertAlmostEqual(ledger['treasury']['cash_usd'], 108.0, places=2)
+        self.assertAlmostEqual(ledger['treasury']['expenses_recorded_usd'], 12.0, places=2)
+
+        tx_lines = [json.loads(line) for line in (self.capsule_dir / 'transactions.jsonl').read_text().splitlines() if line.strip()]
+        self.assertEqual(tx_lines[-1]['type'], 'payout_execution')
+        self.assertEqual(tx_lines[-1]['proposal_id'], proposal['proposal_id'])
+        self.assertEqual(tx_lines[-1]['warrant_id'], 'war_exec_123')
+
+    def test_create_payout_proposal_blocks_ineligible_wallet(self):
+        (self.capsule_dir / 'wallets.json').write_text(json.dumps({
+            'wallets': {
+                'wallet_blocked': {
+                    'id': 'wallet_blocked',
+                    'verification_level': 2,
+                    'verification_label': 'exchange_linked',
+                    'payout_eligible': False,
+                    'status': 'active',
+                }
+            },
+            'verification_levels': {},
+        }, indent=2))
+        (self.capsule_dir / 'contributors.json').write_text(json.dumps({
+            'contributors': {
+                'contrib_blocked': {
+                    'id': 'contrib_blocked',
+                    'name': 'Contributor Blocked',
+                    'payout_wallet_id': 'wallet_blocked',
+                }
+            },
+            'contribution_types': ['code'],
+            'registration_requirements': {},
+        }, indent=2))
+
+        with self.assertRaises(PermissionError):
+            treasury.create_payout_proposal(
+                'contrib_blocked',
+                5.0,
+                'code',
+                proposed_by='user:proposer',
+                org_id=self.org_id,
+                evidence={'description': 'bad wallet should fail'},
+            )
+
     def test_missing_org_fails_cleanly(self):
         with self.assertRaises(SystemExit) as ctx:
             treasury.load_wallets(f'org_missing_{uuid.uuid4().hex[:8]}')

@@ -64,8 +64,13 @@ What is not yet broadly proven:
 - live multi-institution routing inside one deployed service boundary
 
 The executable proof map now lives in [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md).
-For the smallest high-signal rerun, use
-[`examples/run_public_proof_suite.sh`](examples/run_public_proof_suite.sh).
+For the smallest high-signal rerun, generate the public proof bundle with
+[`examples/generate_public_proof_bundle.py`](examples/generate_public_proof_bundle.py).
+That bundle now emits:
+- a structured three-host federation summary
+- a structured OpenClaw reference-adapter federation summary
+- an optional live host receipt when `--live-manifest-url` is supplied
+- an explicit `not_live_proven` list
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
 

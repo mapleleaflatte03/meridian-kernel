@@ -21,56 +21,53 @@ from test_federation import (  # noqa: E402
 )
 
 
-class OpenClawFederationProofTests(unittest.TestCase):
-    def setUp(self):
-        self.orig_check_authority = openclaw_adapter.check_authority
-        self.orig_check_budget = openclaw_adapter.check_budget
-        self.orig_get_restrictions = openclaw_adapter.get_restrictions
-        self.orig_meter_record = openclaw_adapter.meter_record
-        self.orig_log_event = openclaw_adapter.log_event
-
-    def tearDown(self):
-        openclaw_adapter.check_authority = self.orig_check_authority
-        openclaw_adapter.check_budget = self.orig_check_budget
-        openclaw_adapter.get_restrictions = self.orig_get_restrictions
-        openclaw_adapter.meter_record = self.orig_meter_record
-        openclaw_adapter.log_event = self.orig_log_event
-
-    def test_openclaw_reference_adapter_wraps_three_host_federation_execution(self):
+def _run_openclaw_reference_adapter_federation_proof():
+    orig_check_authority = openclaw_adapter.check_authority
+    orig_check_budget = openclaw_adapter.check_budget
+    orig_get_restrictions = openclaw_adapter.get_restrictions
+    orig_meter_record = openclaw_adapter.meter_record
+    orig_log_event = openclaw_adapter.log_event
+    try:
         try:
             port_alpha = _find_free_port()
             port_beta = _find_free_port()
             port_gamma = _find_free_port()
         except PermissionError as exc:
-            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+            raise unittest.SkipTest(f'localhost socket bind unavailable in sandbox: {exc}')
 
         seen = {}
         openclaw_adapter.get_restrictions = lambda agent_id, org_id=None: []
         openclaw_adapter.check_authority = lambda agent_id, action_type, org_id=None: (True, 'ok')
         openclaw_adapter.check_budget = lambda agent_id, cost_usd, org_id=None: (True, 'ok')
         openclaw_adapter.meter_record = lambda org_id, agent_id, metric, quantity=1.0, unit='calls', cost_usd=0.0, run_id='', details=None: (
-            seen.setdefault('meter', {
-                'org_id': org_id,
-                'agent_id': agent_id,
-                'metric': metric,
-                'quantity': quantity,
-                'unit': unit,
-                'cost_usd': cost_usd,
-                'run_id': run_id,
-                'details': details or {},
-            }) or 'meter_openclaw_ref'
+            seen.setdefault(
+                'meter',
+                {
+                    'org_id': org_id,
+                    'agent_id': agent_id,
+                    'metric': metric,
+                    'quantity': quantity,
+                    'unit': unit,
+                    'cost_usd': cost_usd,
+                    'run_id': run_id,
+                    'details': details or {},
+                },
+            ) or 'meter_openclaw_ref'
         )
         openclaw_adapter.log_event = lambda org_id, agent_id, action, resource='', outcome='success', actor_type='agent', details=None, policy_ref='', session_id=None: (
-            seen.setdefault('audit', {
-                'org_id': org_id,
-                'agent_id': agent_id,
-                'action': action,
-                'resource': resource,
-                'outcome': outcome,
-                'actor_type': actor_type,
-                'details': details or {},
-                'session_id': session_id,
-            }) or 'event_openclaw_ref'
+            seen.setdefault(
+                'audit',
+                {
+                    'org_id': org_id,
+                    'agent_id': agent_id,
+                    'action': action,
+                    'resource': resource,
+                    'outcome': outcome,
+                    'actor_type': actor_type,
+                    'details': details or {},
+                    'session_id': session_id,
+                },
+            ) or 'event_openclaw_ref'
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -174,8 +171,8 @@ class OpenClawFederationProofTests(unittest.TestCase):
                     },
                 )
                 action_gate = openclaw_adapter.pre_action_check('org_alpha', adapter_envelope)
-                self.assertTrue(action_gate['allowed'])
-                self.assertEqual(action_gate['stage'], 'ok')
+                assert action_gate['allowed'], action_gate
+                assert action_gate['stage'] == 'ok', action_gate
 
                 proposal_payload = {
                     'summary': 'Shared competitor brief',
@@ -203,14 +200,12 @@ class OpenClawFederationProofTests(unittest.TestCase):
                         'Content-Type': 'application/json',
                     },
                 )
-                self.assertEqual(proposal_status, 200, proposal_body)
-                self.assertEqual(proposal_body['delivery']['claims']['message_type'], 'commitment_proposal')
-                self.assertEqual(proposal_body['delivery']['witness_archive']['created'], 1)
+                assert proposal_status == 200, proposal_body
+                assert proposal_body['delivery']['claims']['message_type'] == 'commitment_proposal', proposal_body
+                assert proposal_body['delivery']['witness_archive']['created'] == 1, proposal_body
                 commitment_id = proposal_body['commitment']['commitment_id']
-                self.assertEqual(
-                    proposal_body['delivery']['claims']['commitment_id'],
-                    commitment_id,
-                )
+                assert proposal_body['delivery']['claims']['commitment_id'] == commitment_id, proposal_body
+
                 adapter_envelope['details']['commitment_id'] = commitment_id
                 execution_request_payload = {
                     'task': 'shared brief review',
@@ -238,9 +233,9 @@ class OpenClawFederationProofTests(unittest.TestCase):
                         'Content-Type': 'application/json',
                     },
                 )
-                self.assertEqual(acceptance_status, 200, acceptance_body)
-                self.assertEqual(acceptance_body['delivery']['claims']['message_type'], 'commitment_acceptance')
-                self.assertEqual(acceptance_body['delivery']['witness_archive']['created'], 1)
+                assert acceptance_status == 200, acceptance_body
+                assert acceptance_body['delivery']['claims']['message_type'] == 'commitment_acceptance', acceptance_body
+                assert acceptance_body['delivery']['witness_archive']['created'] == 1, acceptance_body
 
                 execution_warrant = _issue_workspace_warrant(
                     alpha,
@@ -263,34 +258,37 @@ class OpenClawFederationProofTests(unittest.TestCase):
                         'Content-Type': 'application/json',
                     },
                 )
-                self.assertEqual(execution_status, 200, execution_body)
-                self.assertEqual(execution_body['delivery']['claims']['message_type'], 'execution_request')
-                self.assertEqual(execution_body['delivery']['witness_archive']['created'], 1)
+                assert execution_status == 200, execution_body
+                assert execution_body['delivery']['claims']['message_type'] == 'execution_request', execution_body
+                assert execution_body['delivery']['witness_archive']['created'] == 1, execution_body
 
                 post_record = openclaw_adapter.post_action_record(
                     'org_alpha',
-                    dict(adapter_envelope, details={
-                        **adapter_envelope['details'],
-                        'federation_envelope_id': execution_body['delivery']['claims']['envelope_id'],
-                        'receiver_host_id': execution_body['delivery']['receipt']['receiver_host_id'],
-                    }),
+                    dict(
+                        adapter_envelope,
+                        details={
+                            **adapter_envelope['details'],
+                            'federation_envelope_id': execution_body['delivery']['claims']['envelope_id'],
+                            'receiver_host_id': execution_body['delivery']['receipt']['receiver_host_id'],
+                        },
+                    ),
                     actual_cost_usd=0.04,
                     outcome='success',
                     actor_type='agent',
                 )
-                self.assertEqual(post_record['cost_usd'], 0.04)
-                self.assertEqual(seen['meter']['org_id'], 'org_alpha')
-                self.assertEqual(seen['meter']['metric'], 'runtime_action')
-                self.assertEqual(seen['audit']['action'], 'federated_execution')
-                self.assertEqual(seen['audit']['resource'], 'host_beta/shared_brief_review')
+                assert post_record['cost_usd'] == 0.04, post_record
+                assert seen['meter']['org_id'] == 'org_alpha', seen['meter']
+                assert seen['meter']['metric'] == 'runtime_action', seen['meter']
+                assert seen['audit']['action'] == 'federated_execution', seen['audit']
+                assert seen['audit']['resource'] == 'host_beta/shared_brief_review', seen['audit']
 
                 jobs_status, jobs_body = _http_json(
                     'GET',
                     beta['base_url'] + '/api/federation/execution-jobs',
                     headers={'Authorization': beta['auth_header']},
                 )
-                self.assertEqual(jobs_status, 200, jobs_body)
-                self.assertEqual(jobs_body['summary']['pending_local_warrant'], 1)
+                assert jobs_status == 200, jobs_body
+                assert jobs_body['summary']['pending_local_warrant'] == 1, jobs_body
                 local_warrant_id = jobs_body['jobs'][0]['local_warrant_id']
 
                 review_status, review_body = _http_json(
@@ -302,9 +300,9 @@ class OpenClawFederationProofTests(unittest.TestCase):
                     },
                     headers={'Authorization': beta['auth_header']},
                 )
-                self.assertEqual(review_status, 200, review_body)
-                self.assertEqual(review_body['court_notice']['court_notice']['decision'], 'stay')
-                self.assertEqual(review_body['court_notice']['delivery']['witness_archive']['created'], 1)
+                assert review_status == 200, review_body
+                assert review_body['court_notice']['court_notice']['decision'] == 'stay', review_body
+                assert review_body['court_notice']['delivery']['witness_archive']['created'] == 1, review_body
 
                 breach_warrant = _issue_workspace_warrant(
                     beta,
@@ -326,53 +324,136 @@ class OpenClawFederationProofTests(unittest.TestCase):
                         'Content-Type': 'application/json',
                     },
                 )
-                self.assertEqual(breach_status, 200, breach_body)
-                self.assertEqual(
-                    breach_body['delivery']['response']['processing']['federation_peer']['trust_state'],
-                    'suspended',
-                )
-                self.assertEqual(breach_body['delivery']['witness_archive']['created'], 1)
+                assert breach_status == 200, breach_body
+                assert (
+                    breach_body['delivery']['response']['processing']['federation_peer']['trust_state'] == 'suspended'
+                ), breach_body
+                assert breach_body['delivery']['witness_archive']['created'] == 1, breach_body
 
                 alpha_cases_status, alpha_cases_body = _http_json(
                     'GET',
                     alpha['base_url'] + '/api/cases',
                     headers={'Authorization': alpha['auth_header']},
                 )
-                self.assertEqual(alpha_cases_status, 200, alpha_cases_body)
-                self.assertEqual(alpha_cases_body['blocking_commitment_ids'], [commitment_id])
-                self.assertEqual(alpha_cases_body['blocked_peer_host_ids'], ['host_beta'])
+                assert alpha_cases_status == 200, alpha_cases_body
+                assert alpha_cases_body['blocking_commitment_ids'] == [commitment_id], alpha_cases_body
+                assert alpha_cases_body['blocked_peer_host_ids'] == ['host_beta'], alpha_cases_body
 
                 gamma_archive_status, gamma_archive_body = _http_json(
                     'GET',
                     gamma['base_url'] + '/api/federation/witness/archive',
                     headers={'Authorization': gamma['auth_header']},
                 )
-                self.assertEqual(gamma_archive_status, 200, gamma_archive_body)
-                self.assertEqual(gamma_archive_body['summary']['total'], 5)
-                self.assertEqual(
-                    gamma_archive_body['summary']['message_type_counts'],
-                    {
-                        'commitment_acceptance': 1,
-                        'commitment_breach_notice': 1,
-                        'commitment_proposal': 1,
-                        'court_notice': 1,
-                        'execution_request': 1,
-                    },
-                )
+                assert gamma_archive_status == 200, gamma_archive_body
+                assert gamma_archive_body['summary']['total'] == 5, gamma_archive_body
+                assert gamma_archive_body['summary']['message_type_counts'] == {
+                    'commitment_acceptance': 1,
+                    'commitment_breach_notice': 1,
+                    'commitment_proposal': 1,
+                    'court_notice': 1,
+                    'execution_request': 1,
+                }, gamma_archive_body
 
             alpha_events = _read_jsonl(alpha['audit_log'])
             beta_events = _read_jsonl(beta['audit_log'])
             gamma_events = _read_jsonl(gamma['audit_log'])
-            self.assertTrue(
-                any(event.get('action') == 'federation_commitment_breach_notice_recorded' for event in alpha_events)
-            )
-            self.assertTrue(
-                any(event.get('action') == 'federation_witness_archive_sent' for event in beta_events)
-            )
-            self.assertGreaterEqual(
-                len([event for event in gamma_events if event.get('action') == 'federation_witness_observation_archived']),
-                5,
-            )
+            archived = [
+                event for event in gamma_events
+                if event.get('action') == 'federation_witness_observation_archived'
+            ]
+            assert any(
+                event.get('action') == 'federation_commitment_breach_notice_recorded'
+                for event in alpha_events
+            ), alpha_events
+            assert any(
+                event.get('action') == 'federation_witness_archive_sent'
+                for event in beta_events
+            ), beta_events
+            assert len(archived) >= 5, gamma_events
+
+            return {
+                'runtime_id': 'openclaw_compatible',
+                'adapter_kind': 'reference_adapter',
+                'scope': 'kernel_side_reference_seam',
+                'action_gate': action_gate,
+                'commitment_id': commitment_id,
+                'proposal': {
+                    'status': proposal_status,
+                    'body': proposal_body,
+                },
+                'acceptance': {
+                    'status': acceptance_status,
+                    'body': acceptance_body,
+                },
+                'execution': {
+                    'status': execution_status,
+                    'body': execution_body,
+                },
+                'jobs': {
+                    'status': jobs_status,
+                    'body': jobs_body,
+                },
+                'review': {
+                    'status': review_status,
+                    'body': review_body,
+                },
+                'breach': {
+                    'status': breach_status,
+                    'body': breach_body,
+                },
+                'cases': {
+                    'status': alpha_cases_status,
+                    'body': alpha_cases_body,
+                },
+                'witness_archive': {
+                    'status': gamma_archive_status,
+                    'body': gamma_archive_body,
+                },
+                'post_action_record': post_record,
+                'meter': seen['meter'],
+                'audit': seen['audit'],
+                'audit_events': {
+                    'alpha_actions': [event.get('action') for event in alpha_events],
+                    'beta_actions': [event.get('action') for event in beta_events],
+                    'gamma_archive_count': len(archived),
+                },
+            }
+    finally:
+        openclaw_adapter.check_authority = orig_check_authority
+        openclaw_adapter.check_budget = orig_check_budget
+        openclaw_adapter.get_restrictions = orig_get_restrictions
+        openclaw_adapter.meter_record = orig_meter_record
+        openclaw_adapter.log_event = orig_log_event
+
+
+class OpenClawFederationProofTests(unittest.TestCase):
+    def test_openclaw_reference_adapter_wraps_three_host_federation_execution(self):
+        proof = _run_openclaw_reference_adapter_federation_proof()
+        self.assertEqual(proof['runtime_id'], 'openclaw_compatible')
+        self.assertEqual(proof['adapter_kind'], 'reference_adapter')
+        self.assertTrue(proof['action_gate']['allowed'])
+        self.assertEqual(proof['action_gate']['stage'], 'ok')
+        self.assertEqual(proof['proposal']['status'], 200)
+        self.assertEqual(proof['acceptance']['status'], 200)
+        self.assertEqual(proof['execution']['status'], 200)
+        self.assertEqual(
+            proof['execution']['body']['delivery']['claims']['message_type'],
+            'execution_request',
+        )
+        self.assertEqual(proof['execution']['body']['delivery']['witness_archive']['created'], 1)
+        self.assertEqual(proof['post_action_record']['cost_usd'], 0.04)
+        self.assertEqual(proof['meter']['metric'], 'runtime_action')
+        self.assertEqual(proof['audit']['action'], 'federated_execution')
+        self.assertEqual(proof['review']['body']['court_notice']['court_notice']['decision'], 'stay')
+        self.assertEqual(
+            proof['breach']['body']['delivery']['response']['processing']['federation_peer']['trust_state'],
+            'suspended',
+        )
+        self.assertEqual(proof['cases']['body']['blocking_commitment_ids'], [proof['commitment_id']])
+        self.assertEqual(proof['witness_archive']['body']['summary']['total'], 5)
+        self.assertIn('federation_commitment_breach_notice_recorded', proof['audit_events']['alpha_actions'])
+        self.assertIn('federation_witness_archive_sent', proof['audit_events']['beta_actions'])
+        self.assertGreaterEqual(proof['audit_events']['gamma_archive_count'], 5)
 
 
 if __name__ == '__main__':

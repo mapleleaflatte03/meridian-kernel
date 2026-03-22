@@ -74,8 +74,10 @@ deliberately narrow:
   commitment proposal/acceptance, execution review, court notice, breach
   notice, and witness archival compose into one end-to-end kernel story
 - the executable public proof map now lives in
-  [`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md), with a focused rerun script at
-  [`examples/run_public_proof_suite.sh`](examples/run_public_proof_suite.sh)
+  [`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md), with a focused bundle
+  generator at [`examples/generate_public_proof_bundle.py`](examples/generate_public_proof_bundle.py)
+  that emits structured reference proofs and can optionally embed a public
+  live host receipt from `GET /api/federation/manifest`
 
 What is not yet broadly proven in public code:
 - live end-to-end OpenClaw-compatible deployment wiring

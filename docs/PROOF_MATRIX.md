@@ -25,16 +25,29 @@ This file maps public claims to executable proof artifacts or live surfaces.
 
 ## Public Proof Runner
 
-Run the high-signal reference proof suite:
+Generate the high-signal public proof bundle:
 
 ```bash
-./examples/run_public_proof_suite.sh
+python3 examples/generate_public_proof_bundle.py
 ```
 
-This intentionally runs the smallest set of executable proofs that demonstrate:
+To embed a truthful live host receipt as well, pass the public live manifest:
 
-1. OpenClaw-compatible runtime governance seam
-2. 3-host federation story
+```bash
+python3 examples/generate_public_proof_bundle.py \
+  --live-manifest-url http://127.0.0.1:18901/api/federation/manifest
+```
+
+This emits a JSON artifact containing:
+
+1. a three-host federation summary
+2. an OpenClaw reference-adapter federation summary
+3. an optional live host receipt from `GET /api/federation/manifest`
+4. an explicit `not_live_proven` list
+
+In restricted environments the bundle may mark a proof `skipped` instead of
+failing, for example when localhost socket binding is unavailable. That is
+expected and truthful.
 
 The broader federation regression matrix remains in
 [`kernel/tests/test_federation.py`](../kernel/tests/test_federation.py) and is

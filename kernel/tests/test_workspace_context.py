@@ -563,9 +563,24 @@ class WorkspaceContextTests(unittest.TestCase):
             'target_host_id': 'host_alpha',
             'target_institution_id': 'org_alpha',
             'delivery_refs': [],
+            'settlement_refs': [],
+        }
+        proposal = {
+            'proposal_id': 'pay_demo',
+            'linked_commitment_id': 'cmt_demo',
+            'status': 'executed',
+            'execution_refs': {
+                'tx_ref': 'ptx_demo',
+                'settlement_adapter': 'internal_ledger',
+                'proof_type': 'ledger_transaction',
+                'verification_state': 'host_ledger_final',
+                'finality_state': 'host_local_final',
+                'proof': {'mode': 'institution_transactions_journal'},
+            },
         }
         stored_job = dict(job)
         stored_warrant = dict(warrant)
+        delivered_payloads = []
         delivery = {
             'claims': {
                 'envelope_id': 'fed_notice_1',
@@ -593,24 +608,24 @@ class WorkspaceContextTests(unittest.TestCase):
             stored_warrant['execution_refs'] = dict(execution_refs or {})
             return dict(stored_warrant)
 
+        def fake_deliver(*args, **kwargs):
+            delivered_payloads.append(dict(kwargs.get('payload') or {}))
+            return delivery, {'host_id': 'host_beta'}
+
         with mock.patch.object(self.workspace, 'get_warrant', return_value=stored_warrant), \
              mock.patch.object(self.workspace, 'validate_warrant_for_execution') as validate, \
              mock.patch.object(self.workspace, 'mark_warrant_executed', side_effect=fake_mark_warrant_executed), \
              mock.patch.object(self.workspace, 'get_commitment', return_value=commitment), \
+             mock.patch.object(self.workspace, 'list_payout_proposals', return_value=[proposal]), \
+             mock.patch.object(self.workspace, 'get_payout_proposal', return_value=proposal), \
              mock.patch.object(self.workspace, 'upsert_execution_job', side_effect=fake_upsert), \
-             mock.patch.object(self.workspace, '_deliver_federation_envelope', return_value=(delivery, {'host_id': 'host_beta'})) as deliver, \
+             mock.patch.object(self.workspace, '_deliver_federation_envelope', side_effect=fake_deliver) as deliver, \
              mock.patch.object(self.workspace, 'log_event'):
             executed = self.workspace._complete_federated_execution_job(
                 'org_a',
                 job,
                 actor_id='user_owner',
                 session_id='ses_demo',
-                execution_refs={
-                    'proof_type': 'local_execution',
-                    'verification_state': 'host_local_final',
-                    'finality_state': 'host_local_final',
-                    'proof': {'job_id': 'fej_demo'},
-                },
             )
 
             self.assertEqual(executed['execution_job']['state'], 'executed')
@@ -619,6 +634,8 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(executed['settlement_notice']['envelope_id'], 'fed_notice_1')
             self.assertEqual(deliver.call_count, 1)
             validate.assert_called_once()
+            self.assertEqual(delivered_payloads[0]['execution_refs']['proposal_id'], 'pay_demo')
+            self.assertEqual(delivered_payloads[0]['execution_refs']['tx_ref'], 'ptx_demo')
 
             commitment['delivery_refs'] = [
                 {
@@ -734,6 +751,7 @@ class WorkspaceContextTests(unittest.TestCase):
 
     def test_process_received_settlement_notice_marks_inbox_processed(self):
         from federation import FederationEnvelopeClaims
+        from runtime_host import default_host_identity
 
         calls = {}
         self.workspace.validate_commitment_for_settlement = (
@@ -760,6 +778,22 @@ class WorkspaceContextTests(unittest.TestCase):
             'envelope_id': 'fed_settle',
             'state': kwargs.get('state', 'received'),
             'processed_at': '2026-03-22T00:00:00Z' if kwargs.get('state') == 'processed' else '',
+        }
+        self.workspace.preflight_settlement_adapter = lambda adapter_id, **kwargs: {
+            'preflight_ok': True,
+            'requested_adapter_id': adapter_id,
+            'currency': 'USDC',
+            'normalized_proof': {
+                'proof_type': 'ledger_transaction',
+                'verification_state': 'host_ledger_final',
+                'finality_state': 'host_local_final',
+                'reversal_or_dispute_capability': 'court_case',
+                'proof': {'mode': 'institution_transactions_journal'},
+            },
+            'contract': {
+                'adapter_id': adapter_id,
+                'execution_mode': 'host_ledger',
+            },
         }
         try:
             claims = FederationEnvelopeClaims(
@@ -790,10 +824,6 @@ class WorkspaceContextTests(unittest.TestCase):
                     'proposal_id': 'pay_demo',
                     'tx_ref': 'tx_demo',
                     'settlement_adapter': 'internal_ledger',
-                    'proof_type': 'internal_ledger',
-                    'verification_state': 'accepted',
-                    'finality_state': 'final',
-                    'proof': {'row': 1},
                 },
             )
         finally:
@@ -805,9 +835,86 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['commitment']['state'], 'settled')
         self.assertEqual(processing['settlement_ref']['tx_ref'], 'tx_demo')
         self.assertEqual(processing['settlement_ref']['proposal_id'], 'pay_demo')
+        self.assertEqual(processing['settlement_ref']['proof_type'], 'ledger_transaction')
+        self.assertEqual(processing['settlement_ref']['verification_state'], 'host_ledger_final')
+        self.assertEqual(processing['settlement_ref']['finality_state'], 'host_local_final')
+        self.assertEqual(
+            processing['settlement_ref']['settlement_adapter_contract']['adapter_id'],
+            'internal_ledger',
+        )
+        self.assertTrue(processing['settlement_preflight']['preflight_ok'])
         self.assertEqual(processing['inbox_entry']['state'], 'processed')
         self.assertEqual(calls['settlement_ref'][0], 'cmt_demo')
         self.assertEqual(calls['settlement_ref'][2], 'org_a')
+
+    def test_process_received_settlement_notice_opens_case_when_adapter_invalid(self):
+        from federation import FederationEnvelopeClaims
+        from runtime_host import default_host_identity
+
+        audit_events = []
+        self.workspace.validate_commitment_for_settlement = (
+            lambda commitment_id, **kwargs: {'commitment_id': commitment_id, 'state': 'accepted'}
+        )
+        self.workspace._maybe_block_commitment_settlement = lambda *args, **kwargs: (None, None)
+        self.workspace.preflight_settlement_adapter = lambda adapter_id, **kwargs: {
+            'preflight_ok': False,
+            'requested_adapter_id': adapter_id,
+            'error_type': 'unknown_adapter',
+            'error': f'Unknown settlement_adapter {adapter_id!r}',
+        }
+        self.workspace.ensure_case_for_delivery_failure = lambda *args, **kwargs: (
+            {
+                'case_id': 'case_invalid_notice',
+                'claim_type': 'invalid_settlement_notice',
+                'status': 'open',
+                'linked_commitment_id': 'cmt_demo',
+                'target_host_id': 'host_alpha',
+            },
+            True,
+        )
+        self.workspace._maybe_suspend_peer_for_case = lambda *args, **kwargs: {
+            'applied': True,
+            'peer_host_id': 'host_alpha',
+            'trust_state': 'suspended',
+        }
+        self.workspace.record_settlement_ref = lambda *args, **kwargs: self.fail('settlement ref should not be recorded')
+        self.workspace.settle_commitment = lambda *args, **kwargs: self.fail('commitment should not settle')
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_invalid_settle',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_a',
+            actor_type='service',
+            actor_id='peer:host_alpha',
+            session_id='ses_alpha',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='settlement_notice',
+            payload_hash='hash_invalid',
+            warrant_id='war_demo',
+            commitment_id='cmt_demo',
+        )
+        processing = self.workspace._process_received_federation_message(
+            'org_a',
+            claims,
+            {'receipt_id': 'fedrcpt_invalid', 'accepted_at': '2026-03-22T00:00:00Z'},
+            payload={
+                'proposal_id': 'pay_demo',
+                'tx_ref': 'tx_demo',
+                'settlement_adapter': 'imaginary_chain',
+            },
+        )
+        self.assertFalse(processing['applied'])
+        self.assertEqual(processing['reason'], 'invalid_settlement_notice')
+        self.assertEqual(processing['case']['case_id'], 'case_invalid_notice')
+        self.assertTrue(processing['case_created'])
+        self.assertEqual(processing['federation_peer']['trust_state'], 'suspended')
+        self.assertFalse(processing['settlement_preflight']['preflight_ok'])
+        self.assertEqual(processing['settlement_preflight']['error_type'], 'unknown_adapter')
+        self.assertEqual(audit_events[-1][0][2], 'federation_settlement_notice_rejected')
 
     def test_process_received_settlement_notice_respects_case_block(self):
         from federation import FederationEnvelopeClaims

@@ -157,14 +157,18 @@ local warrant moves the execution job to `ready`, while staying or revoking it
 moves the job to `blocked` or `rejected`.
 `POST /api/federation/execution-jobs/execute` now closes that receiver-side
 loop for the reference path: a `ready` job can be marked locally executed,
-its local warrant is marked `executed`, and the same persisted proof is reused
-to emit one idempotent `settlement_notice` back to the source host when the
-job is linked to a commitment.
+its local warrant is marked `executed`, and the receiver reuses an already
+persisted linked payout execution or settlement ref to emit one idempotent
+`settlement_notice` back to the source host when the job is linked to a
+commitment. Caller-supplied `execution_refs` are not accepted on this route.
 When the received message is a valid `settlement_notice` with a settlement-ready
 `commitment_id`, the receiver can now apply that notice directly to the local
 commitment record and mark the inbox entry as `processed`; if an active case
 blocks settlement, the transport still succeeds but the inbox entry remains
-`received`.
+`received`. Before any notice is applied, the receiver now replays the local
+settlement-adapter preflight contract against the incoming proof; invalid
+notices open `invalid_settlement_notice` cases and can automatically suspend
+the peer on the reference path.
 That same boundary registry now declares whether a boundary requires warrants
 and which message types map to which warrant action classes.
 `/api/warrants` now exposes first-class warrant records and summary counts, and

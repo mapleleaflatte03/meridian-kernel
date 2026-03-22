@@ -96,6 +96,88 @@ def _accepted_commitment_record(*, org_id, commitment_id, target_host_id,
     }
 
 
+def _executed_payout_proposal_record(*, proposal_id, commitment_id, contribution_type='code'):
+    return {
+        'proposal_id': proposal_id,
+        'id': proposal_id,
+        'institution_id': 'org_beta',
+        'contributor_id': 'contrib_beta',
+        'contributor_name': 'Beta Contributor',
+        'amount_usd': 12.0,
+        'currency': 'USDC',
+        'contribution_type': contribution_type,
+        'evidence': {
+            'pr_urls': ['https://example.test/pr/1'],
+            'commit_hashes': [],
+            'issue_refs': [],
+            'description': 'Federated execution closes on an executed payout proposal',
+        },
+        'recipient_wallet_id': 'wallet_beta',
+        'proposed_by': 'user_owner_beta',
+        'reviewed_by': 'user_reviewer_beta',
+        'approved_by': 'user_owner_beta',
+        'status': 'executed',
+        'created_at': _now_stub(),
+        'updated_at': _now_stub(),
+        'submitted_at': _now_stub(),
+        'reviewed_at': _now_stub(),
+        'approved_at': _now_stub(),
+        'dispute_window_started_at': _now_stub(),
+        'dispute_window_ends_at': _now_stub(),
+        'executed_at': _now_stub(),
+        'executed_by': 'user_owner_beta',
+        'tx_hash': '0xfeedbeef',
+        'warrant_id': 'war_payout_beta',
+        'settlement_adapter': 'internal_ledger',
+        'settlement_adapter_contract': {
+            'adapter_id': 'internal_ledger',
+            'execution_mode': 'host_ledger',
+            'settlement_path': 'journal_append',
+            'proof_type': 'ledger_transaction',
+            'verification_state': 'host_ledger_final',
+            'finality_state': 'host_local_final',
+            'dispute_model': 'court_case',
+            'finality_model': 'host_local_final',
+            'host_supported': True,
+            'host_supported_adapters': [],
+            'execution_readiness': 'ready',
+            'execution_blockers': [],
+            'execution_ready': True,
+        },
+        'linked_commitment_id': commitment_id,
+        'execution_refs': {
+            'tx_ref': 'ptx_demo_beta',
+            'settlement_adapter': 'internal_ledger',
+            'settlement_adapter_contract': {
+                'adapter_id': 'internal_ledger',
+                'execution_mode': 'host_ledger',
+                'settlement_path': 'journal_append',
+                'proof_type': 'ledger_transaction',
+                'verification_state': 'host_ledger_final',
+                'finality_state': 'host_local_final',
+                'dispute_model': 'court_case',
+                'finality_model': 'host_local_final',
+                'host_supported': True,
+                'host_supported_adapters': [],
+                'execution_readiness': 'ready',
+                'execution_blockers': [],
+                'execution_ready': True,
+            },
+            'tx_hash': '0xfeedbeef',
+            'proof_type': 'ledger_transaction',
+            'verification_state': 'host_ledger_final',
+            'finality_state': 'host_local_final',
+            'reversal_or_dispute_capability': 'court_case',
+            'proof': {
+                'mode': 'institution_transactions_journal',
+            },
+            'linked_commitment_id': commitment_id,
+        },
+        'note': 'Executed payout proof reused by federated execution close-loop',
+        'metadata': {},
+    }
+
+
 def _find_free_port():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -1227,6 +1309,76 @@ class FederationTests(unittest.TestCase):
                     ),
                 ],
             )
+            _write_json(
+                os.path.join(beta['economy'], 'wallets.json'),
+                {
+                    'wallets': {
+                        'wallet_beta': {
+                            'id': 'wallet_beta',
+                            'verification_level': 3,
+                            'verification_label': 'self_custody_verified',
+                            'payout_eligible': True,
+                            'status': 'active',
+                        },
+                    },
+                    'verification_levels': {},
+                },
+            )
+            _write_json(
+                os.path.join(beta['economy'], 'contributors.json'),
+                {
+                    'contributors': {
+                        'contrib_beta': {
+                            'id': 'contrib_beta',
+                            'name': 'Beta Contributor',
+                            'payout_wallet_id': 'wallet_beta',
+                        },
+                    },
+                    'contribution_types': ['code'],
+                    'registration_requirements': {},
+                },
+            )
+            _write_json(
+                os.path.join(beta['economy'], 'payout_proposals.json'),
+                {
+                    'proposals': {
+                        'ppo_demo_beta': _executed_payout_proposal_record(
+                            proposal_id='ppo_demo_beta',
+                            commitment_id=commitment_id,
+                        ),
+                    },
+                    'state_machine': json.loads(
+                        json.dumps(
+                            {
+                                'states': [
+                                    'draft',
+                                    'submitted',
+                                    'under_review',
+                                    'approved',
+                                    'dispute_window',
+                                    'executed',
+                                    'rejected',
+                                    'cancelled',
+                                ],
+                                'transitions': {
+                                    'draft': ['submitted', 'cancelled'],
+                                    'submitted': ['under_review', 'rejected', 'cancelled'],
+                                    'under_review': ['approved', 'rejected'],
+                                    'approved': ['dispute_window'],
+                                    'dispute_window': ['executed', 'rejected'],
+                                    'executed': [],
+                                    'rejected': [],
+                                    'cancelled': [],
+                                },
+                                'dispute_window_hours': 72,
+                                'notes': 'Seeded executed payout proof for federated execution tests.',
+                            }
+                        )
+                    ),
+                    'proposal_schema': {},
+                    'updatedAt': _now_stub(),
+                },
+            )
 
             with _run_workspace(beta), _run_workspace(alpha):
                 session = _issue_workspace_session(alpha)
@@ -1275,23 +1427,27 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(status, 200, review_body)
                 self.assertEqual(review_body['execution_job']['state'], 'ready')
 
-                execution_refs = {
-                    'proof_type': 'local_execution',
-                    'verification_state': 'host_local_final',
-                    'finality_state': 'host_local_final',
-                    'tx_ref': 'tx_local_beta',
-                    'proof': {
-                        'job_id': job_id,
-                        'note': 'receiver-side execution proof',
-                    },
-                }
-                status, execute_body = _http_json(
+                status, rejected_body = _http_json(
                     'POST',
                     beta['base_url'] + '/api/federation/execution-jobs/execute',
                     payload={
                         'job_id': job_id,
-                        'execution_refs': execution_refs,
+                        'execution_refs': {
+                            'tx_ref': 'tx_untrusted',
+                        },
                     },
+                    headers={
+                        'Authorization': beta['auth_header'],
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 400, rejected_body)
+                self.assertIn('execution_refs are not accepted', rejected_body['error'])
+
+                status, execute_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/federation/execution-jobs/execute',
+                    payload={'job_id': job_id},
                     headers={
                         'Authorization': beta['auth_header'],
                         'Content-Type': 'application/json',
@@ -1303,6 +1459,10 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(execute_body['settlement_notice']['message_type'], 'settlement_notice')
                 first_notice_id = execute_body['settlement_notice']['envelope_id']
                 self.assertTrue(first_notice_id)
+                self.assertEqual(
+                    execute_body['execution_job']['execution_refs']['proposal_id'],
+                    'ppo_demo_beta',
+                )
 
                 status, replay_body = _http_json(
                     'POST',
@@ -1338,6 +1498,10 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(
                     beta_jobs_body['jobs'][0]['execution_refs']['settlement_notice_envelope_id'],
                     first_notice_id,
+                )
+                self.assertEqual(
+                    beta_jobs_body['jobs'][0]['execution_refs']['proposal_id'],
+                    'ppo_demo_beta',
                 )
 
             with open(os.path.join(beta['economy'], 'commitments.json')) as f:
@@ -1434,10 +1598,6 @@ class FederationTests(unittest.TestCase):
                             'proposal_id': 'ppo_demo',
                             'tx_ref': 'tx_demo_settlement',
                             'settlement_adapter': 'internal_ledger',
-                            'proof_type': 'internal_ledger',
-                            'verification_state': 'accepted',
-                            'finality_state': 'final',
-                            'proof': {'entry': 1},
                         },
                     },
                     headers={
@@ -1462,8 +1622,23 @@ class FederationTests(unittest.TestCase):
                     'tx_demo_settlement',
                 )
                 self.assertEqual(
+                    delivery['response']['processing']['settlement_ref']['proof_type'],
+                    'ledger_transaction',
+                )
+                self.assertEqual(
+                    delivery['response']['processing']['settlement_ref']['verification_state'],
+                    'host_ledger_final',
+                )
+                self.assertEqual(
+                    delivery['response']['processing']['settlement_ref']['finality_state'],
+                    'host_local_final',
+                )
+                self.assertEqual(
                     delivery['response']['processing']['inbox_entry']['state'],
                     'processed',
+                )
+                self.assertTrue(
+                    delivery['response']['processing']['settlement_preflight']['preflight_ok']
                 )
 
                 inbox_status, inbox_body = _http_json(
@@ -1482,6 +1657,7 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(beta_record['state'], 'settled')
             self.assertEqual(beta_record['settlement_refs'][0]['proposal_id'], 'ppo_demo')
             self.assertEqual(beta_record['settlement_refs'][0]['tx_ref'], 'tx_demo_settlement')
+            self.assertEqual(beta_record['settlement_refs'][0]['proof_type'], 'ledger_transaction')
             self.assertEqual(beta_record['settlement_refs'][0]['source_host_id'], 'host_alpha')
 
             beta_events = _read_jsonl(beta['audit_log'])
@@ -1491,6 +1667,129 @@ class FederationTests(unittest.TestCase):
             ]
             self.assertTrue(applied)
             self.assertEqual(applied[-1]['resource'], commitment_id)
+
+    def test_workspace_federation_invalid_settlement_notice_opens_case_and_suspends_peer(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            commitment_id = 'cmt_invalid_settlement'
+            _seed_commitments(
+                os.path.join(alpha['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_alpha',
+                        commitment_id=commitment_id,
+                        target_host_id='host_beta',
+                        target_institution_id='org_beta',
+                    ),
+                ],
+            )
+            _seed_commitments(
+                os.path.join(beta['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_beta',
+                        commitment_id=commitment_id,
+                        target_host_id='host_beta',
+                        target_institution_id='org_beta',
+                    ),
+                ],
+            )
+
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'settlement_notice',
+                        'commitment_id': commitment_id,
+                        'payload': {
+                            'proposal_id': 'ppo_invalid',
+                            'tx_ref': 'tx_invalid',
+                            'settlement_adapter': 'imaginary_chain',
+                        },
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                processing = body['delivery']['response']['processing']
+                self.assertFalse(processing['applied'])
+                self.assertEqual(processing['reason'], 'invalid_settlement_notice')
+                self.assertEqual(processing['case']['claim_type'], 'invalid_settlement_notice')
+                self.assertTrue(processing['case_created'])
+                self.assertEqual(processing['federation_peer']['trust_state'], 'suspended')
+                self.assertFalse(processing['settlement_preflight']['preflight_ok'])
+                self.assertEqual(processing['settlement_preflight']['error_type'], 'unknown_adapter')
+
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['received'], 1)
+                self.assertEqual(inbox_body['entries'][0]['state'], 'received')
+
+                cases_status, cases_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/cases',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(cases_status, 200, cases_body)
+                self.assertIn(commitment_id, cases_body['blocking_commitment_ids'])
+                self.assertIn('host_alpha', cases_body['blocked_peer_host_ids'])
+
+            with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+                beta_commitments = json.load(f)
+            beta_record = beta_commitments['commitments'][commitment_id]
+            self.assertEqual(beta_record['state'], 'accepted')
+            self.assertEqual(beta_record['settlement_refs'], [])
 
     def test_workspace_federation_settlement_notice_replay_is_idempotent(self):
         try:

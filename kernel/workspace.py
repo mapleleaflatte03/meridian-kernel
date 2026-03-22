@@ -1117,6 +1117,79 @@ def _settlement_notice_ref(claims, receipt, payload=None):
     }
 
 
+def _settlement_notice_currency(payload=None):
+    payload = payload if isinstance(payload, dict) else {}
+    execution_refs = payload.get('execution_refs') or {}
+    if not isinstance(execution_refs, dict):
+        execution_refs = {}
+    return (
+        str(
+            payload.get('currency')
+            or execution_refs.get('currency')
+            or 'USDC'
+        ).strip().upper()
+        or 'USDC'
+    )
+
+
+def _settlement_notice_preflight(bound_org_id, claims, receipt, *, payload=None):
+    settlement_ref = _settlement_notice_ref(claims, receipt, payload)
+    adapter_id = (settlement_ref.get('settlement_adapter') or '').strip()
+    if not adapter_id:
+        return settlement_ref, {
+            'preflight_ok': False,
+            'requested_adapter_id': '',
+            'error_type': 'validation_error',
+            'error': 'Settlement notice is missing settlement_adapter',
+            'currency': _settlement_notice_currency(payload),
+        }
+    host_identity, _admission_registry = _runtime_host_state(bound_org_id)
+    return settlement_ref, preflight_settlement_adapter(
+        adapter_id,
+        org_id=bound_org_id,
+        currency=_settlement_notice_currency(payload),
+        tx_hash=settlement_ref.get('tx_hash', ''),
+        settlement_proof=settlement_ref.get('proof') or {},
+        host_supported_adapters=getattr(host_identity, 'settlement_adapters', []),
+    )
+
+
+def _validated_settlement_notice_ref(bound_org_id, claims, receipt, *, payload=None):
+    settlement_ref, preflight = _settlement_notice_preflight(
+        bound_org_id,
+        claims,
+        receipt,
+        payload=payload,
+    )
+    adapter_id = (settlement_ref.get('settlement_adapter') or '').strip()
+    if not preflight.get('preflight_ok'):
+        raise ValueError(
+            preflight.get('error')
+            or f"Settlement notice failed adapter preflight for {adapter_id!r}"
+        )
+    normalized = dict(preflight.get('normalized_proof') or {})
+    contract = dict(preflight.get('contract') or {})
+    settlement_ref['settlement_adapter'] = adapter_id
+    settlement_ref['tx_hash'] = normalized.get('tx_hash', settlement_ref.get('tx_hash', ''))
+    settlement_ref['proof_type'] = normalized.get('proof_type', settlement_ref.get('proof_type', ''))
+    settlement_ref['verification_state'] = normalized.get(
+        'verification_state',
+        settlement_ref.get('verification_state', ''),
+    )
+    settlement_ref['finality_state'] = normalized.get(
+        'finality_state',
+        settlement_ref.get('finality_state', ''),
+    )
+    settlement_ref['proof'] = normalized.get('proof') or settlement_ref.get('proof') or {}
+    settlement_ref['currency'] = preflight.get('currency', _settlement_notice_currency(payload))
+    settlement_ref['reversal_or_dispute_capability'] = normalized.get(
+        'reversal_or_dispute_capability',
+        '',
+    )
+    settlement_ref['settlement_adapter_contract'] = contract
+    return settlement_ref, preflight
+
+
 def _federated_execution_job_ref(job, *, execution_refs=None, settlement_notice=None, executed_by=''):
     record = dict(job or {})
     refs = dict(record.get('execution_refs') or {})
@@ -1214,7 +1287,79 @@ def _existing_federated_execution_settlement_notice(job, commitment=None):
     return None
 
 
-def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session_id=None, execution_refs=None):
+def _linked_payout_proposal_for_commitment(bound_org_id, commitment_id):
+    commitment_id = (commitment_id or '').strip()
+    if not commitment_id:
+        return None
+    proposals = [
+        proposal
+        for proposal in list_payout_proposals(bound_org_id)
+        if (proposal.get('linked_commitment_id') or '').strip() == commitment_id
+    ]
+    if not proposals:
+        return None
+    proposals.sort(
+        key=lambda row: (
+            1 if (row.get('status') or '').strip() == 'executed' else 0,
+            row.get('executed_at', ''),
+            row.get('updated_at', ''),
+            row.get('created_at', ''),
+            row.get('proposal_id', ''),
+        ),
+        reverse=True,
+    )
+    return proposals[0]
+
+
+def _commitment_settlement_ref(commitment, *, proposal_id=''):
+    settlement_refs = list((commitment or {}).get('settlement_refs') or [])
+    if not settlement_refs:
+        return None
+    proposal_id = (proposal_id or '').strip()
+    if proposal_id:
+        for ref in reversed(settlement_refs):
+            if (ref or {}).get('proposal_id', '') == proposal_id:
+                return dict(ref or {})
+    return dict(settlement_refs[-1] or {})
+
+
+def _linked_payout_execution_refs(bound_org_id, job):
+    record = dict(job or {})
+    commitment_id = (record.get('commitment_id') or '').strip()
+    if not commitment_id:
+        return None, None
+
+    proposal = _linked_payout_proposal_for_commitment(bound_org_id, commitment_id)
+    if proposal:
+        status = (proposal.get('status') or '').strip()
+        if status == 'executed':
+            execution_refs = dict(proposal.get('execution_refs') or {})
+            if execution_refs:
+                execution_refs.setdefault('proposal_id', proposal.get('proposal_id', ''))
+                execution_refs.setdefault('linked_commitment_id', commitment_id)
+                return proposal, execution_refs
+
+    commitment = get_commitment(commitment_id, org_id=bound_org_id)
+    settlement_ref = _commitment_settlement_ref(
+        commitment,
+        proposal_id=(proposal or {}).get('proposal_id', ''),
+    )
+    if settlement_ref:
+        settlement_ref = dict(settlement_ref)
+        settlement_ref.setdefault('proposal_id', (proposal or {}).get('proposal_id', ''))
+        settlement_ref.setdefault('linked_commitment_id', commitment_id)
+        return proposal, settlement_ref
+
+    if proposal:
+        status = (proposal.get('status') or '').strip()
+        raise LookupError(
+            f"Linked payout proposal '{proposal.get('proposal_id', '')}' for commitment "
+            f"'{commitment_id}' does not have persisted execution refs yet (status={status or 'unknown'})"
+        )
+    raise LookupError(f"No executed payout proposal or settlement ref is linked to commitment '{commitment_id}'")
+
+
+def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session_id=None):
     record = dict(job or {})
     job_id = (record.get('job_id') or '').strip()
     if not job_id:
@@ -1234,9 +1379,6 @@ def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session
 
     merged_refs = dict(record.get('execution_refs') or {})
     if state != 'executed':
-        for key, value in dict(execution_refs or {}).items():
-            if value is not None:
-                merged_refs[key] = value
         merged_refs = _federated_execution_job_ref(
             record,
             execution_refs=merged_refs,
@@ -1314,19 +1456,27 @@ def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session
                 'settlement_notice': _federated_execution_job_settlement_notice_view(merged_refs),
             }
 
+        proposal, settlement_execution_refs = _linked_payout_execution_refs(bound_org_id, record)
+        if not settlement_execution_refs:
+            raise LookupError(
+                f"No persisted payout execution refs are linked to commitment '{commitment_id}'"
+            )
+        settlement_execution_refs = dict(settlement_execution_refs)
+        if proposal and proposal.get('proposal_id'):
+            settlement_execution_refs.setdefault('proposal_id', proposal.get('proposal_id', ''))
         payload = {
             'job_id': job_id,
             'local_warrant_id': local_warrant_id,
             'envelope_id': record.get('envelope_id', ''),
             'commitment_id': commitment_id,
-            'execution_refs': dict(merged_refs),
-            'proof': merged_refs.get('proof') or {},
-            'proof_type': merged_refs.get('proof_type', ''),
-            'verification_state': merged_refs.get('verification_state', ''),
-            'finality_state': merged_refs.get('finality_state', ''),
-            'tx_ref': merged_refs.get('tx_ref', ''),
-            'tx_hash': merged_refs.get('tx_hash', ''),
-            'settlement_adapter': merged_refs.get('settlement_adapter', ''),
+            'execution_refs': dict(settlement_execution_refs),
+            'proof': settlement_execution_refs.get('proof') or {},
+            'proof_type': settlement_execution_refs.get('proof_type', ''),
+            'verification_state': settlement_execution_refs.get('verification_state', ''),
+            'finality_state': settlement_execution_refs.get('finality_state', ''),
+            'tx_ref': settlement_execution_refs.get('tx_ref', ''),
+            'tx_hash': settlement_execution_refs.get('tx_hash', ''),
+            'settlement_adapter': settlement_execution_refs.get('settlement_adapter', ''),
         }
         delivery, _federation_state = _deliver_federation_envelope(
             bound_org_id,
@@ -1350,7 +1500,7 @@ def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session
         }
         merged_refs = _federated_execution_job_ref(
             record,
-            execution_refs=merged_refs,
+            execution_refs=settlement_execution_refs,
             settlement_notice=settlement_notice,
             executed_by=actor_id or '',
         )
@@ -1511,7 +1661,69 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
         })
         return result
 
-    settlement_ref = _settlement_notice_ref(claims, receipt, payload)
+    try:
+        settlement_ref, settlement_preflight = _validated_settlement_notice_ref(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+        )
+    except ValueError as exc:
+        error = str(exc)
+        raw_settlement_ref = _settlement_notice_ref(claims, receipt, payload)
+        case_record, created = ensure_case_for_delivery_failure(
+            'invalid_settlement_notice',
+            actor_id,
+            org_id=bound_org_id,
+            target_host_id=claims.source_host_id,
+            target_institution_id=claims.source_institution_id,
+            linked_commitment_id=claims.commitment_id,
+            linked_warrant_id=claims.warrant_id,
+            note=error,
+            metadata={
+                'receipt_id': (receipt or {}).get('receipt_id', ''),
+                'settlement_adapter': raw_settlement_ref.get('settlement_adapter', ''),
+                'payload_hash': claims.payload_hash,
+            },
+        )
+        federation_peer = None
+        if case_record:
+            federation_peer = _maybe_suspend_peer_for_case(
+                case_record,
+                actor_id,
+                org_id=bound_org_id,
+                session_id=claims.session_id or None,
+            )
+        log_event(
+            bound_org_id,
+            actor_id,
+            'federation_settlement_notice_rejected',
+            resource=claims.commitment_id,
+            outcome='blocked',
+            actor_type=claims.actor_type or 'service',
+            details=_federation_audit_details(
+                claims,
+                receipt_id=(receipt or {}).get('receipt_id', ''),
+                error=error,
+                case_id=(case_record or {}).get('case_id', ''),
+                settlement_adapter=raw_settlement_ref.get('settlement_adapter', ''),
+            ),
+            session_id=claims.session_id or None,
+        )
+        result.update({
+            'reason': 'invalid_settlement_notice',
+            'error': error,
+            'settlement_preflight': _settlement_notice_preflight(
+                bound_org_id,
+                claims,
+                receipt,
+                payload=payload,
+            )[1],
+            'case': case_record,
+            'case_created': created,
+            'federation_peer': federation_peer,
+        })
+        return result
     record_settlement_ref(
         claims.commitment_id,
         settlement_ref,
@@ -1552,6 +1764,7 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
         'reason': 'settlement_notice_applied',
         'commitment': commitment,
         'settlement_ref': settlement_ref,
+        'settlement_preflight': settlement_preflight,
         'inbox_entry': inbox_entry,
     })
     return result
@@ -4303,6 +4516,13 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 job_ref = (body.get('job_id') or body.get('envelope_id') or body.get('local_warrant_id') or '').strip()
                 if not job_ref:
                     return self._json({'error': 'job_id is required'}, 400)
+                if body.get('execution_refs'):
+                    return self._json({
+                        'error': (
+                            'execution_refs are not accepted; the settlement proof is derived '
+                            'from the linked payout proposal'
+                        )
+                    }, 400)
                 job = get_execution_job(job_ref, org_id=org_id) or get_execution_job_by_local_warrant(job_ref, org_id)
                 if not job:
                     return self._json({'error': f'Execution job not found: {job_ref}'}, 404)
@@ -4312,7 +4532,6 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         job,
                         actor_id=by,
                         session_id=_sid,
-                        execution_refs=body.get('execution_refs'),
                     )
                 except FederationUnavailable as e:
                     return self._json({'error': str(e)}, 503)

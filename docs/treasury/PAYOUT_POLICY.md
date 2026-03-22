@@ -74,6 +74,15 @@ path only enables `internal_ledger` for payout execution. Other registered
 adapters may appear in the policy surface, but they remain non-executable until
 their proof contract is enabled.
 
+Receiver-side federation execution closes the loop by reusing an already
+persisted linked payout execution or settlement reference. The
+`POST /api/federation/execution-jobs/execute` route does not accept caller
+supplied `execution_refs`; it only emits a `settlement_notice` from the
+actual stored proof path. When a host receives that `settlement_notice`, it
+replays the same settlement-adapter preflight contract before recording any
+local settlement ref; invalid notices open `invalid_settlement_notice` cases
+and can automatically suspend the peer on the reference path.
+
 Self-review is not allowed. The reviewer must be a different person than the contributor.
 
 ---

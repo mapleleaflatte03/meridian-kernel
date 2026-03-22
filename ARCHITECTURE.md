@@ -144,8 +144,11 @@ messages:
 This is no longer receiver-side persistence only. The current kernel reference
 can also apply a valid `settlement_notice` onto a local accepted commitment and
 append the resulting settlement reference, while still leaving blocked notices
-in `received` state when case review prevents settlement. It is not yet the
-full warrant-first cross-host execution program.
+in `received` state when case review prevents settlement. Before any notice is
+applied, the receiver replays the same settlement-adapter preflight contract
+used by payout execution; invalid notices open `invalid_settlement_notice`
+cases and can automatically suspend the peer on the reference path. It is not
+yet the full warrant-first cross-host execution program.
 
 ## Receiver-Side Federated Execution Jobs
 

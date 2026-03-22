@@ -36,6 +36,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_load_admission_registry = self.workspace.load_admission_registry
         self.orig_runtime_host_state = self.workspace._runtime_host_state
         self.orig_federation_authority = self.workspace._federation_authority
+        self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
         self.orig_log_event = self.workspace.log_event
 
     def tearDown(self):
@@ -51,6 +52,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.load_admission_registry = self.orig_load_admission_registry
         self.workspace._runtime_host_state = self.orig_runtime_host_state
         self.workspace._federation_authority = self.orig_federation_authority
+        self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
         self.workspace.log_event = self.orig_log_event
 
     def test_configured_org_binds_process_context(self):
@@ -164,6 +166,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/institution/charter']['allowed'])
         self.assertFalse(permissions['/api/treasury/contribute']['allowed'])
         self.assertTrue(permissions['/api/federation/send']['allowed'])
+        self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
+        self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
 
     def test_api_status_exposes_runtime_core(self):
         from runtime_host import default_host_identity
@@ -326,6 +330,70 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(snapshot['peer_count'], 1)
             self.assertEqual(snapshot['trusted_peer_ids'], ['host_beta'])
             self.assertTrue(any(peer['host_id'] == 'host_beta' for peer in snapshot['peers']))
+
+    def test_mutate_federation_peer_refreshes_capability_snapshot(self):
+        from federation import FederationPeer, upsert_peer_registry_entry
+        from runtime_host import default_host_identity
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.workspace.FEDERATION_PEERS_FILE = os.path.join(tmp, 'federation_peers.json')
+            host = default_host_identity(
+                host_id='host_alpha',
+                role='control_host',
+                federation_enabled=True,
+                peer_transport='https',
+                supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+            )
+            self.workspace.load_host_identity = lambda *args, **kwargs: host
+            self.workspace.load_admission_registry = lambda *args, **kwargs: {
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'institutions': {'org_a': {'status': 'admitted'}},
+                'admitted_org_ids': ['org_a'],
+            }
+            upsert_peer_registry_entry(
+                self.workspace.FEDERATION_PEERS_FILE,
+                'host_beta',
+                host_identity=host,
+                label='Beta Host',
+                endpoint_url='http://127.0.0.1:19017',
+                shared_secret='beta-secret',
+                admitted_org_ids=['org_b'],
+            )
+            self.workspace.refresh_peer_registry_entry = lambda *args, **kwargs: {
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        label='Beta Host',
+                        endpoint_url='http://127.0.0.1:19017',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                        admitted_org_ids=['org_b'],
+                        capability_snapshot={
+                            'manifest_version': 1,
+                            'federation': {
+                                'boundary_name': 'federation_gateway',
+                            },
+                        },
+                        last_refreshed_at='2026-03-22T00:00:00Z',
+                    ),
+                },
+            }
+            snapshot = self.workspace._mutate_federation_peer('org_a', 'refresh', {
+                'peer_host_id': 'host_beta',
+                'target_org_id': 'org_b',
+            })
+            peer = next(peer for peer in snapshot['peers'] if peer['host_id'] == 'host_beta')
+            self.assertTrue(peer['last_refreshed_at'])
+            self.assertEqual(peer['capability_snapshot']['manifest_version'], 1)
+            self.assertEqual(
+                peer['capability_snapshot']['federation']['boundary_name'],
+                'federation_gateway',
+            )
 
     def test_mutate_federation_peer_rejects_self_host(self):
         from runtime_host import default_host_identity

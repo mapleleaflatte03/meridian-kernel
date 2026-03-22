@@ -44,6 +44,7 @@ Endpoints:
   POST /api/admission/suspend     -> Suspend an admitted institution on this host
   POST /api/admission/revoke      -> Revoke an institution on this host
   POST /api/federation/peers/upsert -> Create or update a federation peer
+  POST /api/federation/peers/refresh -> Refresh peer capability snapshot from its public manifest
   POST /api/federation/peers/suspend -> Suspend a federation peer
   POST /api/federation/peers/revoke -> Revoke a federation peer
   POST /api/federation/send       -> Deliver a federation envelope to a trusted peer
@@ -137,6 +138,7 @@ from federation import (
     ReplayStore,
     load_peer_registry,
     upsert_peer_registry_entry,
+    refresh_peer_registry_entry,
     set_peer_trust_state,
     FederationUnavailable,
     FederationDeliveryError,
@@ -212,6 +214,7 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/admission/revoke': 'owner',
     '/api/federation/send': 'admin',
     '/api/federation/peers/upsert': 'owner',
+    '/api/federation/peers/refresh': 'owner',
     '/api/federation/peers/suspend': 'owner',
     '/api/federation/peers/revoke': 'owner',
     '/api/institution/charter': 'admin',
@@ -492,6 +495,13 @@ def _mutate_federation_peer(bound_org_id, action, payload):
             trust_state=payload.get('trust_state'),
             shared_secret=payload.get('shared_secret'),
             admitted_org_ids=payload.get('admitted_org_ids'),
+        )
+    elif action == 'refresh':
+        peer_registry = refresh_peer_registry_entry(
+            FEDERATION_PEERS_FILE,
+            peer_host_id,
+            host_identity=host_identity,
+            target_org_id=(payload.get('target_org_id') or '').strip() or None,
         )
     else:
         status_map = {
@@ -1713,7 +1723,12 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     },
                 })
 
-            elif path in ('/api/federation/peers/upsert', '/api/federation/peers/suspend', '/api/federation/peers/revoke'):
+            elif path in (
+                '/api/federation/peers/upsert',
+                '/api/federation/peers/refresh',
+                '/api/federation/peers/suspend',
+                '/api/federation/peers/revoke',
+            ):
                 action = path.rsplit('/', 1)[-1]
                 peer_host_id = (body.get('peer_host_id') or body.get('host_id') or '').strip()
                 snapshot = _mutate_federation_peer(org_id, action, body)
@@ -1735,6 +1750,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         'host_id': snapshot['host_id'],
                         'management_mode': snapshot['management_mode'],
                         'trust_state': (peer_record or {}).get('trust_state', ''),
+                        'last_refreshed_at': (peer_record or {}).get('last_refreshed_at', ''),
+                        'manifest_version': (
+                            ((peer_record or {}).get('capability_snapshot') or {}).get('manifest_version')
+                        ),
                     },
                     session_id=_sid,
                 )

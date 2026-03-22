@@ -384,6 +384,56 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(peer.receive_url, 'http://127.0.0.1:19014/api/federation/receive')
             self.assertEqual(peer.admitted_org_ids, ['org_beta'])
 
+    def test_refresh_peer_registry_entry_persists_capability_snapshot(self):
+        from federation import refresh_peer_registry_entry, upsert_peer_registry_entry
+        from runtime_host import default_host_identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            peers_path = os.path.join(tmp, 'federation_peers.json')
+            host = default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+            )
+            upsert_peer_registry_entry(
+                peers_path,
+                'host_beta',
+                host_identity=host,
+                label='Beta Host',
+                endpoint_url='http://127.0.0.1:19015',
+                shared_secret='beta-secret',
+                admitted_org_ids=['org_beta'],
+            )
+            registry = refresh_peer_registry_entry(
+                peers_path,
+                'host_beta',
+                host_identity=host,
+                http_get=lambda _url: {
+                    'manifest_version': 1,
+                    'host_identity': {'host_id': 'host_beta'},
+                    'admission': {'admitted_org_ids': ['org_beta']},
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                },
+                target_org_id='org_beta',
+            )
+            peer = registry['peers']['host_beta']
+            self.assertTrue(peer.last_refreshed_at)
+            self.assertEqual(peer.capability_snapshot['manifest_version'], 1)
+            self.assertEqual(
+                peer.capability_snapshot['federation']['boundary_name'],
+                'federation_gateway',
+            )
+
     def test_set_peer_trust_state_updates_snapshot_and_send_enabled(self):
         from federation import (
             FederationAuthority,

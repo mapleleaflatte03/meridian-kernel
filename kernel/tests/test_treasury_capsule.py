@@ -743,6 +743,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertTrue(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'host_ledger')
         self.assertEqual(result['contract']['settlement_path'], 'journal_append')
+        self.assertFalse(result['contract']['requires_verifier_attestation'])
         self.assertEqual(
             result['contract']['contract_digest'],
             treasury.settlement_adapter_contract_digest(result['contract']['contract_snapshot']),
@@ -752,6 +753,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'host_ledger')
         self.assertEqual(result['requirements']['settlement_path'], 'journal_append')
+        self.assertFalse(result['requirements']['requires_verifier_attestation'])
         self.assertEqual(result['requirements']['dispute_model'], 'court_case')
         self.assertEqual(result['requirements']['finality_model'], 'host_local_final')
         self.assertEqual(result['normalized_proof']['proof']['mode'], 'institution_transactions_journal')
@@ -775,11 +777,13 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'external_chain')
         self.assertEqual(result['contract']['settlement_path'], 'x402_onchain')
+        self.assertTrue(result['contract']['requires_verifier_attestation'])
         self.assertEqual(result['contract']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['contract']['finality_model'], 'external_chain_finality')
         self.assertIn('payout_execution_disabled', result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'external_chain')
         self.assertEqual(result['requirements']['settlement_path'], 'x402_onchain')
+        self.assertTrue(result['requirements']['requires_verifier_attestation'])
         self.assertEqual(result['requirements']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['requirements']['finality_model'], 'external_chain_finality')
 
@@ -799,11 +803,13 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'manual_offchain')
         self.assertEqual(result['contract']['settlement_path'], 'manual_bank_review')
+        self.assertTrue(result['contract']['requires_verifier_attestation'])
         self.assertEqual(result['contract']['dispute_model'], 'manual_reversal_and_court_case')
         self.assertEqual(result['contract']['finality_model'], 'manual_settlement_pending')
         self.assertIn('payout_execution_disabled', result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'manual_offchain')
         self.assertEqual(result['requirements']['settlement_path'], 'manual_bank_review')
+        self.assertTrue(result['requirements']['requires_verifier_attestation'])
         self.assertEqual(result['requirements']['dispute_model'], 'manual_reversal_and_court_case')
         self.assertEqual(result['requirements']['finality_model'], 'manual_settlement_pending')
 

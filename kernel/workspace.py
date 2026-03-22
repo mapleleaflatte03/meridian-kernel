@@ -1315,6 +1315,11 @@ def _validated_settlement_notice_ref(bound_org_id, claims, receipt, *, payload=N
         contract.get('contract_digest')
         or settlement_adapter_contract_digest(current_snapshot)
     ).strip()
+    requires_verifier_attestation = bool(contract.get('requires_verifier_attestation'))
+    if requires_verifier_attestation and not expected_snapshot:
+        raise ValueError(
+            f"Settlement notice for non-internal adapter {adapter_id!r} requires verifier attestation snapshot and digest"
+        )
     if expected_snapshot and current_snapshot != expected_snapshot:
         raise ValueError(
             f"Settlement notice adapter contract drifted for {adapter_id!r}"

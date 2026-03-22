@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -176,6 +177,32 @@ def _executed_payout_proposal_record(*, proposal_id, commitment_id, contribution
         'note': 'Executed payout proof reused by federated execution close-loop',
         'metadata': {},
     }
+
+
+def _base_usdc_x402_contract_snapshot():
+    return {
+        'contract_version': 1,
+        'adapter_id': 'base_usdc_x402',
+        'status': 'active',
+        'payout_execution_enabled': True,
+        'execution_mode': 'external_chain',
+        'settlement_path': 'x402_onchain',
+        'supported_currencies': ['USDC'],
+        'requires_tx_hash': True,
+        'requires_settlement_proof': True,
+        'requires_verifier_attestation': True,
+        'proof_type': 'onchain_receipt',
+        'verification_state': 'external_verification_required',
+        'finality_state': 'external_chain_finality',
+        'finality_model': 'external_chain_finality',
+        'reversal_or_dispute_capability': 'court_case_plus_chain_review',
+        'dispute_model': 'court_case_plus_chain_review',
+    }
+
+
+def _contract_digest(snapshot):
+    raw = json.dumps(snapshot, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _find_free_port():
@@ -2437,6 +2464,10 @@ class FederationTests(unittest.TestCase):
                             'tx_ref': 'tx_base_x402_demo',
                             'tx_hash': '0xbase123',
                             'settlement_adapter': 'base_usdc_x402',
+                            'settlement_adapter_contract_snapshot': _base_usdc_x402_contract_snapshot(),
+                            'settlement_adapter_contract_digest': _contract_digest(
+                                _base_usdc_x402_contract_snapshot()
+                            ),
                             'proof': {
                                 'reference': 'base://receipt/demo',
                                 'payer_wallet': '0xabc123',

@@ -672,6 +672,13 @@ def settlement_adapter_summary(org_id=None, *, host_supported_adapters=None):
 
 def settlement_adapter_contract_snapshot(contract_or_adapter):
     contract = dict(contract_or_adapter or {})
+    requires_verifier_attestation = bool(
+        contract.get(
+            'requires_verifier_attestation',
+            contract.get('execution_mode', 'external_reference') != 'host_ledger'
+            or contract.get('settlement_path', 'external_reference') != 'journal_append',
+        )
+    )
     return {
         'contract_version': 1,
         'adapter_id': (contract.get('adapter_id') or '').strip(),
@@ -688,6 +695,7 @@ def settlement_adapter_contract_snapshot(contract_or_adapter):
         ),
         'requires_tx_hash': bool(contract.get('requires_tx_hash')),
         'requires_settlement_proof': bool(contract.get('requires_settlement_proof')),
+        'requires_verifier_attestation': requires_verifier_attestation,
         'proof_type': contract.get('proof_type', 'external_reference'),
         'verification_state': contract.get('verification_state', 'unknown'),
         'finality_state': contract.get('finality_state', 'unknown'),
@@ -738,6 +746,13 @@ def _settlement_adapter_contract(adapter, *, host_supported_adapters=None):
         'supported_currencies': list(adapter.get('supported_currencies', [])),
         'requires_tx_hash': bool(adapter.get('requires_tx_hash')),
         'requires_settlement_proof': bool(adapter.get('requires_settlement_proof')),
+        'requires_verifier_attestation': bool(
+            adapter.get(
+                'requires_verifier_attestation',
+                adapter.get('execution_mode', 'external_reference') != 'host_ledger'
+                or adapter.get('settlement_path', 'external_reference') != 'journal_append',
+            )
+        ),
         'proof_type': adapter.get('proof_type', 'external_reference'),
         'verification_state': adapter.get('verification_state', 'unknown'),
         'finality_state': adapter.get('finality_state', 'unknown'),
@@ -980,6 +995,7 @@ def preflight_settlement_adapter(adapter_id='', *, org_id=None, currency='USDC',
             'supported_currencies': list(adapter.get('supported_currencies', [])),
             'requires_tx_hash': bool(adapter.get('requires_tx_hash')),
             'requires_settlement_proof': bool(adapter.get('requires_settlement_proof')),
+            'requires_verifier_attestation': bool(contract.get('requires_verifier_attestation')),
             'proof_type': adapter.get('proof_type', 'external_reference'),
             'verification_state': adapter.get('verification_state', 'unknown'),
             'finality_state': adapter.get('finality_state', 'unknown'),

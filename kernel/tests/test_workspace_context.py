@@ -1165,6 +1165,93 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['settlement_preflight']['error_type'], 'unknown_adapter')
         self.assertEqual(audit_events[-1][0][2], 'federation_settlement_notice_rejected')
 
+    def test_process_received_settlement_notice_rejects_missing_verifier_attestation_for_external_adapter(self):
+        from federation import FederationEnvelopeClaims
+
+        audit_events = []
+        self.workspace.validate_commitment_for_settlement = (
+            lambda commitment_id, **kwargs: {'commitment_id': commitment_id, 'state': 'accepted'}
+        )
+        self.workspace._maybe_block_commitment_settlement = lambda *args, **kwargs: (None, None)
+        self.workspace.ensure_case_for_delivery_failure = lambda *args, **kwargs: (
+            {
+                'case_id': 'case_missing_attestation',
+                'claim_type': 'invalid_settlement_notice',
+                'status': 'open',
+                'linked_commitment_id': 'cmt_demo',
+                'target_host_id': 'host_alpha',
+            },
+            True,
+        )
+        self.workspace._maybe_suspend_peer_for_case = lambda *args, **kwargs: {
+            'applied': True,
+            'peer_host_id': 'host_alpha',
+            'trust_state': 'suspended',
+        }
+        self.workspace.mark_warrant_executed = lambda *args, **kwargs: self.fail('sender warrant should not finalize')
+        self.workspace.record_settlement_ref = lambda *args, **kwargs: self.fail('settlement ref should not be recorded')
+        self.workspace.settle_commitment = lambda *args, **kwargs: self.fail('commitment should not settle')
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
+        self.workspace.preflight_settlement_adapter = lambda adapter_id, **kwargs: {
+            'preflight_ok': True,
+            'requested_adapter_id': adapter_id,
+            'currency': 'USDC',
+            'normalized_proof': {
+                'proof_type': 'onchain_receipt',
+                'verification_state': 'external_verification_required',
+                'finality_state': 'external_chain_finality',
+                'reversal_or_dispute_capability': 'court_case_plus_chain_review',
+                'proof': {'reference': 'base://receipt/demo'},
+            },
+            'contract': {
+                'adapter_id': adapter_id,
+                'execution_mode': 'external_chain',
+                'settlement_path': 'x402_onchain',
+                'requires_verifier_attestation': True,
+            },
+        }
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_missing_attestation',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_a',
+            actor_type='service',
+            actor_id='peer:host_alpha',
+            session_id='ses_alpha',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='settlement_notice',
+            payload_hash='hash_missing_attestation',
+            warrant_id='war_demo',
+            commitment_id='cmt_demo',
+        )
+        processing = self.workspace._process_received_federation_message(
+            'org_a',
+            claims,
+            {'receipt_id': 'fedrcpt_missing_attestation', 'accepted_at': '2026-03-22T00:00:00Z'},
+            payload={
+                'proposal_id': 'pay_demo',
+                'tx_ref': 'tx_demo',
+                'settlement_adapter': 'base_usdc_x402',
+                'tx_hash': '0xbase123',
+                'proof': {
+                    'reference': 'base://receipt/demo',
+                    'payer_wallet': '0xabc123',
+                },
+            },
+        )
+        self.assertFalse(processing['applied'])
+        self.assertEqual(processing['reason'], 'invalid_settlement_notice')
+        self.assertEqual(processing['case']['case_id'], 'case_missing_attestation')
+        self.assertTrue(processing['case_created'])
+        self.assertEqual(processing['federation_peer']['trust_state'], 'suspended')
+        self.assertFalse(processing['settlement_preflight']['preflight_ok'])
+        self.assertEqual(processing['settlement_preflight']['error_type'], 'validation_error')
+        self.assertIn('verifier attestation', processing['error'])
+        self.assertEqual(audit_events[-1][0][2], 'federation_settlement_notice_rejected')
+
     def test_process_received_settlement_notice_rejects_contract_digest_mismatch(self):
         from federation import FederationEnvelopeClaims
 

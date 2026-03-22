@@ -50,7 +50,7 @@ What is real today:
 - one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
 - one receiver-side settlement application path: accepted `settlement_notice` envelopes can record a settlement ref, settle the linked commitment, and move the inbox entry from `received` to `processed`
 - one receiver-side execution review path: accepted `execution_request` envelopes can materialize a local federated execution job plus a pending local warrant instead of implying remote work is already authorized
-- one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, and sender-side federation validation when `commitment_id` is supplied
+- one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, sender-side federation validation when `commitment_id` is supplied, and warrant-bound `commitment_proposal` / `commitment_acceptance` envelopes
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
 
@@ -186,6 +186,13 @@ counts, and the reference workspace can mutate those records through
 `/api/commitments/settle` when the bound actor has admin authority.
 Federation delivery can now validate an accepted `commitment_id` on the sender
 side and append delivery references to the capsule-backed commitment record.
+The same commitment surface now also supports a first real federated
+commitment loop: `POST /api/commitments/propose` and
+`POST /api/commitments/accept` can dispatch warrant-bound
+`commitment_proposal` / `commitment_acceptance` envelopes, so the receiver can
+persist a mirrored commitment record and the source host can move the original
+record to `accepted` from a signed peer acceptance rather than a same-host
+shortcut.
 `/api/cases` now exposes first inter-institution case records and summary
 counts, and the reference workspace can mutate those records through
 `POST /api/cases/open`, `/api/cases/stay`, and `/api/cases/resolve`.

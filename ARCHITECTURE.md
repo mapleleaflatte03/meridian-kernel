@@ -101,6 +101,10 @@ Today that proof is also deliberately narrow:
   commitments
 - sender-side federation delivery can validate an accepted `commitment_id`
   before any envelope is sent
+- warrant-bound `commitment_proposal` envelopes can create mirrored
+  commitment records on a peer host
+- warrant-bound `commitment_acceptance` envelopes can move the source
+  commitment into `accepted` from peer-side review
 - successful delivery can append delivery references back onto the commitment
   record
 

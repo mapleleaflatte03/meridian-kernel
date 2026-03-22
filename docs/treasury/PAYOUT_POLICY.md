@@ -28,6 +28,7 @@ draft -> submitted -> under_review -> approved -> dispute_window -> executed
 Reference workspace surfaces:
 - `GET /api/payouts`
 - `GET /api/treasury/settlement-adapters`
+- `POST /api/treasury/settlement-adapters/preflight`
 - `POST /api/payouts/propose|submit|review|approve|open-dispute-window|reject|cancel|execute`
 
 ---

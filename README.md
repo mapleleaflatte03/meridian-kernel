@@ -163,6 +163,11 @@ counts, and the reference workspace can mutate those records through
 Commitment breach can now open a linked local case record, but this is still
 the start of the cross-institution court program rather than the full network
 dispute system.
+`POST /api/treasury/settlement-adapters/preflight` now exposes the same
+settlement-adapter contract as a preflight surface: it tells the caller
+whether an adapter is merely registered, whether payout execution is enabled on
+that adapter, whether the current host supports it, and whether the supplied
+currency / tx hash / proof shape is acceptable before execution is attempted.
 Open or stayed cases now also have real enforcement effect: a linked
 `commitment_id` blocks sender-side federation delivery, and risky case types
 such as `fraudulent_proof`, `invalid_settlement_notice`, or

@@ -135,6 +135,9 @@ deliberately narrow:
   with normalized proof / verification / finality fields
 - `GET /api/treasury/settlement-adapters` surfaces the registered adapter
   contract and the host-supported subset for the current institution
+- `POST /api/treasury/settlement-adapters/preflight` exposes the same contract
+  as a non-executing validation path, so callers can inspect adapter status,
+  host support, and proof requirements before attempting execution
 
 This is the first public payout object in Meridian. It is not yet the full
 settlement-adapter, multi-institution payout network.

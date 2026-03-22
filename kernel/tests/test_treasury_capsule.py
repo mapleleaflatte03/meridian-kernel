@@ -460,6 +460,109 @@ class TreasuryCapsuleTests(unittest.TestCase):
         proposal_after = treasury.get_payout_proposal(proposal['proposal_id'], org_id=self.org_id)
         self.assertEqual(proposal_after['status'], 'dispute_window')
 
+    def test_execute_payout_records_linked_commitment_settlement_ref(self):
+        ledger_path = self.capsule_dir / 'ledger.json'
+        ledger = json.loads(ledger_path.read_text())
+        ledger['treasury']['cash_usd'] = 120.0
+        ledger['treasury']['reserve_floor_usd'] = 50.0
+        ledger_path.write_text(json.dumps(ledger, indent=2))
+
+        (self.capsule_dir / 'wallets.json').write_text(json.dumps({
+            'wallets': {
+                'wallet_exec': {
+                    'id': 'wallet_exec',
+                    'verification_level': 3,
+                    'verification_label': 'self_custody_verified',
+                    'payout_eligible': True,
+                    'status': 'active',
+                }
+            },
+            'verification_levels': {},
+        }, indent=2))
+        (self.capsule_dir / 'contributors.json').write_text(json.dumps({
+            'contributors': {
+                'contrib_exec': {
+                    'id': 'contrib_exec',
+                    'name': 'Contributor Exec',
+                    'payout_wallet_id': 'wallet_exec',
+                }
+            },
+            'contribution_types': ['code'],
+            'registration_requirements': {},
+        }, indent=2))
+
+        commitment = treasury.commitments.propose_commitment(
+            self.org_id,
+            'host_beta',
+            'org_beta',
+            'Settle the approved brief',
+            'user_owner',
+            warrant_id='war_exec_123',
+        )
+        treasury.commitments.accept_commitment(
+            commitment['commitment_id'],
+            'user_owner',
+            org_id=self.org_id,
+        )
+
+        proposal = treasury.create_payout_proposal(
+            'contrib_exec',
+            12.0,
+            'code',
+            proposed_by='user:proposer',
+            org_id=self.org_id,
+            evidence={'pr_urls': ['https://example.test/pr/1']},
+            linked_commitment_id=commitment['commitment_id'],
+        )
+        proposal = treasury.submit_payout_proposal(
+            proposal['proposal_id'],
+            'user:proposer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.review_payout_proposal(
+            proposal['proposal_id'],
+            'user:reviewer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.approve_payout_proposal(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+        )
+        proposal = treasury.open_payout_dispute_window(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+            dispute_window_hours=0,
+        )
+        with mock.patch.object(treasury, '_payout_phase_gate', return_value=(True, 'phase 5 test override')):
+            proposal = treasury.execute_payout_proposal(
+                proposal['proposal_id'],
+                'user:owner',
+                org_id=self.org_id,
+                warrant_id='war_exec_123',
+                tx_hash='tx_demo_hash',
+            )
+
+        self.assertEqual(proposal['linked_commitment_id'], commitment['commitment_id'])
+        self.assertEqual(
+            proposal['execution_refs']['linked_commitment_id'],
+            commitment['commitment_id'],
+        )
+        self.assertEqual(proposal['linked_commitment']['commitment_id'], commitment['commitment_id'])
+        self.assertEqual(
+            proposal['linked_commitment']['settlement_refs'][0]['proposal_id'],
+            proposal['proposal_id'],
+        )
+        self.assertEqual(
+            proposal['linked_commitment']['settlement_refs'][0]['tx_ref'],
+            proposal['execution_refs']['tx_ref'],
+        )
+        self.assertEqual(
+            treasury.commitments.commitment_summary(self.org_id)['settlement_refs_total'],
+            1,
+        )
+
     def test_preflight_settlement_adapter_accepts_internal_ledger(self):
         result = treasury.preflight_settlement_adapter(
             'internal_ledger',

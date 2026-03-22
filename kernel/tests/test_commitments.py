@@ -133,6 +133,54 @@ class CommitmentCapsuleTests(unittest.TestCase):
         )
         self.assertEqual(settled['status'], 'settled')
 
+    def test_settlement_refs_are_recorded_and_deduped(self):
+        record = commitments.propose_commitment(
+            self.org_id,
+            'host_beta',
+            'org_beta',
+            'Settle the approved brief',
+            'user_owner',
+            warrant_id='war_demo',
+        )
+        commitments.accept_commitment(record['commitment_id'], 'user_owner', org_id=self.org_id)
+
+        validated = commitments.validate_commitment_for_settlement(
+            record['commitment_id'],
+            org_id=self.org_id,
+            warrant_id='war_demo',
+        )
+        self.assertEqual(validated['commitment_id'], record['commitment_id'])
+
+        updated = commitments.record_settlement_ref(
+            record['commitment_id'],
+            {
+                'proposal_id': 'ppo_demo',
+                'tx_ref': 'ptx_demo',
+                'verification_state': 'host_ledger_final',
+            },
+            org_id=self.org_id,
+        )
+        self.assertEqual(len(updated['settlement_refs']), 1)
+        self.assertEqual(updated['settlement_refs'][0]['proposal_id'], 'ppo_demo')
+        self.assertIn('recorded_at', updated['settlement_refs'][0])
+
+        updated = commitments.record_settlement_ref(
+            record['commitment_id'],
+            {
+                'proposal_id': 'ppo_demo',
+                'tx_ref': 'ptx_demo_v2',
+                'verification_state': 'chain_final',
+            },
+            org_id=self.org_id,
+        )
+        self.assertEqual(len(updated['settlement_refs']), 1)
+        self.assertEqual(updated['settlement_refs'][0]['tx_ref'], 'ptx_demo_v2')
+        self.assertEqual(updated['settlement_refs'][0]['verification_state'], 'chain_final')
+
+        summary = commitments.commitment_summary(self.org_id)
+        self.assertEqual(summary['accepted'], 1)
+        self.assertEqual(summary['settlement_refs_total'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -138,6 +138,8 @@ reference workspace can mutate the file-backed admission registry via
 The same `runtime_core` surface now also exposes the `federation_gateway`
 boundary state: whether the host has federation enabled, which peer hosts are
 trusted, and whether replay protection is file-backed or memory-only.
+That same boundary registry now declares whether a boundary requires warrants
+and which message types map to which warrant action classes.
 `/api/warrants` now exposes first-class warrant records and summary counts, and
 the reference workspace can mutate those records through
 `POST /api/warrants/issue`, `/api/warrants/approve`, `/api/warrants/stay`, and

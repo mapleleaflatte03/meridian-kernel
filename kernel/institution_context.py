@@ -56,9 +56,9 @@ class ServiceBoundary:
     per-request state — that belongs to InstitutionContext.
     """
 
-    __slots__ = ('name', 'identity_model', 'scope', 'description')
+    __slots__ = ('name', 'identity_model', 'scope', 'description', 'requires_warrant_for_messages')
 
-    def __init__(self, name, identity_model, scope, description=''):
+    def __init__(self, name, identity_model, scope, description='', *, requires_warrant_for_messages=None):
         if identity_model not in IDENTITY_MODELS:
             raise ValueError(
                 f'Unknown identity_model {identity_model!r}. '
@@ -72,6 +72,7 @@ class ServiceBoundary:
         self.identity_model = identity_model
         self.scope = scope
         self.description = description
+        self.requires_warrant_for_messages = dict(requires_warrant_for_messages or {})
 
     def to_dict(self):
         d = {
@@ -234,6 +235,9 @@ CLI_BOUNDARY = ServiceBoundary(
 FEDERATION_GATEWAY_BOUNDARY = ServiceBoundary(
     'federation_gateway', 'signed_host_service', 'federation_gateway',
     'Cross-host federation gateway — signed host-service identity',
+    requires_warrant_for_messages={
+        'execution_request': 'federated_execution',
+    },
 )
 
 SUBSCRIPTIONS_BOUNDARY = ServiceBoundary(
@@ -266,7 +270,10 @@ def describe_boundary(boundary):
         'institution_bound',
         'federation_gateway',
     )
+    data['supports_federation'] = boundary.scope == 'federation_gateway'
     data['requires_admitted_institution'] = boundary.scope not in ('unscoped', 'daemon_only')
+    data['requires_warrant'] = bool(boundary.requires_warrant_for_messages)
+    data['required_warrant_actions'] = dict(boundary.requires_warrant_for_messages)
     return data
 
 

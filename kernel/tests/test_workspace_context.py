@@ -227,6 +227,11 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(status['runtime_core']['institution_context']['org_id'], 'org_a')
         self.assertTrue(status['runtime_core']['service_registry']['workspace']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['service_registry']['federation_gateway']['supports_institution_routing'])
+        self.assertTrue(status['runtime_core']['service_registry']['federation_gateway']['requires_warrant'])
+        self.assertEqual(
+            status['runtime_core']['service_registry']['federation_gateway']['required_warrant_actions']['execution_request'],
+            'federated_execution',
+        )
         self.assertTrue(status['runtime_core']['admission']['additional_institutions_allowed'])
         self.assertEqual(status['runtime_core']['admission']['management_mode'], 'workspace_api_file_backed')
         self.assertTrue(status['runtime_core']['admission']['mutation_enabled'])
@@ -312,6 +317,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(manifest['admission']['bound_org_id'], ctx.org_id)
         self.assertIn('federation_gateway', manifest['service_registry'])
         self.assertEqual(manifest['federation']['boundary_name'], 'federation_gateway')
+        self.assertTrue(manifest['service_registry']['federation_gateway']['requires_warrant'])
 
     def test_federation_receipt_is_bound_to_receiver_host_and_org(self):
         from federation import FederationEnvelopeClaims
@@ -668,6 +674,43 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(event['args'][2], 'federation_envelope_delivery_failed')
         self.assertEqual(event['kwargs']['details']['envelope_id'], 'fed_demo')
         self.assertEqual(event['kwargs']['details']['error'], 'Peer returned HTTP 503')
+
+    def test_deliver_federation_envelope_blocks_execution_without_warrant(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+
+        class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        with self.assertRaises(PermissionError):
+            self.workspace._deliver_federation_envelope(
+                'org_a',
+                'host_beta',
+                'org_b',
+                'execution_request',
+                payload={'task': 'demo'},
+                actor_type='user',
+                actor_id='user_owner',
+                session_id='ses_demo',
+            )
+
+        self.assertEqual(len(audit_events), 1)
+        event = audit_events[0]
+        self.assertEqual(event['args'][2], 'federation_warrant_blocked')
+        self.assertEqual(event['kwargs']['details']['required_action_class'], 'federated_execution')
+        self.assertEqual(event['kwargs']['details']['target_host_id'], 'host_beta')
 
 
 if __name__ == '__main__':

@@ -68,6 +68,8 @@ Today that proof is deliberately narrow:
 - warrants are institution-scoped and capsule-backed
 - warrants record action class, boundary, actor, session, request hash, and TTL
 - workspace APIs can issue, approve, stay, revoke, and inspect warrants
+- the surfaced boundary registry declares warrant requirements per message type
+  for boundaries such as `federation_gateway`
 - sender-side federated `execution_request` delivery requires an executable
   warrant and records that `warrant_id` in sender and receiver audit provenance
 

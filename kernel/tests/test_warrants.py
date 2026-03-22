@@ -112,6 +112,44 @@ class WarrantCapsuleTests(unittest.TestCase):
                 boundary_name='federation_gateway',
             )
 
+    def test_validate_rejects_stayed_warrant(self):
+        record = warrants.issue_warrant(
+            self.org_id,
+            'federated_execution',
+            'federation_gateway',
+            'user_owner',
+        )
+        warrants.review_warrant(record['warrant_id'], 'stay', 'user_owner', org_id=self.org_id)
+        with self.assertRaises(PermissionError):
+            warrants.validate_warrant_for_execution(
+                record['warrant_id'],
+                org_id=self.org_id,
+                action_class='federated_execution',
+                boundary_name='federation_gateway',
+            )
+
+    def test_validate_rejects_expired_warrant(self):
+        record = warrants.issue_warrant(
+            self.org_id,
+            'federated_execution',
+            'federation_gateway',
+            'user_owner',
+            request_payload={'task': 'demo'},
+        )
+        warrants.review_warrant(record['warrant_id'], 'approve', 'user_owner', org_id=self.org_id)
+        store = warrants._load_store(self.org_id)
+        store['warrants'][record['warrant_id']]['expires_at'] = '1970-01-01T00:00:00Z'
+        warrants._save_store(store, self.org_id)
+        with self.assertRaises(PermissionError):
+            warrants.validate_warrant_for_execution(
+                record['warrant_id'],
+                org_id=self.org_id,
+                action_class='federated_execution',
+                boundary_name='federation_gateway',
+                actor_id='user_owner',
+                request_payload={'task': 'demo'},
+            )
+
     def test_message_type_mapping_requires_federated_execution(self):
         self.assertEqual(
             warrants.warrant_action_for_message('execution_request'),

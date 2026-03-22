@@ -254,7 +254,8 @@ def _issue_workspace_session(instance):
     return body
 
 
-def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=False):
+def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=False,
+                            review_decision='approve'):
     status, body = _http_json(
         'POST',
         instance['base_url'] + '/api/warrants/issue',
@@ -273,10 +274,10 @@ def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=Fal
     if status != 200:
         raise AssertionError(f'failed issuing warrant for {instance["host_id"]}: {status} {body}')
     warrant = body['warrant']
-    if not auto_issue:
+    if not auto_issue and review_decision:
         status, body = _http_json(
             'POST',
-            instance['base_url'] + '/api/warrants/approve',
+            instance['base_url'] + f'/api/warrants/{review_decision}',
             payload={'warrant_id': warrant['warrant_id']},
             headers={
                 'Authorization': f'Bearer {token}',
@@ -284,7 +285,9 @@ def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=Fal
             },
         )
         if status != 200:
-            raise AssertionError(f'failed approving warrant for {instance["host_id"]}: {status} {body}')
+            raise AssertionError(
+                f'failed {review_decision} warrant for {instance["host_id"]}: {status} {body}'
+            )
         warrant = body['warrant']
     return warrant
 
@@ -1279,6 +1282,168 @@ class FederationTests(unittest.TestCase):
             ]
             self.assertTrue(failed)
             self.assertEqual(failed[-1]['details']['target_host_id'], 'host_beta')
+            self.assertEqual(received, [])
+
+    def test_workspace_federation_send_rejects_missing_warrant(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'execution_request',
+                        'payload': {'task': 'demo'},
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 403, body)
+                self.assertIn('requires warrant_id', body['error'])
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            blocked = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_warrant_blocked'
+            ]
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertTrue(blocked)
+            self.assertEqual(blocked[-1]['details']['required_action_class'], 'federated_execution')
+            self.assertEqual(received, [])
+
+    def test_workspace_federation_send_rejects_stayed_warrant(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                request_payload = {'task': 'demo'}
+                warrant = _issue_workspace_warrant(
+                    alpha,
+                    session['token'],
+                    request_payload,
+                    review_decision='stay',
+                )
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'execution_request',
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 403, body)
+                self.assertIn('court_review_state=stayed', body['error'])
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            blocked = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_warrant_blocked'
+            ]
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertTrue(blocked)
+            self.assertEqual(blocked[-1]['details']['warrant_id'], warrant['warrant_id'])
             self.assertEqual(received, [])
 
     def test_upsert_peer_registry_entry_round_trips_file_backed_registry(self):

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
+import base64
 import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, ROOT)
@@ -222,14 +225,24 @@ class FederationTests(unittest.TestCase):
         calls = {}
 
         def fake_post(url, data):
+            body_b64 = data['envelope'].split('.', 1)[0]
+            padding = '=' * ((4 - len(body_b64) % 4) % 4)
+            envelope_payload = json.loads(
+                base64.urlsafe_b64decode(body_b64 + padding).decode('utf-8')
+            )
             calls['url'] = url
             calls['data'] = data
             return {
                 'accepted': True,
                 'receipt': {
                     'receipt_id': 'fedrcpt_demo',
+                    'envelope_id': envelope_payload['envelope_id'],
+                    'accepted_at': '2026-03-22T00:00:00Z',
                     'receiver_host_id': 'host_beta',
                     'receiver_institution_id': 'org_beta',
+                    'message_type': envelope_payload['message_type'],
+                    'boundary_name': envelope_payload['boundary_name'],
+                    'identity_model': 'signed_host_service',
                 },
             }
 
@@ -260,11 +273,74 @@ class FederationTests(unittest.TestCase):
         self.assertIn('envelope', calls['data'])
         self.assertEqual(calls['data']['payload'], {'task': 'demo'})
         self.assertTrue(result['response']['accepted'])
+        self.assertEqual(result['receipt']['receipt_id'], 'fedrcpt_demo')
         self.assertEqual(result['response']['receipt']['receipt_id'], 'fedrcpt_demo')
         self.assertEqual(result['peer']['host_id'], 'host_beta')
         self.assertEqual(result['claims']['target_host_id'], 'host_beta')
         self.assertEqual(result['claims']['target_institution_id'], 'org_beta')
         self.assertEqual(result['claims']['message_type'], 'execution_request')
+
+    def test_deliver_rejects_receipt_with_wrong_receiver_host(self):
+        from federation import FederationAuthority, FederationDeliveryError, FederationPeer
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_alpha',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        authority = FederationAuthority(
+            host,
+            signing_secret='alpha-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_alpha',
+                'trusted_peer_ids': ['host_beta'],
+                'peers': {
+                    'host_beta': FederationPeer(
+                        'host_beta',
+                        transport='https',
+                        endpoint_url='http://127.0.0.1:19013',
+                        trust_state='trusted',
+                        shared_secret='beta-secret',
+                        admitted_org_ids=['org_beta'],
+                    ),
+                },
+            },
+        )
+
+        with self.assertRaises(FederationDeliveryError):
+            authority.deliver(
+                'host_beta',
+                'org_alpha',
+                'org_beta',
+                'execution_request',
+                payload={'task': 'demo'},
+                http_post=lambda _url, _data: {
+                    'accepted': True,
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_bad',
+                        'envelope_id': 'fed_wrong',
+                        'receiver_host_id': 'host_wrong',
+                        'receiver_institution_id': 'org_beta',
+                    },
+                },
+                http_get=lambda _url: {
+                    'host_identity': {'host_id': 'host_beta'},
+                    'admission': {'admitted_org_ids': ['org_beta']},
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                },
+            )
 
     def test_deliver_rejects_peer_without_endpoint_url(self):
         from federation import FederationAuthority, FederationDeliveryError, FederationPeer
@@ -366,6 +442,216 @@ class FederationTests(unittest.TestCase):
         self.assertEqual(ctx.exception.claims.target_host_id, 'host_beta')
         self.assertEqual(ctx.exception.claims.target_institution_id, 'org_beta')
         self.assertEqual(ctx.exception.claims.message_type, 'execution_request')
+
+    def test_deliver_round_trips_over_http_between_two_hosts(self):
+        from federation import FederationAuthority, FederationPeer
+        from runtime_host import default_host_identity
+
+        receiver_host = default_host_identity(
+            host_id='host_beta',
+            federation_enabled=True,
+            peer_transport='https',
+        )
+        receiver = FederationAuthority(receiver_host, signing_secret='beta-secret')
+        received_claims = []
+
+        class PeerHandler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                return
+
+            def do_GET(self):
+                if self.path != '/api/federation/manifest':
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps({
+                    'manifest_version': 1,
+                    'host_identity': {'host_id': 'host_beta'},
+                    'admission': {'admitted_org_ids': ['org_beta']},
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                }).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                if self.path != '/api/federation/receive':
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                length = int(self.headers.get('Content-Length', '0') or 0)
+                payload = json.loads(self.rfile.read(length).decode('utf-8') or '{}')
+                claims = receiver.accept(
+                    payload.get('envelope', ''),
+                    payload=payload.get('payload'),
+                    expected_target_host_id='host_beta',
+                    expected_target_org_id='org_beta',
+                    expected_boundary_name='federation_gateway',
+                )
+                received_claims.append(claims.to_dict())
+                body = json.dumps({
+                    'accepted': True,
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_http',
+                        'envelope_id': claims.envelope_id,
+                        'accepted_at': '2026-03-22T00:00:00Z',
+                        'receiver_host_id': 'host_beta',
+                        'receiver_institution_id': 'org_beta',
+                        'message_type': claims.message_type,
+                        'boundary_name': claims.boundary_name,
+                        'identity_model': 'signed_host_service',
+                    },
+                }).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        try:
+            server = ThreadingHTTPServer(('127.0.0.1', 0), PeerHandler)
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            sender_host = default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+            )
+            authority = FederationAuthority(
+                sender_host,
+                signing_secret='alpha-secret',
+                peer_registry={
+                    'source': 'test',
+                    'host_id': 'host_alpha',
+                    'trusted_peer_ids': ['host_beta'],
+                    'peers': {
+                        'host_beta': FederationPeer(
+                            'host_beta',
+                            transport='https',
+                            endpoint_url=f'http://127.0.0.1:{server.server_address[1]}',
+                            trust_state='trusted',
+                            shared_secret='beta-secret',
+                            admitted_org_ids=['org_beta'],
+                        ),
+                    },
+                },
+            )
+            result = authority.deliver(
+                'host_beta',
+                'org_alpha',
+                'org_beta',
+                'execution_request',
+                payload={'task': 'demo'},
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(result['receipt']['receipt_id'], 'fedrcpt_http')
+        self.assertEqual(result['receipt']['receiver_host_id'], 'host_beta')
+        self.assertEqual(result['claims']['target_host_id'], 'host_beta')
+        self.assertEqual(len(received_claims), 1)
+        self.assertEqual(received_claims[0]['source_host_id'], 'host_alpha')
+        self.assertEqual(received_claims[0]['target_institution_id'], 'org_beta')
+
+    def test_deliver_rejects_http_manifest_target_mismatch(self):
+        from federation import FederationAuthority, FederationDeliveryError, FederationPeer
+        from runtime_host import default_host_identity
+
+        class ManifestOnlyHandler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                return
+
+            def do_GET(self):
+                if self.path != '/api/federation/manifest':
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps({
+                    'manifest_version': 1,
+                    'host_identity': {'host_id': 'host_beta'},
+                    'admission': {'admitted_org_ids': ['org_other']},
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                }).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                self.send_response(500)
+                self.end_headers()
+
+        try:
+            server = ThreadingHTTPServer(('127.0.0.1', 0), ManifestOnlyHandler)
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host = default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+            )
+            authority = FederationAuthority(
+                host,
+                signing_secret='alpha-secret',
+                peer_registry={
+                    'source': 'test',
+                    'host_id': 'host_alpha',
+                    'trusted_peer_ids': ['host_beta'],
+                    'peers': {
+                        'host_beta': FederationPeer(
+                            'host_beta',
+                            transport='https',
+                            endpoint_url=f'http://127.0.0.1:{server.server_address[1]}',
+                            trust_state='trusted',
+                            shared_secret='beta-secret',
+                            admitted_org_ids=['org_beta'],
+                        ),
+                    },
+                },
+            )
+            with self.assertRaises(FederationDeliveryError):
+                authority.deliver(
+                    'host_beta',
+                    'org_alpha',
+                    'org_beta',
+                    'execution_request',
+                    payload={'task': 'demo'},
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_upsert_peer_registry_entry_round_trips_file_backed_registry(self):
         from federation import load_peer_registry, upsert_peer_registry_entry

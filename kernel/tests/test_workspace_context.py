@@ -541,6 +541,11 @@ class WorkspaceContextTests(unittest.TestCase):
                         'boundary_name': 'federation_gateway',
                         'message_type': 'execution_request',
                     },
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_demo',
+                        'receiver_host_id': 'host_beta',
+                        'receiver_institution_id': 'org_b',
+                    },
                     'response': {
                         'accepted': True,
                         'receipt': {
@@ -580,6 +585,7 @@ class WorkspaceContextTests(unittest.TestCase):
         )
 
         self.assertEqual(delivery['claims']['envelope_id'], 'fed_demo')
+        self.assertEqual(delivery['receipt']['receipt_id'], 'fedrcpt_demo')
         self.assertEqual(snapshot['bound_org_id'], 'org_a')
         self.assertEqual(len(audit_events), 1)
         event = audit_events[0]

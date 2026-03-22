@@ -112,6 +112,29 @@ class CaseCapsuleTests(unittest.TestCase):
         self.assertCountEqual(cases.blocking_commitment_ids(self.org_id), ['cmt_demo', 'cmt_other'])
         self.assertEqual(cases.blocked_peer_host_ids(self.org_id), ['host_beta'])
 
+    def test_resolve_clears_blocking_peer_and_commitment_views(self):
+        record = cases.open_case(
+            self.org_id,
+            'misrouted_execution',
+            'user_owner',
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            linked_commitment_id='cmt_demo',
+        )
+        self.assertTrue(cases.case_targets_peer(record))
+        self.assertEqual(cases.blocked_peer_host_ids(self.org_id), ['host_beta'])
+        self.assertEqual(cases.blocking_commitment_ids(self.org_id), ['cmt_demo'])
+
+        cases.resolve_case(
+            record['case_id'],
+            'user_owner',
+            org_id=self.org_id,
+            note='Resolved after review',
+        )
+
+        self.assertEqual(cases.blocked_peer_host_ids(self.org_id), [])
+        self.assertEqual(cases.blocking_commitment_ids(self.org_id), [])
+
     def test_delivery_failure_helper_dedupes_active_case(self):
         first, created_first = cases.ensure_case_for_delivery_failure(
             'invalid_settlement_notice',

@@ -235,6 +235,7 @@ from cases import (
     blocking_commitment_case,
     blocking_peer_case,
     case_requires_peer_block,
+    case_targets_peer,
     case_summary,
     ensure_case_for_delivery_failure,
     ensure_case_for_commitment_breach,
@@ -1789,6 +1790,14 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
         org_id=bound_org_id,
         note='Applied from received settlement_notice envelope',
     )
+    sender_warrant = _finalize_sender_warrant_for_settlement_notice(
+        bound_org_id,
+        claims,
+        receipt,
+        commitment,
+        settlement_ref,
+        payload=payload,
+    )
     inbox_entry = _federation_inbox_entry(
         bound_org_id,
         claims,
@@ -1820,6 +1829,7 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
         'settlement_ref': settlement_ref,
         'settlement_preflight': settlement_preflight,
         'inbox_entry': inbox_entry,
+        'warrant': sender_warrant,
     })
     return result
 
@@ -2065,7 +2075,9 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
     receipt = dict(delivery.get('receipt') or {})
     if not receipt and isinstance(delivery.get('response'), dict):
         receipt = dict(delivery['response'].get('receipt') or {})
-    if execution_warrant:
+    if execution_warrant and not (
+        message_type == 'execution_request' and linked_commitment
+    ):
         mark_warrant_executed(
             warrant_id,
             org_id=bound_org_id,
@@ -2589,6 +2601,161 @@ def _maybe_suspend_peer_for_case(case_record, actor_id, *, org_id, session_id=No
         'trust_state': (peer_record or {}).get('trust_state', ''),
         'federation': snapshot,
     }
+
+
+def _maybe_restore_peer_for_case(case_record, actor_id, *, org_id, session_id=None):
+    if not case_targets_peer(case_record):
+        return None
+    target_host_id = (case_record.get('target_host_id') or '').strip()
+    if not target_host_id:
+        return None
+    host_identity, admission_registry = _runtime_host_state(org_id)
+    management = _federation_management_state(host_identity)
+    if not management['mutation_enabled']:
+        return {
+            'applied': False,
+            'peer_host_id': target_host_id,
+            'reason': management['mutation_disabled_reason'],
+            'trust_state': '',
+        }
+    current_peer = _federation_peer_state(target_host_id, host_identity=host_identity)
+    if current_peer and current_peer.get('trust_state') == 'revoked':
+        return {
+            'applied': False,
+            'peer_host_id': target_host_id,
+            'reason': 'peer_revoked',
+            'trust_state': 'revoked',
+        }
+    remaining_case = blocking_peer_case(target_host_id, org_id=org_id)
+    if remaining_case:
+        snapshot = _federation_snapshot(
+            org_id,
+            host_identity=host_identity,
+            admission_registry=admission_registry,
+        )
+        peer_record = next(
+            (peer for peer in snapshot.get('peers', []) if peer.get('host_id') == target_host_id),
+            None,
+        )
+        return {
+            'applied': False,
+            'peer_host_id': target_host_id,
+            'reason': 'other_blocking_case_remains',
+            'trust_state': (peer_record or {}).get('trust_state', ''),
+            'case_id': remaining_case.get('case_id', ''),
+            'federation': snapshot,
+        }
+    if current_peer and current_peer.get('trust_state') == 'trusted':
+        return {
+            'applied': False,
+            'peer_host_id': target_host_id,
+            'reason': 'already_trusted',
+            'trust_state': 'trusted',
+        }
+    try:
+        peer_registry = set_peer_trust_state(
+            FEDERATION_PEERS_FILE,
+            target_host_id,
+            'trusted',
+            host_identity=host_identity,
+        )
+    except LookupError:
+        return {
+            'applied': False,
+            'peer_host_id': target_host_id,
+            'reason': 'peer_not_registered',
+            'trust_state': '',
+        }
+
+    snapshot = _federation_snapshot(
+        org_id,
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+        peer_registry=peer_registry,
+    )
+    peer_record = next(
+        (peer for peer in snapshot.get('peers', []) if peer.get('host_id') == target_host_id),
+        None,
+    )
+    log_event(
+        org_id,
+        actor_id,
+        'federation_peer_auto_reinstated',
+        resource=target_host_id,
+        outcome='success',
+        details={
+            'peer_host_id': target_host_id,
+            'case_id': case_record.get('case_id', ''),
+            'claim_type': case_record.get('claim_type', ''),
+            'trust_state': (peer_record or {}).get('trust_state', ''),
+        },
+        session_id=session_id,
+    )
+    return {
+        'applied': True,
+        'peer_host_id': target_host_id,
+        'reason': '',
+        'trust_state': (peer_record or {}).get('trust_state', ''),
+        'federation': snapshot,
+    }
+
+
+def _sender_warrant_delivery_ref_for_settlement_notice(commitment, claims, *, payload=None):
+    payload = payload if isinstance(payload, dict) else {}
+    execution_envelope_id = (payload.get('envelope_id') or '').strip()
+    for ref in reversed(list((commitment or {}).get('delivery_refs') or [])):
+        ref = dict(ref or {})
+        if (ref.get('message_type') or '').strip() != 'execution_request':
+            continue
+        if execution_envelope_id and (ref.get('envelope_id') or '').strip() != execution_envelope_id:
+            continue
+        if (ref.get('target_host_id') or '').strip() != (claims.source_host_id or '').strip():
+            continue
+        if (ref.get('target_institution_id') or '').strip() != (claims.source_institution_id or '').strip():
+            continue
+        warrant_id = (ref.get('warrant_id') or '').strip()
+        if warrant_id:
+            return warrant_id, ref
+    return '', None
+
+
+def _finalize_sender_warrant_for_settlement_notice(bound_org_id, claims, receipt, commitment,
+                                                   settlement_ref, *, payload=None):
+    warrant_id, delivery_ref = _sender_warrant_delivery_ref_for_settlement_notice(
+        commitment,
+        claims,
+        payload=payload,
+    )
+    if not warrant_id:
+        return None
+    warrant = get_warrant(warrant_id, org_id=bound_org_id)
+    if not warrant:
+        return None
+    if warrant.get('execution_state') == 'executed':
+        return warrant
+    if warrant.get('execution_state') != 'ready':
+        return warrant
+    execution_refs = {
+        'message_type': 'execution_request',
+        'envelope_id': (delivery_ref or {}).get('envelope_id', ''),
+        'target_host_id': (delivery_ref or {}).get('target_host_id', ''),
+        'target_institution_id': (delivery_ref or {}).get('target_institution_id', ''),
+        'receipt_id': (delivery_ref or {}).get('receipt_id', ''),
+        'receiver_host_id': (delivery_ref or {}).get('receiver_host_id', ''),
+        'receiver_institution_id': (delivery_ref or {}).get('receiver_institution_id', ''),
+        'commitment_id': claims.commitment_id,
+        'completion_message_type': 'settlement_notice',
+        'completion_envelope_id': claims.envelope_id,
+        'completion_receipt_id': (receipt or {}).get('receipt_id', ''),
+        'completion_source_host_id': claims.source_host_id,
+        'completion_source_institution_id': claims.source_institution_id,
+        'settlement_ref': dict(settlement_ref or {}),
+    }
+    return mark_warrant_executed(
+        warrant_id,
+        org_id=bound_org_id,
+        execution_refs=execution_refs,
+    )
 
 
 def _delivery_failure_claim_type(error_message):
@@ -4527,6 +4694,13 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         org_id=org_id,
                         session_id=_sid,
                         note=body.get('note', ''),
+                    )
+                elif decision == 'resolve':
+                    federation_peer = _maybe_restore_peer_for_case(
+                        case_record,
+                        by,
+                        org_id=org_id,
+                        session_id=_sid,
                     )
                 return self._json({
                     'message': f"Case {case_record['status']}: {case_id}",

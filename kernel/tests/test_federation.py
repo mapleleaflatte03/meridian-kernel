@@ -1409,6 +1409,18 @@ class FederationTests(unittest.TestCase):
                 delivery = body['delivery']
                 self.assertEqual(delivery['claims']['commitment_id'], commitment_id)
 
+                alpha_warrants_status, alpha_warrants_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/warrants',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(alpha_warrants_status, 200, alpha_warrants_body)
+                sender_warrant = next(
+                    item for item in alpha_warrants_body['warrants']
+                    if item['warrant_id'] == warrant['warrant_id']
+                )
+                self.assertEqual(sender_warrant['execution_state'], 'ready')
+
                 jobs_status, jobs_body = _http_json(
                     'GET',
                     beta['base_url'] + '/api/federation/execution-jobs',
@@ -1487,6 +1499,22 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(inbox_body['summary']['processed'], 1)
                 self.assertEqual(inbox_body['entries'][0]['message_type'], 'settlement_notice')
                 self.assertEqual(inbox_body['entries'][0]['commitment_id'], commitment_id)
+
+                alpha_warrants_status, alpha_warrants_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/warrants',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(alpha_warrants_status, 200, alpha_warrants_body)
+                sender_warrant = next(
+                    item for item in alpha_warrants_body['warrants']
+                    if item['warrant_id'] == warrant['warrant_id']
+                )
+                self.assertEqual(sender_warrant['execution_state'], 'executed')
+                self.assertEqual(
+                    sender_warrant['execution_refs']['completion_envelope_id'],
+                    first_notice_id,
+                )
 
                 beta_jobs_status, beta_jobs_body = _http_json(
                     'GET',
@@ -3166,18 +3194,66 @@ class FederationTests(unittest.TestCase):
                     self.assertEqual(cases_body['total'], 1)
                     self.assertEqual(cases_body['blocked_peer_host_ids'], ['host_beta'])
 
+                    resolve_status, resolve_body = _http_json(
+                        'POST',
+                        alpha['base_url'] + '/api/cases/resolve',
+                        payload={
+                            'case_id': body['case']['case_id'],
+                            'note': 'Peer reviewed and reinstated for retry',
+                        },
+                        headers={
+                            'Authorization': alpha['auth_header'],
+                            'Content-Type': 'application/json',
+                        },
+                    )
+                    self.assertEqual(resolve_status, 200, resolve_body)
+                    self.assertTrue(resolve_body['federation_peer']['applied'])
+                    self.assertEqual(resolve_body['federation_peer']['trust_state'], 'trusted')
+
+                    status, cases_body = _http_json(
+                        'GET',
+                        alpha['base_url'] + '/api/cases',
+                        headers={'Authorization': alpha['auth_header']},
+                    )
+                    self.assertEqual(status, 200, cases_body)
+                    self.assertEqual(cases_body['blocked_peer_host_ids'], [])
+
+                    retry_status, retry_body = _http_json(
+                        'POST',
+                        alpha['base_url'] + '/api/federation/send',
+                        payload={
+                            'target_host_id': 'host_beta',
+                            'target_org_id': 'org_beta',
+                            'message_type': 'settlement_notice',
+                            'payload': {'tx_ref': '0xghi'},
+                        },
+                        headers={
+                            'Authorization': f"Bearer {session['token']}",
+                            'Content-Type': 'application/json',
+                        },
+                    )
+                    self.assertEqual(retry_status, 502, retry_body)
+                    self.assertEqual(retry_body['case']['claim_type'], 'misrouted_execution')
+                    self.assertEqual(BadReceiptHandler.receive_count, 2)
+
                 alpha_events = _read_jsonl(alpha['audit_log'])
                 opened = [e for e in alpha_events if e.get('action') == 'case_opened']
                 suspended = [e for e in alpha_events if e.get('action') == 'federation_peer_auto_suspended']
+                reinstated = [e for e in alpha_events if e.get('action') == 'federation_peer_auto_reinstated']
                 failed = [e for e in alpha_events if e.get('action') == 'federation_envelope_delivery_failed']
                 blocked = [e for e in alpha_events if e.get('action') == 'federation_case_blocked']
                 self.assertTrue(opened)
                 self.assertEqual(opened[-1]['details']['claim_type'], 'misrouted_execution')
                 self.assertTrue(suspended)
                 self.assertEqual(suspended[-1]['details']['trust_state'], 'suspended')
+                self.assertTrue(reinstated)
+                self.assertEqual(reinstated[-1]['details']['trust_state'], 'trusted')
                 self.assertTrue(failed)
                 self.assertTrue(blocked)
-                self.assertEqual(blocked[-1]['details']['case_id'], opened[-1]['resource'])
+                self.assertIn(
+                    blocked[-1]['details']['case_id'],
+                    [event['resource'] for event in opened],
+                )
         finally:
             server.shutdown()
             server.server_close()

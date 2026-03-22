@@ -931,6 +931,33 @@ class WorkspaceContextTests(unittest.TestCase):
         from runtime_host import default_host_identity
 
         calls = {}
+        sender_warrant = {
+            'warrant_id': 'war_sender',
+            'execution_state': 'ready',
+        }
+        self.workspace.get_commitment = lambda commitment_id, org_id=None: {
+            'commitment_id': commitment_id,
+            'delivery_refs': [
+                {
+                    'message_type': 'execution_request',
+                    'envelope_id': 'fed_exec',
+                    'target_host_id': 'host_alpha',
+                    'target_institution_id': 'org_alpha',
+                    'receipt_id': 'fedrcpt_exec',
+                    'receiver_host_id': 'host_alpha',
+                    'receiver_institution_id': 'org_alpha',
+                    'warrant_id': 'war_sender',
+                }
+            ],
+        }
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: (
+            dict(sender_warrant) if warrant_id == 'war_sender' else None
+        )
+        self.workspace.mark_warrant_executed = lambda warrant_id, *, org_id=None, execution_refs=None: {
+            'warrant_id': warrant_id,
+            'execution_state': 'executed',
+            'execution_refs': dict(execution_refs or {}),
+        }
         self.workspace.validate_commitment_for_settlement = (
             lambda commitment_id, **kwargs: {'commitment_id': commitment_id, 'state': 'accepted'}
         )
@@ -946,6 +973,18 @@ class WorkspaceContextTests(unittest.TestCase):
                 'commitment_id': commitment_id,
                 'state': 'settled',
                 'settled_by': by,
+                'delivery_refs': [
+                    {
+                        'message_type': 'execution_request',
+                        'envelope_id': 'fed_exec',
+                        'target_host_id': 'host_alpha',
+                        'target_institution_id': 'org_alpha',
+                        'receipt_id': 'fedrcpt_exec',
+                        'receiver_host_id': 'host_alpha',
+                        'receiver_institution_id': 'org_alpha',
+                        'warrant_id': 'war_sender',
+                    }
+                ],
             }
         )
         self.workspace.log_event = lambda *args, **kwargs: calls.setdefault('audit', []).append((args, kwargs))
@@ -1001,6 +1040,7 @@ class WorkspaceContextTests(unittest.TestCase):
                     'proposal_id': 'pay_demo',
                     'tx_ref': 'tx_demo',
                     'settlement_adapter': 'internal_ledger',
+                    'envelope_id': 'fed_exec',
                 },
             )
         finally:
@@ -1019,6 +1059,10 @@ class WorkspaceContextTests(unittest.TestCase):
             processing['settlement_ref']['settlement_adapter_contract']['adapter_id'],
             'internal_ledger',
         )
+        self.assertEqual(processing['warrant']['warrant_id'], 'war_sender')
+        self.assertEqual(processing['warrant']['execution_state'], 'executed')
+        self.assertEqual(processing['warrant']['execution_refs']['envelope_id'], 'fed_exec')
+        self.assertEqual(processing['warrant']['execution_refs']['completion_envelope_id'], 'fed_settle')
         self.assertTrue(processing['settlement_preflight']['preflight_ok'])
         self.assertEqual(processing['inbox_entry']['state'], 'processed')
         self.assertEqual(calls['settlement_ref'][0], 'cmt_demo')
@@ -1054,6 +1098,7 @@ class WorkspaceContextTests(unittest.TestCase):
             'peer_host_id': 'host_alpha',
             'trust_state': 'suspended',
         }
+        self.workspace.mark_warrant_executed = lambda *args, **kwargs: self.fail('sender warrant should not finalize')
         self.workspace.record_settlement_ref = lambda *args, **kwargs: self.fail('settlement ref should not be recorded')
         self.workspace.settle_commitment = lambda *args, **kwargs: self.fail('commitment should not settle')
         self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
@@ -1089,6 +1134,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['case']['case_id'], 'case_invalid_notice')
         self.assertTrue(processing['case_created'])
         self.assertEqual(processing['federation_peer']['trust_state'], 'suspended')
+        self.assertIsNone(processing.get('warrant'))
         self.assertFalse(processing['settlement_preflight']['preflight_ok'])
         self.assertEqual(processing['settlement_preflight']['error_type'], 'unknown_adapter')
         self.assertEqual(audit_events[-1][0][2], 'federation_settlement_notice_rejected')
@@ -1882,6 +1928,83 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(marked[0]['kwargs']['delivery_ref']['receipt_id'], 'fedrcpt_demo')
         self.assertEqual(audit_events[-1]['kwargs']['details']['commitment_id'], 'cmt_demo')
 
+    def test_deliver_federation_execution_request_defers_commitment_warrant_execution(self):
+        from runtime_host import default_host_identity
+
+        recorded = []
+        marked = []
+
+        class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
+            def deliver(self, *args, **kwargs):
+                return {
+                    'peer': {'host_id': 'host_beta', 'transport': 'https'},
+                    'claims': {
+                        'envelope_id': 'fed_exec_demo',
+                        'source_host_id': 'host_alpha',
+                        'source_institution_id': 'org_a',
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_b',
+                        'nonce': 'nonce_demo',
+                        'boundary_name': 'federation_gateway',
+                        'message_type': 'execution_request',
+                        'commitment_id': 'cmt_demo',
+                    },
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_exec_demo',
+                        'receiver_host_id': 'host_beta',
+                        'receiver_institution_id': 'org_b',
+                    },
+                    'response': {'accepted': True},
+                }
+
+            def snapshot(self, *, bound_org_id='', admission_registry=None):
+                return {
+                    'enabled': True,
+                    'bound_org_id': bound_org_id,
+                    'admitted_org_ids': list((admission_registry or {}).get('admitted_org_ids', [])),
+                }
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.validate_warrant_for_execution = lambda *args, **kwargs: {
+            'warrant_id': 'war_demo',
+            'execution_state': 'ready',
+        }
+        self.workspace.validate_commitment_for_delivery = lambda commitment_id, **_kwargs: {
+            'commitment_id': commitment_id,
+            'status': 'accepted',
+        }
+        self.workspace.record_delivery_ref = lambda commitment_id, **kwargs: recorded.append({
+            'commitment_id': commitment_id,
+            'kwargs': kwargs,
+        })
+        self.workspace.mark_warrant_executed = lambda *args, **kwargs: marked.append((args, kwargs))
+        self.workspace.log_event = lambda *args, **kwargs: None
+
+        delivery, _snapshot = self.workspace._deliver_federation_envelope(
+            'org_a',
+            'host_beta',
+            'org_b',
+            'execution_request',
+            payload={'task': 'demo'},
+            actor_type='user',
+            actor_id='user_owner',
+            session_id='ses_demo',
+            warrant_id='war_demo',
+            commitment_id='cmt_demo',
+        )
+
+        self.assertEqual(delivery['claims']['message_type'], 'execution_request')
+        self.assertEqual(marked, [])
+        self.assertEqual(recorded[0]['commitment_id'], 'cmt_demo')
+        self.assertEqual(recorded[0]['kwargs']['delivery_ref']['warrant_id'], 'war_demo')
+
     def test_deliver_federation_envelope_blocks_invalid_commitment(self):
         from runtime_host import default_host_identity
 
@@ -2020,6 +2143,81 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(result['peer_host_id'], 'host_beta')
         self.assertEqual(result['trust_state'], 'suspended')
         self.assertEqual(audit_events[0]['args'][2], 'federation_peer_auto_suspended')
+
+    def test_maybe_restore_peer_for_case_updates_trust(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True, peer_transport='https'),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace.blocking_peer_case = lambda peer_host_id, **_kwargs: None
+        self.workspace.set_peer_trust_state = lambda *_args, **_kwargs: {
+            'source': 'file',
+            'host_id': 'host_alpha',
+            'trusted_peer_ids': ['host_beta'],
+            'peers': {
+                'host_beta': {
+                    'host_id': 'host_beta',
+                    'trust_state': 'trusted',
+                },
+            },
+        }
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        result = self.workspace._maybe_restore_peer_for_case(
+            {
+                'case_id': 'case_demo',
+                'claim_type': 'misrouted_execution',
+                'status': 'resolved',
+                'target_host_id': 'host_beta',
+            },
+            'user_owner',
+            org_id='org_a',
+            session_id='ses_demo',
+        )
+
+        self.assertTrue(result['applied'])
+        self.assertEqual(result['peer_host_id'], 'host_beta')
+        self.assertEqual(result['trust_state'], 'trusted')
+        self.assertEqual(audit_events[0]['args'][2], 'federation_peer_auto_reinstated')
+
+    def test_maybe_restore_peer_for_case_preserves_revoked_peer(self):
+        from runtime_host import default_host_identity
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True, peer_transport='https'),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_peer_state = lambda peer_host_id, **_kwargs: {
+            'applied': False,
+            'peer_host_id': peer_host_id,
+            'reason': 'case_blocked',
+            'trust_state': 'revoked',
+        }
+        self.workspace.blocking_peer_case = lambda peer_host_id, **_kwargs: None
+        self.workspace.set_peer_trust_state = lambda *_args, **_kwargs: self.fail('revoked peer should not be auto-restored')
+        self.workspace.log_event = lambda *args, **kwargs: self.fail('revoked peer should not emit restore audit')
+
+        result = self.workspace._maybe_restore_peer_for_case(
+            {
+                'case_id': 'case_demo',
+                'claim_type': 'misrouted_execution',
+                'status': 'resolved',
+                'target_host_id': 'host_beta',
+            },
+            'user_owner',
+            org_id='org_a',
+            session_id='ses_demo',
+        )
+
+        self.assertFalse(result['applied'])
+        self.assertEqual(result['reason'], 'peer_revoked')
+        self.assertEqual(result['trust_state'], 'revoked')
 
     def test_maybe_stay_warrant_for_case_stays_ready_warrant(self):
         audit_events = []

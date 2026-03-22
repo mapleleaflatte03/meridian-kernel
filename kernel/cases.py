@@ -228,7 +228,14 @@ def case_requires_peer_block(case_record):
     case_record = dict(case_record or {})
     return (
         case_record.get('status') in BLOCKING_CASE_STATES
-        and case_record.get('claim_type') in PEER_SUSPENSION_CLAIM_TYPES
+        and case_targets_peer(case_record)
+    )
+
+
+def case_targets_peer(case_record):
+    case_record = dict(case_record or {})
+    return (
+        case_record.get('claim_type') in PEER_SUSPENSION_CLAIM_TYPES
         and bool((case_record.get('target_host_id') or '').strip())
     )
 

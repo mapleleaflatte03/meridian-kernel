@@ -44,48 +44,55 @@ class CommitmentCapsuleTests(unittest.TestCase):
             self.org_id,
             'host_beta',
             'org_beta',
-            'delivery_execution',
+            'Deliver the approved brief',
             'user_owner',
             terms_payload={'scope': 'demo'},
             warrant_id='war_demo',
         )
-        self.assertEqual(record['state'], 'proposed')
-        accepted = commitments.review_commitment(
+        self.assertEqual(record['status'], 'proposed')
+        self.assertEqual(record['summary'], 'Deliver the approved brief')
+        self.assertEqual(record['institution_id'], self.org_id)
+        self.assertEqual(record['target_institution_id'], 'org_beta')
+        accepted = commitments.accept_commitment(
             record['commitment_id'],
-            'accept',
             'user_owner',
             org_id=self.org_id,
         )
-        self.assertEqual(accepted['state'], 'accepted')
-        validated = commitments.validate_commitment_for_federation(
+        self.assertEqual(accepted['status'], 'accepted')
+        self.assertEqual(accepted['accepted_by'], 'user_owner')
+        validated = commitments.validate_commitment_for_delivery(
             record['commitment_id'],
             org_id=self.org_id,
             target_host_id='host_beta',
-            target_org_id='org_beta',
+            target_institution_id='org_beta',
             warrant_id='war_demo',
         )
         self.assertEqual(validated['commitment_id'], record['commitment_id'])
-        updated = commitments.mark_commitment_delivery(
+        updated = commitments.record_delivery_ref(
             record['commitment_id'],
+            {'receipt_id': 'fedrcpt_demo'},
             org_id=self.org_id,
-            delivery_ref={'receipt_id': 'fedrcpt_demo'},
         )
         self.assertEqual(updated['delivery_refs'][0]['receipt_id'], 'fedrcpt_demo')
+        self.assertIn('recorded_at', updated['delivery_refs'][0])
+        summary = commitments.commitment_summary(self.org_id)
+        self.assertEqual(summary['accepted'], 1)
+        self.assertEqual(summary['delivery_refs_total'], 1)
 
     def test_validate_rejects_unaccepted_commitment(self):
         record = commitments.propose_commitment(
             self.org_id,
             'host_beta',
             'org_beta',
-            'delivery_execution',
+            'Deliver the approved brief',
             'user_owner',
         )
-        with self.assertRaises(PermissionError):
-            commitments.validate_commitment_for_federation(
+        with self.assertRaises(ValueError):
+            commitments.validate_commitment_for_delivery(
                 record['commitment_id'],
                 org_id=self.org_id,
                 target_host_id='host_beta',
-                target_org_id='org_beta',
+                target_institution_id='org_beta',
             )
 
     def test_validate_rejects_target_mismatch(self):
@@ -93,16 +100,16 @@ class CommitmentCapsuleTests(unittest.TestCase):
             self.org_id,
             'host_beta',
             'org_beta',
-            'delivery_execution',
+            'Deliver the approved brief',
             'user_owner',
         )
-        commitments.review_commitment(record['commitment_id'], 'accept', 'user_owner', org_id=self.org_id)
-        with self.assertRaises(PermissionError):
-            commitments.validate_commitment_for_federation(
+        commitments.accept_commitment(record['commitment_id'], 'user_owner', org_id=self.org_id)
+        with self.assertRaises(ValueError):
+            commitments.validate_commitment_for_delivery(
                 record['commitment_id'],
                 org_id=self.org_id,
                 target_host_id='host_gamma',
-                target_org_id='org_beta',
+                target_institution_id='org_beta',
             )
 
     def test_review_transitions_to_breach_and_settle(self):
@@ -110,23 +117,21 @@ class CommitmentCapsuleTests(unittest.TestCase):
             self.org_id,
             'host_beta',
             'org_beta',
-            'delivery_execution',
+            'Deliver the approved brief',
             'user_owner',
         )
-        breached = commitments.review_commitment(
+        breached = commitments.breach_commitment(
             record['commitment_id'],
-            'breach',
             'user_owner',
             org_id=self.org_id,
         )
-        self.assertEqual(breached['state'], 'breached')
-        settled = commitments.review_commitment(
+        self.assertEqual(breached['status'], 'breached')
+        settled = commitments.settle_commitment(
             record['commitment_id'],
-            'settle',
             'user_owner',
             org_id=self.org_id,
         )
-        self.assertEqual(settled['state'], 'settled')
+        self.assertEqual(settled['status'], 'settled')
 
 
 if __name__ == '__main__':

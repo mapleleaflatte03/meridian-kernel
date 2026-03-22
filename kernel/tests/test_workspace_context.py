@@ -39,9 +39,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
         self.orig_log_event = self.workspace.log_event
         self.orig_list_warrants = self.workspace.list_warrants
+        self.orig_commitment_summary = self.workspace.commitment_summary
         self.orig_list_commitments = self.workspace.list_commitments
-        self.orig_validate_commitment_for_federation = self.workspace.validate_commitment_for_federation
-        self.orig_mark_commitment_delivery = self.workspace.mark_commitment_delivery
+        self.orig_validate_commitment_for_delivery = self.workspace.validate_commitment_for_delivery
+        self.orig_record_delivery_ref = self.workspace.record_delivery_ref
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -59,9 +60,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
         self.workspace.log_event = self.orig_log_event
         self.workspace.list_warrants = self.orig_list_warrants
+        self.workspace.commitment_summary = self.orig_commitment_summary
         self.workspace.list_commitments = self.orig_list_commitments
-        self.workspace.validate_commitment_for_federation = self.orig_validate_commitment_for_federation
-        self.workspace.mark_commitment_delivery = self.orig_mark_commitment_delivery
+        self.workspace.validate_commitment_for_delivery = self.orig_validate_commitment_for_delivery
+        self.workspace.record_delivery_ref = self.orig_record_delivery_ref
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -215,9 +217,18 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.list_commitments = lambda org_id=None, **_kwargs: [
             {
                 'commitment_id': 'cmt_demo',
-                'state': 'accepted',
+                'status': 'accepted',
             }
         ]
+        self.workspace.commitment_summary = lambda org_id=None: {
+            'total': 1,
+            'proposed': 0,
+            'accepted': 1,
+            'rejected': 0,
+            'breached': 0,
+            'settled': 0,
+            'delivery_refs_total': 0,
+        }
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
         self.workspace.get_pending_approvals = lambda org_id=None: []
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
@@ -255,6 +266,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(status['warrants']['executable'], 1)
         self.assertEqual(status['commitments']['total'], 1)
         self.assertEqual(status['commitments']['accepted'], 1)
+        self.assertEqual(status['commitments']['management_mode'], 'workspace_api_file_backed')
+        self.assertTrue(status['commitments']['mutation_enabled'])
         self.assertIn('federation', status['runtime_core'])
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
@@ -772,11 +785,11 @@ class WorkspaceContextTests(unittest.TestCase):
             {'admitted_org_ids': ['org_a', 'org_b']},
         )
         self.workspace._federation_authority = lambda _host: FakeAuthority()
-        self.workspace.validate_commitment_for_federation = lambda commitment_id, **_kwargs: {
+        self.workspace.validate_commitment_for_delivery = lambda commitment_id, **_kwargs: {
             'commitment_id': commitment_id,
-            'state': 'accepted',
+            'status': 'accepted',
         }
-        self.workspace.mark_commitment_delivery = lambda commitment_id, **kwargs: marked.append({
+        self.workspace.record_delivery_ref = lambda commitment_id, **kwargs: marked.append({
             'commitment_id': commitment_id,
             'kwargs': kwargs,
         })
@@ -818,15 +831,15 @@ class WorkspaceContextTests(unittest.TestCase):
             {'admitted_org_ids': ['org_a', 'org_b']},
         )
         self.workspace._federation_authority = lambda _host: FakeAuthority()
-        self.workspace.validate_commitment_for_federation = lambda _commitment_id, **_kwargs: (_ for _ in ()).throw(
-            PermissionError("Commitment 'cmt_demo' is not active for federation (state=rejected)")
+        self.workspace.validate_commitment_for_delivery = lambda _commitment_id, **_kwargs: (_ for _ in ()).throw(
+            ValueError("Commitment 'cmt_demo' is not active for federation (state=rejected)")
         )
         self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
             'args': args,
             'kwargs': kwargs,
         })
 
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(ValueError):
             self.workspace._deliver_federation_envelope(
                 'org_a',
                 'host_beta',

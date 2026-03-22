@@ -100,43 +100,65 @@ def _save_store(data, org_id=None):
         json.dump(data, f, indent=2, sort_keys=True)
 
 
-def propose_commitment(org_id, target_host_id, target_org_id, commitment_type,
-                       actor_id, *, terms_payload=None, warrant_id='',
-                       note=''):
+def _normalize_target_institution_id(*, target_org_id='', target_institution_id=''):
+    return (target_institution_id or target_org_id or '').strip()
+
+
+def _canonical_state(record):
+    return (record.get('status') or record.get('state') or '').strip()
+
+
+def _propose_commitment_record(org_id, target_host_id, target_institution_id, summary,
+                               actor_id, *, commitment_id=None, terms_payload=None,
+                               warrant_id='', note='', metadata=None):
     target_host_id = (target_host_id or '').strip()
-    target_org_id = (target_org_id or '').strip()
-    commitment_type = (commitment_type or '').strip()
+    target_institution_id = _normalize_target_institution_id(
+        target_institution_id=target_institution_id,
+    )
+    summary = (summary or '').strip()
     actor_id = (actor_id or '').strip()
     if not target_host_id:
         raise ValueError('target_host_id is required')
-    if not target_org_id:
-        raise ValueError('target_org_id is required')
-    if not commitment_type:
-        raise ValueError('commitment_type is required')
+    if not target_institution_id:
+        raise ValueError('target_institution_id is required')
+    if not summary:
+        raise ValueError('summary is required')
     if not actor_id:
         raise ValueError('actor_id is required')
 
-    commitment_id = f'cmt_{uuid.uuid4().hex[:12]}'
+    timestamp = _now()
+    commitment_id = (commitment_id or '').strip() or f'cmt_{uuid.uuid4().hex[:12]}'
     record = {
         'commitment_id': commitment_id,
+        'institution_id': org_id,
         'source_institution_id': org_id,
         'target_host_id': target_host_id,
-        'target_institution_id': target_org_id,
-        'commitment_type': commitment_type,
+        'target_institution_id': target_institution_id,
+        'commitment_type': summary,
+        'summary': summary,
         'terms_hash': _payload_hash(terms_payload),
         'terms_payload': terms_payload if terms_payload is not None else {},
         'warrant_id': (warrant_id or '').strip(),
         'state': 'proposed',
+        'status': 'proposed',
         'proposed_by': actor_id,
-        'proposed_at': _now(),
+        'proposed_at': timestamp,
+        'updated_at': timestamp,
         'reviewed_by': '',
         'reviewed_at': '',
         'review_note': '',
+        'accepted_by': '',
+        'accepted_at': '',
+        'rejected_by': '',
+        'rejected_at': '',
+        'breached_by': '',
+        'settled_by': '',
         'delivery_refs': [],
         'last_delivery_at': '',
         'breached_at': '',
         'settled_at': '',
         'note': note or '',
+        'metadata': dict(metadata or {}),
     }
     store = _load_store(org_id)
     store.setdefault('commitments', {})[commitment_id] = record
@@ -144,11 +166,52 @@ def propose_commitment(org_id, target_host_id, target_org_id, commitment_type,
     return record
 
 
+def propose_commitment(*args, **kwargs):
+    if len(args) >= 5:
+        org_id, target_host_id, target_org_id, summary, actor_id = args[:5]
+        return _propose_commitment_record(
+            org_id,
+            target_host_id,
+            _normalize_target_institution_id(
+                target_org_id=target_org_id,
+                target_institution_id=kwargs.get('target_institution_id', ''),
+            ),
+            summary,
+            actor_id,
+            commitment_id=kwargs.get('commitment_id'),
+            terms_payload=kwargs.get('terms_payload'),
+            warrant_id=kwargs.get('warrant_id', ''),
+            note=kwargs.get('note', ''),
+            metadata=kwargs.get('metadata'),
+        )
+    if len(args) >= 3:
+        target_host_id, target_org_id, summary = args[:3]
+        org_id = kwargs.get('org_id')
+        if not org_id:
+            raise ValueError('org_id is required')
+        return _propose_commitment_record(
+            org_id,
+            target_host_id,
+            _normalize_target_institution_id(
+                target_org_id=target_org_id,
+                target_institution_id=kwargs.get('target_institution_id', ''),
+            ),
+            summary,
+            kwargs.get('proposed_by') or kwargs.get('actor_id') or 'owner',
+            commitment_id=kwargs.get('commitment_id'),
+            terms_payload=kwargs.get('terms_payload'),
+            warrant_id=kwargs.get('warrant_id', ''),
+            note=kwargs.get('note', ''),
+            metadata=kwargs.get('metadata'),
+        )
+    raise TypeError('Unsupported propose_commitment call signature')
+
+
 def list_commitments(org_id=None, *, state=None):
     store = _load_store(org_id)
     commitments = list(store.get('commitments', {}).values())
     if state:
-        commitments = [row for row in commitments if row.get('state') == state]
+        commitments = [row for row in commitments if _canonical_state(row) == state]
     commitments.sort(key=lambda row: row.get('proposed_at', ''), reverse=True)
     return commitments
 
@@ -175,16 +238,43 @@ def review_commitment(commitment_id, decision, by, *, org_id=None, note=''):
     if not record:
         raise ValueError(f'Commitment not found: {commitment_id}')
     state = state_map[decision]
+    timestamp = _now()
     record['state'] = state
+    record['status'] = state
     record['reviewed_by'] = (by or '').strip()
-    record['reviewed_at'] = _now()
+    record['reviewed_at'] = timestamp
     record['review_note'] = note or ''
+    record['updated_at'] = timestamp
+    if state == 'accepted':
+        record['accepted_by'] = record['reviewed_by']
+        record['accepted_at'] = timestamp
+    if state == 'rejected':
+        record['rejected_by'] = record['reviewed_by']
+        record['rejected_at'] = timestamp
     if state == 'breached':
-        record['breached_at'] = record['reviewed_at']
+        record['breached_by'] = record['reviewed_by']
+        record['breached_at'] = timestamp
     if state == 'settled':
-        record['settled_at'] = record['reviewed_at']
+        record['settled_by'] = record['reviewed_by']
+        record['settled_at'] = timestamp
     _save_store(store, org_id)
     return record
+
+
+def accept_commitment(commitment_id, by, *, org_id=None, note=''):
+    return review_commitment(commitment_id, 'accept', by, org_id=org_id, note=note)
+
+
+def reject_commitment(commitment_id, by, *, org_id=None, note=''):
+    return review_commitment(commitment_id, 'reject', by, org_id=org_id, note=note)
+
+
+def breach_commitment(commitment_id, by, *, org_id=None, note=''):
+    return review_commitment(commitment_id, 'breach', by, org_id=org_id, note=note)
+
+
+def settle_commitment(commitment_id, by, *, org_id=None, note=''):
+    return review_commitment(commitment_id, 'settle', by, org_id=org_id, note=note)
 
 
 def validate_commitment_for_federation(commitment_id, *, org_id=None,
@@ -193,10 +283,10 @@ def validate_commitment_for_federation(commitment_id, *, org_id=None,
     record = get_commitment(commitment_id, org_id=org_id)
     if not record:
         raise PermissionError(f"Commitment '{commitment_id}' does not exist")
-    if record.get('state') != 'accepted':
+    if _canonical_state(record) != 'accepted':
         raise PermissionError(
             f"Commitment '{commitment_id}' is not active for federation "
-            f"(state={record.get('state', '')})"
+            f"(state={_canonical_state(record)})"
         )
     if target_host_id and record.get('target_host_id') != target_host_id:
         raise PermissionError(
@@ -216,18 +306,62 @@ def validate_commitment_for_federation(commitment_id, *, org_id=None,
     return record
 
 
+def validate_commitment_for_delivery(commitment_id, *, target_host_id='',
+                                     target_institution_id='', org_id=None,
+                                     warrant_id=''):
+    try:
+        return validate_commitment_for_federation(
+            commitment_id,
+            org_id=org_id,
+            target_host_id=target_host_id,
+            target_org_id=target_institution_id,
+            warrant_id=warrant_id,
+        )
+    except PermissionError as exc:
+        raise ValueError(str(exc))
+
+
 def mark_commitment_delivery(commitment_id, *, org_id=None, delivery_ref=None):
     store = _load_store(org_id)
     record = store.get('commitments', {}).get(commitment_id)
     if not record:
         raise ValueError(f'Commitment not found: {commitment_id}')
     ref = dict(delivery_ref or {})
+    ref.setdefault('recorded_at', _now())
     refs = list(record.get('delivery_refs', []))
     refs.append(ref)
     record['delivery_refs'] = refs
-    record['last_delivery_at'] = _now()
+    record['last_delivery_at'] = ref['recorded_at']
+    record['updated_at'] = ref['recorded_at']
     _save_store(store, org_id)
     return record
+
+
+def record_delivery_ref(commitment_id, delivery_ref, *, org_id=None):
+    return mark_commitment_delivery(
+        commitment_id,
+        org_id=org_id,
+        delivery_ref=delivery_ref,
+    )
+
+
+def commitment_summary(org_id=None):
+    commitments = list_commitments(org_id)
+    summary = {
+        'total': len(commitments),
+        'proposed': 0,
+        'accepted': 0,
+        'rejected': 0,
+        'breached': 0,
+        'settled': 0,
+        'delivery_refs_total': 0,
+    }
+    for record in commitments:
+        state = _canonical_state(record)
+        if state in summary:
+            summary[state] += 1
+        summary['delivery_refs_total'] += len(record.get('delivery_refs', []))
+    return summary
 
 
 def main():

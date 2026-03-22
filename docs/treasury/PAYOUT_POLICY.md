@@ -27,6 +27,7 @@ draft -> submitted -> under_review -> approved -> dispute_window -> executed
 
 Reference workspace surfaces:
 - `GET /api/payouts`
+- `GET /api/treasury/settlement-adapters`
 - `POST /api/payouts/propose|submit|review|approve|open-dispute-window|reject|cancel|execute`
 
 ---
@@ -66,6 +67,12 @@ Execution also requires an executable warrant with:
 - `action_class = payout_execution`
 - `boundary_name = payouts`
 
+Execution additionally validates the chosen settlement adapter against the
+institution-local `settlement_adapters.json` policy. The current reference
+path only enables `internal_ledger` for payout execution. Other registered
+adapters may appear in the policy surface, but they remain non-executable until
+their proof contract is enabled.
+
 Self-review is not allowed. The reviewer must be a different person than the contributor.
 
 ---
@@ -93,7 +100,35 @@ Payouts to Level 0, 1, or 2 wallets are blocked. This protects against sending f
 
 ---
 
-## 6. Current Status
+## 6. Settlement Adapter Contract
+
+The payout surface now carries a machine-readable settlement adapter registry.
+Each adapter declares:
+
+- whether payout execution is enabled
+- which currencies are supported
+- whether `tx_hash` is required
+- whether structured `settlement_proof` is required
+- the normalized `proof_type`
+- the expected verification state
+- the expected finality state
+- the reversal or dispute capability
+
+On the current reference path:
+
+| Adapter | Status | Payout Execution |
+|---------|--------|------------------|
+| `internal_ledger` | registered | enabled |
+| `base_usdc_x402` | registered | disabled |
+| `manual_bank_wire` | registered | disabled |
+
+`internal_ledger` normalizes proof as an institution transaction journal
+reference and marks execution as `host_ledger_final`. The other adapters remain
+public policy stubs until a stronger settlement verification path is wired.
+
+---
+
+## 7. Current Status
 
 - Treasury balance: $0.00
 - Payouts executed: 0

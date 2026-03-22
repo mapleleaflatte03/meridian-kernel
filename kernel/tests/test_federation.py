@@ -2275,6 +2275,8 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(body['proposal']['status'], 'executed')
                 self.assertEqual(body['proposal']['warrant_id'], warrant_id)
                 self.assertEqual(body['warrant']['execution_state'], 'executed')
+                self.assertEqual(body['proposal']['execution_refs']['proof_type'], 'ledger_transaction')
+                self.assertEqual(body['proposal']['execution_refs']['verification_state'], 'host_ledger_final')
 
                 status, payouts = _http_json(
                     'GET',
@@ -2284,6 +2286,10 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(payouts['summary']['executed'], 1)
                 self.assertGreaterEqual(payouts['summary']['total'], 2)
+                self.assertEqual(
+                    payouts['settlement_adapter_summary']['default_payout_adapter'],
+                    'internal_ledger',
+                )
 
             with open(os.path.join(economy_dir, 'ledger.json')) as f:
                 ledger = json.load(f)
@@ -2294,6 +2300,7 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(tx_rows[-1]['type'], 'payout_execution')
             self.assertEqual(tx_rows[-1]['proposal_id'], 'ppo_ready')
             self.assertEqual(tx_rows[-1]['tx_hash'], 'tx_alpha_demo')
+            self.assertEqual(tx_rows[-1]['verification_state'], 'host_ledger_final')
 
             audit_rows = _read_jsonl(alpha['audit_log'])
             actions = [row.get('action') for row in audit_rows]

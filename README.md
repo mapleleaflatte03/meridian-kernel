@@ -184,6 +184,10 @@ Execution is intentionally narrow. It requires an executable
 and a phase-5 contributor-payout gate before the reference workspace will
 write a payout execution row to the institution ledger. This is a real kernel
 primitive, not yet the full settlement-adapter ecosystem.
+`GET /api/treasury/settlement-adapters` now surfaces the institution payout
+adapter registry. On the current reference path only `internal_ledger` is
+execution-enabled; `base_usdc_x402` and `manual_bank_wire` are registered but
+still policy-disabled until a stronger settlement proof path exists.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

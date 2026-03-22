@@ -128,8 +128,13 @@ deliberately narrow:
 - execution is warrant-bound through `action_class = payout_execution`
 - execution also enforces wallet eligibility, reserve-floor surplus, and a
   phase-5 contributor-payout gate before funds move
+- payout execution validates a file-backed settlement adapter contract before
+  funds move
 - successful execution appends a `payout_execution` row to the institution
   transaction journal and links warrant execution refs back to the proposal
+  with normalized proof / verification / finality fields
+- `GET /api/treasury/settlement-adapters` surfaces the registered adapter
+  contract and the host-supported subset for the current institution
 
 This is the first public payout object in Meridian. It is not yet the full
 settlement-adapter, multi-institution payout network.
@@ -214,6 +219,9 @@ Real money tracking with enforcement.
 - **Spend tracking** — per-agent, per-org metering (runtime-reported)
 - **Revenue summary** — governance facade over the economy layer
 - **Contributor protocol** — wallet registry, payout proposals, funding sources
+- **Settlement adapter registry** — institution policy describing which payout
+  adapters are registered, which are execution-enabled, and what proof/finality
+  contract each adapter requires
 
 No new database layer — treasury resolves through capsule-backed economy state
 and `kernel/metering.jsonl`.

@@ -16,6 +16,7 @@ class RuntimeHostTests(unittest.TestCase):
         self.assertEqual(host.role, 'institution_host')
         self.assertIn('workspace', host.supported_boundaries)
         self.assertFalse(host.federation_enabled)
+        self.assertEqual(host.settlement_adapters, ['internal_ledger'])
         self.assertTrue(host.host_id.startswith('host_'))
 
     def test_load_host_identity_from_file(self):

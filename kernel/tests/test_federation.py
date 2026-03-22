@@ -1291,6 +1291,8 @@ class FederationTests(unittest.TestCase):
             self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
 
         class BadReceiptHandler(BaseHTTPRequestHandler):
+            receive_count = 0
+
             def log_message(self, format, *args):
                 return
 
@@ -1326,6 +1328,7 @@ class FederationTests(unittest.TestCase):
                     self.send_response(404)
                     self.end_headers()
                     return
+                type(self).receive_count += 1
                 length = int(self.headers.get('Content-Length', '0') or 0)
                 payload = json.loads(self.rfile.read(length).decode('utf-8') or '{}')
                 envelope = payload.get('envelope', '')
@@ -1398,6 +1401,29 @@ class FederationTests(unittest.TestCase):
                     self.assertEqual(body['case']['target_host_id'], 'host_beta')
                     self.assertTrue(body['federation_peer']['applied'])
                     self.assertEqual(body['federation_peer']['trust_state'], 'suspended')
+                    self.assertEqual(BadReceiptHandler.receive_count, 1)
+
+                    blocked_status, blocked_body = _http_json(
+                        'POST',
+                        alpha['base_url'] + '/api/federation/send',
+                        payload={
+                            'target_host_id': 'host_beta',
+                            'target_org_id': 'org_beta',
+                            'message_type': 'settlement_notice',
+                            'payload': {'tx_ref': '0xdef'},
+                        },
+                        headers={
+                            'Authorization': f"Bearer {session['token']}",
+                            'Content-Type': 'application/json',
+                        },
+                    )
+                    self.assertEqual(blocked_status, 409, blocked_body)
+                    self.assertEqual(blocked_body['case']['case_id'], body['case']['case_id'])
+                    self.assertEqual(blocked_body['case']['claim_type'], 'misrouted_execution')
+                    self.assertEqual(blocked_body['federation_peer']['peer_host_id'], 'host_beta')
+                    self.assertEqual(blocked_body['federation_peer']['trust_state'], 'suspended')
+                    self.assertEqual(blocked_body['federation_peer']['reason'], 'case_blocked')
+                    self.assertEqual(BadReceiptHandler.receive_count, 1)
 
                     status, cases_body = _http_json(
                         'GET',
@@ -1412,11 +1438,14 @@ class FederationTests(unittest.TestCase):
                 opened = [e for e in alpha_events if e.get('action') == 'case_opened']
                 suspended = [e for e in alpha_events if e.get('action') == 'federation_peer_auto_suspended']
                 failed = [e for e in alpha_events if e.get('action') == 'federation_envelope_delivery_failed']
+                blocked = [e for e in alpha_events if e.get('action') == 'federation_case_blocked']
                 self.assertTrue(opened)
                 self.assertEqual(opened[-1]['details']['claim_type'], 'misrouted_execution')
                 self.assertTrue(suspended)
                 self.assertEqual(suspended[-1]['details']['trust_state'], 'suspended')
                 self.assertTrue(failed)
+                self.assertTrue(blocked)
+                self.assertEqual(blocked[-1]['details']['case_id'], opened[-1]['resource'])
         finally:
             server.shutdown()
             server.server_close()

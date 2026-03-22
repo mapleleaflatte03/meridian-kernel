@@ -761,7 +761,7 @@ class WorkspaceContextTests(unittest.TestCase):
             'kwargs': kwargs,
         })
 
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(PermissionError) as exc_info:
             self.workspace._deliver_federation_envelope(
                 'org_a',
                 'host_beta',
@@ -924,7 +924,7 @@ class WorkspaceContextTests(unittest.TestCase):
             'kwargs': kwargs,
         })
 
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(PermissionError) as exc_info:
             self.workspace._deliver_federation_envelope(
                 'org_a',
                 'host_beta',
@@ -937,6 +937,9 @@ class WorkspaceContextTests(unittest.TestCase):
                 commitment_id='cmt_demo',
             )
 
+        self.assertEqual(exc_info.exception.case_record['case_id'], 'case_demo')
+        self.assertEqual(exc_info.exception.federation_peer['peer_host_id'], 'host_beta')
+        self.assertEqual(exc_info.exception.federation_peer['reason'], 'peer_not_registered')
         self.assertEqual(len(audit_events), 1)
         event = audit_events[0]
         self.assertEqual(event['args'][2], 'federation_case_blocked')

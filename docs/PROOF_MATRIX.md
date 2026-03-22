@@ -17,7 +17,7 @@ This file maps public claims to executable proof artifacts or live surfaces.
 
 | Claim | Live Surface | Current Truth |
 | --- | --- | --- |
-| Live workspace exposes runtime-core and agent-runtime truth | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtimes` | Founding-only, single-org, honest boundary classification; bindings and runtime registry are surfaced consistently |
+| Live workspace exposes runtime-core and agent-runtime truth | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtime-proof` | Founding-only, single-org, honest boundary classification; bindings are surfaced consistently and the live OpenClaw host returns a filtered runtime-proof receipt |
 | Live treasury exposes settlement adapter contract | `GET /api/treasury/settlement-adapters` | `internal_ledger` ready; external adapters registered but not executable |
 | Live preflight exposes settlement verifier blockers | `POST /api/treasury/settlement-adapters/preflight` | External adapters fail closed until verifier is ready and host support exists |
 | Live service boundaries are explicitly classified | `GET /api/subscriptions`, `GET /api/accounting`, `GET /api/federation/manifest` | Canonical service module + compatibility role surfaced, no fake multi-host routing |
@@ -43,7 +43,8 @@ This emits a JSON artifact containing:
 1. a three-host federation summary
 2. an OpenClaw reference-adapter federation summary
 3. an optional live host receipt from `GET /api/federation/manifest`
-4. an explicit `not_live_proven` list
+4. an optional live runtime receipt from `GET /api/runtime-proof`
+5. an explicit `not_live_proven` list
 
 In restricted environments the bundle may mark a proof `skipped` instead of
 failing, for example when localhost socket binding is unavailable. That is

@@ -107,6 +107,44 @@ def _fetch_live_manifest(url):
     }
 
 
+def _derive_sibling_url(url, old_suffix, new_suffix):
+    if not url or not url.endswith(old_suffix):
+        return ''
+    return url[:-len(old_suffix)] + new_suffix
+
+
+def _fetch_live_runtime_proof(url):
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            raw = response.read()
+            payload = json.loads(raw.decode('utf-8'))
+            status = getattr(response, 'status', 200)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError) as exc:
+        return {
+            'included': False,
+            'attempted': True,
+            'route': url,
+            'error': str(exc),
+        }
+    return {
+        'included': True,
+        'attempted': True,
+        'route': url,
+        'http_status': status,
+        'fetched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        'body_sha256': hashlib.sha256(raw).hexdigest(),
+        'receipt': {
+            'runtime_id': payload.get('runtime_id', ''),
+            'proof_type': payload.get('proof_type', ''),
+            'bound_org_id': payload.get('bound_org_id', ''),
+            'deployment_truth': payload.get('deployment_truth', {}),
+            'health': payload.get('health', {}),
+            'pong_probe': payload.get('pong_probe', {}),
+            'mapping': payload.get('mapping', {}),
+        },
+    }
+
+
 def _summarize_openclaw_reference_proof(proof):
     return {
         'runtime_id': proof.get('runtime_id'),
@@ -164,7 +202,7 @@ def _summarize_openclaw_reference_proof(proof):
     }
 
 
-def build_bundle(live_manifest_url=None):
+def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
     try:
         three_host = {
             'passed': True,
@@ -192,7 +230,7 @@ def build_bundle(live_manifest_url=None):
             'reason': str(exc),
         }
     return {
-        'proof_bundle_version': 2,
+        'proof_bundle_version': 3,
         'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         'reference_scope': 'oss_kernel_reference',
         'three_host_federation': three_host,
@@ -205,6 +243,19 @@ def build_bundle(live_manifest_url=None):
                 'attempted': False,
                 'route': '',
                 'reason': 'no_live_manifest_url_supplied',
+            }
+        ),
+        'live_runtime_receipt': (
+            _fetch_live_runtime_proof(
+                live_runtime_proof_url
+                or _derive_sibling_url(live_manifest_url or '', '/api/federation/manifest', '/api/runtime-proof')
+            )
+            if (live_runtime_proof_url or live_manifest_url) else
+            {
+                'included': False,
+                'attempted': False,
+                'route': '',
+                'reason': 'no_live_runtime_proof_url_supplied',
             }
         ),
         'not_live_proven': [
@@ -227,9 +278,17 @@ def main():
         default='',
         help='Optional public live federation manifest URL to embed as a host receipt',
     )
+    parser.add_argument(
+        '--live-runtime-proof-url',
+        default='',
+        help='Optional public live runtime-proof URL; defaults to a sibling of --live-manifest-url when omitted',
+    )
     args = parser.parse_args()
 
-    bundle = build_bundle(live_manifest_url=args.live_manifest_url or None)
+    bundle = build_bundle(
+        live_manifest_url=args.live_manifest_url or None,
+        live_runtime_proof_url=args.live_runtime_proof_url or None,
+    )
     raw = json.dumps(bundle, indent=2, sort_keys=True) + '\n'
     if args.output == '-':
         sys.stdout.write(raw)

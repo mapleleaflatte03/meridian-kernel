@@ -106,6 +106,11 @@ python3 kernel/runtime_adapter.py register \
   --identity_mode api_key
 ```
 
+Keep agent bindings and runtime registry entries coherent:
+- set or review each agent's `runtime_binding` in `kernel/agent_registry.json`
+- confirm the binding appears in `GET /api/agents` and `GET /api/status`
+- confirm the corresponding runtime metadata appears in `GET /api/runtimes`
+
 ### D. Enforce governance checks in your runtime
 
 Before privileged actions:
@@ -155,6 +160,11 @@ Read endpoints include:
 - `/api/treasury`
 - `/api/court`
 - `/api/runtimes`
+
+Public truth surface:
+- `/api/agents` shows each governed agent record, including its `runtime_binding`
+- `/api/status` shows the same agent truth in the full workspace snapshot
+- `/api/runtimes` shows the runtime registry truth used to interpret those bindings
 
 Mutation endpoints include:
 - `/api/authority/kill-switch`

@@ -6,7 +6,7 @@ This file maps public claims to executable proof artifacts or live surfaces.
 
 | Claim | Proof Artifact | Notes |
 | --- | --- | --- |
-| Runtime-core routing/admission truth exists | `GET /api/context`, `GET /api/status`, `GET /api/admission`, `GET /api/federation` | Process-bound reference workspace, not shared request-level multi-org hopping |
+| Runtime-core and agent-runtime truth exists | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtimes`, `GET /api/admission`, `GET /api/federation` | Process-bound reference workspace, with agent `runtime_binding` surfaced and kept coherent with registry truth |
 | Signed host-service federation exists | [`kernel/tests/test_federation.py`](../kernel/tests/test_federation.py) | Covers peer registry, replay protection, wrong-target rejection, settlement notice, case/court notice, witness archive |
 | 3-host federation story exists | [`kernel/tests/test_three_host_federation_proof.py`](../kernel/tests/test_three_host_federation_proof.py) | Alpha/Beta/Gamma story with proposal, acceptance, execution review, court notice, breach notice, and witness archive |
 | OpenClaw-compatible runtime seam exists | [`kernel/tests/test_openclaw_federation_proof.py`](../kernel/tests/test_openclaw_federation_proof.py) | Kernel-side reference adapter proof, not a live hosted OpenClaw deployment |
@@ -17,7 +17,7 @@ This file maps public claims to executable proof artifacts or live surfaces.
 
 | Claim | Live Surface | Current Truth |
 | --- | --- | --- |
-| Live workspace exposes runtime-core truth | `GET /api/context`, `GET /api/status` | Founding-only, single-org, honest boundary classification |
+| Live workspace exposes runtime-core and agent-runtime truth | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtimes` | Founding-only, single-org, honest boundary classification; bindings and runtime registry are surfaced consistently |
 | Live treasury exposes settlement adapter contract | `GET /api/treasury/settlement-adapters` | `internal_ledger` ready; external adapters registered but not executable |
 | Live preflight exposes settlement verifier blockers | `POST /api/treasury/settlement-adapters/preflight` | External adapters fail closed until verifier is ready and host support exists |
 | Live service boundaries are explicitly classified | `GET /api/subscriptions`, `GET /api/accounting`, `GET /api/federation/manifest` | Canonical service module + compatibility role surfaced, no fake multi-host routing |

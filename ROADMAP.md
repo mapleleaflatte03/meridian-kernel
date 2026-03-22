@@ -28,7 +28,7 @@ demo, and example vertical.
 - [ ] MCP adapter implementation (agent identity, action envelope, sanction controls)
 - [ ] A2A adapter implementation (action envelope mapping from A2A task schema)
 - [ ] OpenClaw adapter (cost attribution + budget gate hooks)
-- [ ] Runtime binding field in agent_registry.json (link agent to runtime)
+- [x] Runtime binding field in agent_registry.json (link agent to runtime)
 
 ## v0.1.1 — Contributor Treasury Protocol
 

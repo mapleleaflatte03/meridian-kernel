@@ -302,7 +302,8 @@ First-class managed entity with identity and governance state.
 - **Risk state** — `nominal` → `elevated` → `critical` → `suspended`
 - **Lifecycle** — `provisioned` → `active` → `quarantined` → `decommissioned`
 - **Economy participation** — REP score, AUTH score, incident count
-- **Runtime binding** — optional field mapping agent to a specific runtime ID
+- **Runtime binding** — explicit field mapping agent to a specific runtime ID,
+  kept coherent with the runtime registry and surfaced workspace views
 
 Risk auto-escalation: 3+ incidents → elevated, 5+ → critical.
 
@@ -364,7 +365,8 @@ The runtime adapter is the bridge between Meridian governance and external
 agent runtimes. It provides:
 
 - **Runtime registry** (`kernel/runtimes.json`) — machine-readable catalog of
-  registered runtimes with protocol support, identity mode, and contract status
+  registered runtimes with protocol support, identity mode, and contract status;
+  this is the registry truth used to interpret agent `runtime_binding`
 - **Contract checker** — reports registry-declared compliance against the seven
   constitutional requirements
 - **Registration** — new runtimes register themselves with contract compliance data
@@ -460,6 +462,10 @@ three runtime-core questions directly in surfaced state:
 - what identity model governs the current boundary
 - how additional institutions are admitted without cross-org bleed
 - whether host-service federation is enabled and which peers are trusted
+
+`/api/agents` surfaces each agent record's `runtime_binding`, `/api/status`
+includes the same binding in the workspace snapshot, and `/api/runtimes`
+surfaces the runtime registry truth those bindings refer to.
 
 In the OSS reference workspace, the current admission mode is
 `single_process_per_institution`: a second institution is admitted by binding a

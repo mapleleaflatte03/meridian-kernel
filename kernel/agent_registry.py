@@ -36,6 +36,11 @@ VALID_ROLLOUT_STATES = ('active', 'staged', 'quarantined', 'disabled')
 VALID_ROLES = ('manager', 'analyst', 'verifier', 'executor', 'writer', 'qa_gate', 'compressor')
 VALID_RISK_STATES = ('nominal', 'elevated', 'critical', 'suspended')
 VALID_LIFECYCLE_STATES = ('provisioned', 'active', 'quarantined', 'decommissioned')
+DEFAULT_RUNTIME_ID = 'local_kernel'
+DEFAULT_RUNTIME_LABEL = 'Local Kernel Runtime'
+RUNTIME_BINDING_BOUNDARY_NAME = 'workspace'
+RUNTIME_BINDING_IDENTITY_MODEL = 'session'
+RUNTIME_BINDING_BOUNDARY_SCOPE = 'institution_bound'
 
 # Risk auto-escalation thresholds
 INCIDENT_ELEVATED_THRESHOLD = 3
@@ -46,14 +51,87 @@ def _now():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+def _runtime_binding_runtime(runtime_id):
+    try:
+        from runtime_adapter import get_runtime
+    except ImportError:
+        get_runtime = None
+    if get_runtime is None:
+        return ({
+            'id': runtime_id,
+            'label': DEFAULT_RUNTIME_LABEL if runtime_id == DEFAULT_RUNTIME_ID else runtime_id,
+        }, runtime_id == DEFAULT_RUNTIME_ID)
+    runtime = get_runtime(runtime_id)
+    if runtime:
+        return runtime, True
+    return ({
+        'id': runtime_id,
+        'label': DEFAULT_RUNTIME_LABEL if runtime_id == DEFAULT_RUNTIME_ID else runtime_id,
+    }, False)
+
+
+def _normalize_runtime_binding(runtime_binding, org_id=None, context_source='agent_registry'):
+    if isinstance(runtime_binding, str):
+        binding = {'runtime_id': runtime_binding}
+    else:
+        binding = dict(runtime_binding or {})
+    runtime_id = (binding.get('runtime_id') or '').strip() or DEFAULT_RUNTIME_ID
+    runtime, runtime_registered = _runtime_binding_runtime(runtime_id)
+    binding['runtime_id'] = runtime.get('id', runtime_id)
+    binding['runtime_label'] = binding.get('runtime_label') or runtime.get('label', DEFAULT_RUNTIME_LABEL)
+    binding['runtime_registered'] = runtime_registered
+    binding['registration_status'] = 'registered' if runtime_registered else 'missing_runtime'
+    binding['bound_org_id'] = org_id
+    binding['context_source'] = context_source
+    binding['boundary_name'] = RUNTIME_BINDING_BOUNDARY_NAME
+    binding['identity_model'] = RUNTIME_BINDING_IDENTITY_MODEL
+    binding['boundary_scope'] = RUNTIME_BINDING_BOUNDARY_SCOPE
+    return binding
+
+
+def _validate_runtime_binding(runtime_binding):
+    binding = _normalize_runtime_binding(runtime_binding)
+    if not binding.get('runtime_registered'):
+        raise ValueError(
+            f"Runtime {binding.get('runtime_id')!r} is not declared in kernel/runtimes.json"
+        )
+    return binding
+
+
+def _normalize_agent_record(agent):
+    if not agent:
+        return agent
+    normalized = dict(agent)
+    normalized['runtime_binding'] = _normalize_runtime_binding(
+        normalized.get('runtime_binding'),
+        org_id=normalized.get('org_id'),
+    )
+    return normalized
+
+
+def normalize_agent_record(agent):
+    return _normalize_agent_record(agent)
+
+
+def _normalize_registry(data):
+    data = dict(data or {})
+    agents = data.get('agents', {})
+    data['agents'] = {
+        agent_id: _normalize_agent_record(agent)
+        for agent_id, agent in agents.items()
+    }
+    return data
+
+
 def load_registry():
     if os.path.exists(REGISTRY_FILE):
         with open(REGISTRY_FILE) as f:
-            return json.load(f)
-    return {'agents': {}, 'updatedAt': _now()}
+            return _normalize_registry(json.load(f))
+    return _normalize_registry({'agents': {}, 'updatedAt': _now()})
 
 
 def save_registry(data):
+    data = _normalize_registry(data)
     data['updatedAt'] = _now()
     with open(REGISTRY_FILE, 'w') as f:
         json.dump(data, f, indent=2)
@@ -70,9 +148,10 @@ def _ledger_path(org_id=None):
 
 
 def register_agent(org_id, name, role, purpose, scopes=None, model_policy=None,
-                    budget=None, approval_required=False):
+                    budget=None, approval_required=False, runtime_binding=None):
     data = load_registry()
     agent_id = f'agent_{name.lower()}_{uuid.uuid4().hex[:6]}'
+    normalized_runtime_binding = _validate_runtime_binding(runtime_binding)
 
     data['agents'][agent_id] = {
         'id': agent_id,
@@ -93,6 +172,7 @@ def register_agent(org_id, name, role, purpose, scopes=None, model_policy=None,
         },
         'approval_required': approval_required,
         'rollout_state': 'active',
+        'runtime_binding': _normalize_runtime_binding(normalized_runtime_binding, org_id=org_id),
         'sla': {
             'max_latency_seconds': 120,
             'availability_target': 0.95,
@@ -117,7 +197,7 @@ def get_agent(agent_id, org_id=None):
     data = load_registry()
     agent = data['agents'].get(agent_id)
     if agent and _org_matches(agent, org_id):
-        return agent
+        return _normalize_agent_record(agent)
     return None
 
 
@@ -128,7 +208,7 @@ def list_agents(org_id=None, include_disabled=False):
         agents = [a for a in agents if a['org_id'] == org_id]
     if not include_disabled:
         agents = [a for a in agents if a['rollout_state'] != 'disabled']
-    return agents
+    return [_normalize_agent_record(agent) for agent in agents]
 
 
 def update_agent(agent_id, **kwargs):
@@ -140,8 +220,12 @@ def update_agent(agent_id, **kwargs):
     if 'rollout_state' in kwargs and kwargs['rollout_state'] not in VALID_ROLLOUT_STATES:
         raise ValueError(f'Invalid rollout state: {kwargs["rollout_state"]}')
 
-    for key in ('name', 'purpose', 'rollout_state', 'approval_required', 'status'):
+    for key in ('name', 'purpose', 'rollout_state', 'approval_required', 'status', 'runtime_binding'):
         if key in kwargs and kwargs[key] is not None:
+            if key == 'runtime_binding':
+                validated = _validate_runtime_binding(kwargs[key])
+                agent[key] = _normalize_runtime_binding(validated, org_id=agent.get('org_id'))
+                continue
             agent[key] = kwargs[key]
 
     agent['last_active_at'] = _now()
@@ -252,7 +336,7 @@ def get_agents_by_economy_key(economy_key, org_id=None):
     matches = []
     for agent in data['agents'].values():
         if agent.get('economy_key') == economy_key and _org_matches(agent, org_id):
-            matches.append(agent)
+            matches.append(_normalize_agent_record(agent))
     return matches
 
 
@@ -335,6 +419,7 @@ def main():
     r.add_argument('--purpose', required=True)
     r.add_argument('--scopes', default='')
     r.add_argument('--approval_required', action='store_true')
+    r.add_argument('--runtime_binding', default=None)
 
     g = sub.add_parser('get')
     g.add_argument('--agent_id', required=True)
@@ -348,6 +433,7 @@ def main():
     u.add_argument('--agent_id', required=True)
     u.add_argument('--rollout_state', default=None)
     u.add_argument('--purpose', default=None)
+    u.add_argument('--runtime_binding', default=None)
 
     sb = sub.add_parser('set-budget')
     sb.add_argument('--agent_id', required=True)
@@ -381,7 +467,8 @@ def main():
     if args.command == 'register':
         scopes = [s.strip() for s in args.scopes.split(',') if s.strip()] if args.scopes else []
         aid = register_agent(args.org_id, args.name, args.role, args.purpose,
-                             scopes=scopes, approval_required=args.approval_required)
+                             scopes=scopes, approval_required=args.approval_required,
+                             runtime_binding=args.runtime_binding)
         print(f'Registered agent: {aid}')
     elif args.command == 'get':
         agent = resolve_agent(args.agent_id, org_id=getattr(args, 'org_id', None))
@@ -391,7 +478,12 @@ def main():
             print(f"  {a['id']:<30} {a['name']:<12} role={a['role']:<10} "
                   f"state={a['rollout_state']:<12} REP={a['reputation_units']} AUTH={a['authority_units']}")
     elif args.command == 'update':
-        update_agent(args.agent_id, rollout_state=args.rollout_state, purpose=args.purpose)
+        update_agent(
+            args.agent_id,
+            rollout_state=args.rollout_state,
+            purpose=args.purpose,
+            runtime_binding=args.runtime_binding,
+        )
         print(f'Updated {args.agent_id}')
     elif args.command == 'set-budget':
         set_budget(args.agent_id, args.max_per_run_usd, args.max_per_day_usd, args.max_per_month_usd)

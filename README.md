@@ -46,6 +46,7 @@ What is real today:
 - the `runtime_core` surface that exposes institution context, host identity, boundary identity model, service registry, admission state, and federation gateway state
 - one real built-in reference runtime path: `local_kernel`
 - one tested kernel-side reference adapter library: `openclaw_compatible`
+- agent records now carry an explicit `runtime_binding` field, and the surfaced workspace APIs keep that binding coherent with the runtime registry
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 - one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
 - one witness archival fan-out path: successful federated deliveries can automatically archive envelope/payload/receipt snapshots on configured witness-host peers and surface the archival results in the sender response
@@ -157,6 +158,9 @@ reference workspace can mutate the file-backed admission registry via
 The same `runtime_core` surface now also exposes the `federation_gateway`
 boundary state: whether the host has federation enabled, which peer hosts are
 trusted, and whether replay protection is file-backed or memory-only.
+`/api/agents` surfaces each agent record's `runtime_binding`, `/api/status`
+includes the same field in the workspace snapshot, and `/api/runtimes`
+surfaces the runtime registry truth used to interpret those bindings.
 `GET /api/federation/inbox` now exposes the receiver-side capsule-backed inbox
 for accepted federation messages, including per-message-type counts and the
 latest accepted entries for the bound institution.
@@ -368,7 +372,7 @@ All state is JSON/JSONL on the local filesystem. No database required.
 | File | Contents | Scope |
 |------|----------|-------|
 | `kernel/organizations.json` | Institutions with charters and policies | Global |
-| `kernel/agent_registry.json` | Agents with scores, budgets, risk states | Global |
+| `kernel/agent_registry.json` | Agents with scores, budgets, risk states, and `runtime_binding` | Global |
 | `economy/capsules/<org_id>/ledger.json` | Economy state (REP, AUTH, CASH per agent) | Per-institution (capsule) |
 | `economy/capsules/<org_id>/revenue.json` | Revenue orders, clients, receivables | Per-institution (capsule) |
 | `economy/capsules/<org_id>/transactions.jsonl` | Transaction log | Per-institution (capsule) |

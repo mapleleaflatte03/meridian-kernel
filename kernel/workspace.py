@@ -165,7 +165,7 @@ if os.path.isdir(EXAMPLES_INTELLIGENCE_DIR):
 
 from organizations import (load_orgs, set_charter, set_policy_defaults,
                            transition_lifecycle as org_transition_lifecycle)
-from agent_registry import load_registry, sync_from_economy
+from agent_registry import load_registry, normalize_agent_record, sync_from_economy
 from audit import log_event, query_events, tail_events
 
 import importlib.util
@@ -4579,6 +4579,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
     agents = []
     remediations = []
     for a in reg['agents'].values():
+        a = normalize_agent_record(a)
         restrictions = get_restrictions(a.get('economy_key', a['name'].lower()), org_id=org_id)
         remediation = None
         if _ci_vertical_available:
@@ -4589,6 +4590,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             'id': a['id'], 'name': a['name'], 'role': a['role'],
             'purpose': a['purpose'],
             'rep': a['reputation_units'], 'auth': a['authority_units'],
+            'runtime_binding': a.get('runtime_binding'),
             'risk_state': a.get('risk_state', 'nominal'),
             'lifecycle_state': a.get('lifecycle_state', 'active'),
             'economy_key': a.get('economy_key'),
@@ -4597,6 +4599,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             'is_sprint_lead': a.get('economy_key') == lead_id,
             'remediation': remediation,
         })
+    runtime_usage = _agent_runtime_usage_snapshot(org_id=org_id, reg=reg)
 
     open_violations = [v for v in records['violations'].values()
                        if v['status'] in ('open', 'sanctioned', 'appealed')]
@@ -4660,6 +4663,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
         'remediations': remediations,
         'timestamp': _now(),
     }
+    result['runtime_core']['runtime_usage'] = runtime_usage
     result['runtime_core']['federation'] = _federation_snapshot(
         org_id,
         host_identity=host_identity,
@@ -4684,6 +4688,46 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             result['phase_machine'] = {'error': 'evaluation failed'}
 
     return result
+
+
+def _agent_runtime_usage_snapshot(org_id=None, reg=None):
+    if reg is None:
+        reg = _scoped_registry(org_id)
+    usage = {}
+    unregistered_bindings = []
+    for agent in (reg or {}).get('agents', {}).values():
+        normalized = normalize_agent_record(agent)
+        binding = dict(normalized.get('runtime_binding') or {})
+        runtime_id = (binding.get('runtime_id') or '').strip()
+        if not runtime_id:
+            continue
+        entry = usage.setdefault(runtime_id, {
+            'runtime_id': runtime_id,
+            'bound_agent_ids': [],
+            'bound_org_ids': [],
+        })
+        entry['bound_agent_ids'].append(normalized.get('id'))
+        bound_org_id = normalized.get('org_id')
+        if bound_org_id:
+            entry['bound_org_ids'].append(bound_org_id)
+        if not binding.get('runtime_registered', True):
+            unregistered_bindings.append({
+                'agent_id': normalized.get('id'),
+                'org_id': bound_org_id,
+                'runtime_id': runtime_id,
+                'registration_status': binding.get('registration_status', 'missing_runtime'),
+            })
+
+    for entry in usage.values():
+        entry['bound_agent_ids'] = sorted({aid for aid in entry['bound_agent_ids'] if aid})
+        entry['bound_org_ids'] = sorted({oid for oid in entry['bound_org_ids'] if oid})
+        entry['bound_agent_count'] = len(entry['bound_agent_ids'])
+        entry['runtime_binding_status'] = 'in_use' if entry['bound_agent_count'] else 'declared_unused'
+
+    return {
+        'runtimes': usage,
+        'unregistered_bindings': unregistered_bindings,
+    }
 
 
 def _ci_vertical_status(reg, lead_id, org_id=None):
@@ -5132,7 +5176,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(org or {})
         elif path == '/api/agents':
             reg = _scoped_registry(org_id)
-            return self._json(list(reg['agents'].values()))
+            return self._json([normalize_agent_record(a) for a in reg['agents'].values()])
         elif path == '/api/authority':
             queue = _load_queue(org_id)
             lead_id, lead_auth = get_sprint_lead(org_id)
@@ -5221,15 +5265,24 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             data = load_runtimes()
             contracts = check_all_contracts()
             runtimes = data.get('runtimes', {})
+            usage_snapshot = _agent_runtime_usage_snapshot(org_id=org_id)
             # Embed contract check result into each runtime entry
             result = {}
             for rid, rt in runtimes.items():
                 result[rid] = dict(rt)
                 result[rid]['contract_check'] = contracts.get(rid, {})
+                result[rid]['runtime_usage'] = usage_snapshot['runtimes'].get(rid, {
+                    'runtime_id': rid,
+                    'bound_agent_ids': [],
+                    'bound_org_ids': [],
+                    'bound_agent_count': 0,
+                    'runtime_binding_status': 'declared_unused',
+                })
             return self._json({
                 'runtimes': result,
                 'contract_requirements': data.get('contract_requirements', {}),
                 'compliance_thresholds': data.get('compliance_thresholds', {}),
+                'runtime_usage': usage_snapshot,
             })
         elif path.startswith('/api/runtimes/'):
             runtime_id = path[len('/api/runtimes/'):]
@@ -5237,8 +5290,16 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             if rt is None:
                 return self._json({'error': f'Runtime {runtime_id!r} not found'}, 404)
             from runtime_adapter import check_contract
+            usage_snapshot = _agent_runtime_usage_snapshot(org_id=org_id)
             enriched = dict(rt)
             enriched['contract_check'] = check_contract(runtime_id)
+            enriched['runtime_usage'] = usage_snapshot['runtimes'].get(runtime_id, {
+                'runtime_id': runtime_id,
+                'bound_agent_ids': [],
+                'bound_org_ids': [],
+                'bound_agent_count': 0,
+                'runtime_binding_status': 'declared_unused',
+            })
             return self._json(enriched)
         elif path == '/api/session/validate':
             qs = parse_qs(parsed.query)

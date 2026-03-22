@@ -286,7 +286,30 @@ class WorkspaceContextTests(unittest.TestCase):
                 },
             }
         }
-        self.workspace.load_registry = lambda: {'agents': {}}
+        self.workspace.load_registry = lambda: {
+            'agents': {
+                'agent_atlas_a': {
+                    'id': 'agent_atlas_a',
+                    'org_id': 'org_a',
+                    'name': 'Atlas',
+                    'role': 'analyst',
+                    'purpose': 'Research',
+                    'economy_key': 'atlas',
+                    'runtime_binding': {
+                        'runtime_id': 'local_kernel',
+                        'runtime_label': 'Local Kernel Runtime',
+                    },
+                    'rollout_state': 'active',
+                    'reputation_units': 100,
+                    'authority_units': 100,
+                    'last_active_at': '2026-03-21T00:00:00Z',
+                    'risk_state': 'nominal',
+                    'lifecycle_state': 'active',
+                    'budget': {'max_per_run_usd': 1.0},
+                    'scopes': ['execute'],
+                },
+            }
+        }
         self.workspace._load_queue = lambda org_id: {
             'kill_switch': False,
             'pending_approvals': {},
@@ -333,6 +356,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.blocked_peer_host_ids = lambda org_id=None: ['host_beta']
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
         self.workspace.get_pending_approvals = lambda org_id=None: []
+        self.workspace.get_restrictions = lambda *args, **kwargs: {}
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
         self.workspace.get_agent_remediation = lambda economy_key, reg: None
         self.workspace.load_host_identity = lambda *args, **kwargs: default_host_identity(
@@ -406,6 +430,17 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertIn('federation', status['runtime_core'])
         self.assertTrue(status['runtime_core']['service_registry']['subscriptions']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['service_registry']['accounting']['supports_institution_routing'])
+        self.assertEqual(status['agents'][0]['runtime_binding']['runtime_id'], 'local_kernel')
+        self.assertEqual(status['agents'][0]['runtime_binding']['bound_org_id'], 'org_a')
+        self.assertEqual(status['agents'][0]['runtime_binding']['context_source'], 'agent_registry')
+        self.assertEqual(status['agents'][0]['runtime_binding']['boundary_name'], 'workspace')
+        self.assertTrue(status['agents'][0]['runtime_binding']['runtime_registered'])
+        self.assertEqual(status['runtime_core']['runtime_usage']['runtimes']['local_kernel']['bound_agent_count'], 1)
+        self.assertEqual(
+            status['runtime_core']['runtime_usage']['runtimes']['local_kernel']['bound_agent_ids'],
+            ['agent_atlas_a'],
+        )
+        self.assertEqual(status['runtime_core']['runtime_usage']['unregistered_bindings'], [])
         self.assertEqual(status['service_state']['subscriptions']['summary']['subscriber_count'], 1)
         self.assertEqual(status['service_state']['accounting']['summary']['entry_count'], 0)
 
@@ -473,6 +508,27 @@ class WorkspaceContextTests(unittest.TestCase):
         with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()), \
              mock.patch.object(self.workspace, '_enforce_request_context', return_value={'mode': 'process_bound'}), \
              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}), \
+             mock.patch.object(self.workspace, 'load_registry', return_value={
+                 'agents': {
+                     'agent_atlas_a': {
+                         'id': 'agent_atlas_a',
+                         'org_id': 'org_a',
+                         'name': 'Atlas',
+                         'role': 'analyst',
+                         'purpose': 'Research',
+                         'economy_key': 'atlas',
+                         'runtime_binding': {'runtime_id': 'mcp_generic'},
+                         'rollout_state': 'active',
+                         'reputation_units': 100,
+                         'authority_units': 100,
+                         'last_active_at': '2026-03-21T00:00:00Z',
+                         'risk_state': 'nominal',
+                         'lifecycle_state': 'active',
+                         'budget': {'max_per_run_usd': 1.0},
+                         'scopes': ['execute'],
+                     },
+                 }
+             }), \
              mock.patch.object(self.workspace, 'load_subscriptions', return_value={'subscribers': {'111': []}, 'delivery_log': [], '_meta': {'storage_model': 'capsule_canonical'}}), \
              mock.patch.object(self.workspace, 'subscription_summary', return_value={'subscriber_count': 1}), \
              mock.patch.object(self.workspace, 'active_delivery_targets', return_value=['111']), \
@@ -497,6 +553,25 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(captured['status'], 200)
             self.assertEqual(captured['data']['bound_org_id'], 'org_a')
             self.assertEqual(captured['data']['summary']['entry_count'], 0)
+
+            handler.path = '/api/agents'
+            captured.clear()
+            handler.do_GET()
+            self.assertEqual(captured['status'], 200)
+            self.assertEqual(captured['data'][0]['runtime_binding']['runtime_id'], 'mcp_generic')
+            self.assertEqual(captured['data'][0]['runtime_binding']['bound_org_id'], 'org_a')
+            self.assertTrue(captured['data'][0]['runtime_binding']['runtime_registered'])
+
+            handler.path = '/api/runtimes'
+            captured.clear()
+            handler.do_GET()
+            self.assertEqual(captured['status'], 200)
+            self.assertEqual(captured['data']['runtimes']['mcp_generic']['runtime_usage']['bound_agent_count'], 1)
+            self.assertEqual(
+                captured['data']['runtimes']['mcp_generic']['runtime_usage']['bound_agent_ids'],
+                ['agent_atlas_a'],
+            )
+            self.assertEqual(captured['data']['runtime_usage']['unregistered_bindings'], [])
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
         from runtime_host import default_host_identity

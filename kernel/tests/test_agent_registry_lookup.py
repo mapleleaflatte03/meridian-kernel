@@ -32,6 +32,10 @@ class AgentRegistryLookupTests(unittest.TestCase):
                     'org_id': 'org_a',
                     'name': 'Atlas',
                     'economy_key': 'atlas',
+                    'runtime_binding': {
+                        'runtime_id': 'local_kernel',
+                        'runtime_label': 'Local Kernel Runtime',
+                    },
                     'rollout_state': 'active',
                     'reputation_units': 100,
                     'authority_units': 100,
@@ -66,6 +70,20 @@ class AgentRegistryLookupTests(unittest.TestCase):
                     'budget': {'max_per_run_usd': 1.0},
                     'scopes': ['write'],
                 },
+                'agent_rogue_a': {
+                    'id': 'agent_rogue_a',
+                    'org_id': 'org_a',
+                    'name': 'Rogue',
+                    'economy_key': 'rogue',
+                    'runtime_binding': {'runtime_id': 'ghost_runtime'},
+                    'rollout_state': 'active',
+                    'reputation_units': 100,
+                    'authority_units': 100,
+                    'last_active_at': '2026-03-21T00:00:00Z',
+                    'risk_state': 'nominal',
+                    'budget': {'max_per_run_usd': 1.0},
+                    'scopes': ['read'],
+                },
             },
             'updatedAt': '2026-03-21T00:00:00Z',
         }, indent=2))
@@ -85,6 +103,57 @@ class AgentRegistryLookupTests(unittest.TestCase):
 
             resolved = agent_registry.resolve_agent('atlas', org_id='org_a')
             self.assertEqual(resolved['id'], 'agent_atlas_a')
+            self.assertEqual(resolved['runtime_binding']['runtime_id'], 'local_kernel')
+
+    def test_lookup_exposes_runtime_binding_field_and_defaults_missing_records(self):
+        with mock.patch.object(agent_registry, 'REGISTRY_FILE', str(self.registry_file)):
+            bound_agent = agent_registry.get_agent('agent_atlas_a')
+            self.assertEqual(bound_agent['runtime_binding']['runtime_id'], 'local_kernel')
+            self.assertEqual(bound_agent['runtime_binding']['bound_org_id'], 'org_a')
+            self.assertEqual(bound_agent['runtime_binding']['boundary_name'], 'workspace')
+            self.assertTrue(bound_agent['runtime_binding']['runtime_registered'])
+
+            legacy_agent = agent_registry.get_agent('agent_quill_a')
+            self.assertEqual(legacy_agent['runtime_binding']['runtime_id'], 'local_kernel')
+            self.assertEqual(legacy_agent['runtime_binding']['bound_org_id'], 'org_a')
+            self.assertEqual(legacy_agent['runtime_binding']['identity_model'], 'session')
+            self.assertTrue(legacy_agent['runtime_binding']['runtime_registered'])
+
+            rogue_agent = agent_registry.get_agent('agent_rogue_a')
+            self.assertEqual(rogue_agent['runtime_binding']['runtime_id'], 'ghost_runtime')
+            self.assertFalse(rogue_agent['runtime_binding']['runtime_registered'])
+            self.assertEqual(rogue_agent['runtime_binding']['registration_status'], 'missing_runtime')
+
+    def test_register_agent_persists_runtime_binding(self):
+        with mock.patch.object(agent_registry, 'REGISTRY_FILE', str(self.registry_file)):
+            agent_id = agent_registry.register_agent(
+                'org_a',
+                'Nova',
+                'analyst',
+                'Research and analysis',
+                runtime_binding={'runtime_id': 'mcp_generic'},
+            )
+
+            stored = agent_registry.get_agent(agent_id)
+            self.assertEqual(stored['runtime_binding']['runtime_id'], 'mcp_generic')
+            self.assertEqual(stored['runtime_binding']['bound_org_id'], 'org_a')
+            self.assertEqual(stored['runtime_binding']['boundary_scope'], 'institution_bound')
+            self.assertTrue(stored['runtime_binding']['runtime_registered'])
+            self.assertEqual(
+                agent_registry.load_registry()['agents'][agent_id]['runtime_binding']['runtime_id'],
+                'mcp_generic',
+            )
+
+    def test_register_agent_rejects_missing_runtime_binding(self):
+        with mock.patch.object(agent_registry, 'REGISTRY_FILE', str(self.registry_file)):
+            with self.assertRaisesRegex(ValueError, "ghost_runtime"):
+                agent_registry.register_agent(
+                    'org_a',
+                    'Nova',
+                    'analyst',
+                    'Research and analysis',
+                    runtime_binding={'runtime_id': 'ghost_runtime'},
+                )
 
     def test_check_budget_and_scope_use_resolved_agent(self):
         with mock.patch.object(agent_registry, 'REGISTRY_FILE', str(self.registry_file)):

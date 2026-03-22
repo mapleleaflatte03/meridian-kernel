@@ -1104,9 +1104,35 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(jobs_body['jobs'][0]['envelope_id'], delivery['claims']['envelope_id'])
                 self.assertEqual(jobs_body['jobs'][0]['receipt_id'], delivery['receipt']['receipt_id'])
                 self.assertEqual(jobs_body['jobs'][0]['state'], 'pending_local_warrant')
+                self.assertEqual(jobs_body['jobs'][0]['state'], 'pending_local_warrant')
                 self.assertEqual(jobs_body['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
                 self.assertEqual(jobs_body['jobs'][0]['local_warrant']['execution_state'], 'ready')
                 self.assertEqual(jobs_body['jobs'][0]['local_warrant']['warrant_id'], jobs_body['jobs'][0]['local_warrant_id'])
+                local_warrant_id = jobs_body['jobs'][0]['local_warrant_id']
+
+                status, review_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/warrants/approve',
+                    payload={'warrant_id': local_warrant_id},
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(status, 200, review_body)
+                self.assertEqual(review_body['warrant']['warrant_id'], local_warrant_id)
+                self.assertEqual(review_body['warrant']['court_review_state'], 'approved')
+                self.assertEqual(review_body['execution_job']['job_id'], jobs_body['jobs'][0]['job_id'])
+                self.assertEqual(review_body['execution_job']['state'], 'ready')
+
+                jobs_status, jobs_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/execution-jobs',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(jobs_status, 200, jobs_body)
+                self.assertEqual(jobs_body['summary']['ready'], 1)
+                self.assertEqual(jobs_body['summary']['pending_local_warrant'], 0)
+                self.assertEqual(jobs_body['jobs'][0]['state'], 'ready')
+                self.assertEqual(jobs_body['jobs'][0]['metadata']['review_decision'], 'approve')
+                self.assertEqual(jobs_body['jobs'][0]['local_warrant']['court_review_state'], 'approved')
 
             alpha_events = _read_jsonl(alpha['audit_log'])
             beta_events = _read_jsonl(beta['audit_log'])

@@ -61,8 +61,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_ensure_case_for_delivery_failure = self.workspace.ensure_case_for_delivery_failure
         self.orig_summarize_inbox_entries = self.workspace.summarize_inbox_entries
         self.orig_get_execution_job = self.workspace.get_execution_job
+        self.orig_get_execution_job_by_local_warrant = self.workspace.get_execution_job_by_local_warrant
         self.orig_list_execution_jobs = self.workspace.list_execution_jobs
         self.orig_execution_job_summary = self.workspace.execution_job_summary
+        self.orig_sync_execution_job_for_local_warrant = self.workspace.sync_execution_job_for_local_warrant
         self.orig_upsert_execution_job = self.workspace.upsert_execution_job
 
     def tearDown(self):
@@ -102,8 +104,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.ensure_case_for_delivery_failure = self.orig_ensure_case_for_delivery_failure
         self.workspace.summarize_inbox_entries = self.orig_summarize_inbox_entries
         self.workspace.get_execution_job = self.orig_get_execution_job
+        self.workspace.get_execution_job_by_local_warrant = self.orig_get_execution_job_by_local_warrant
         self.workspace.list_execution_jobs = self.orig_list_execution_jobs
         self.workspace.execution_job_summary = self.orig_execution_job_summary
+        self.workspace.sync_execution_job_for_local_warrant = self.orig_sync_execution_job_for_local_warrant
         self.workspace.upsert_execution_job = self.orig_upsert_execution_job
 
     def test_configured_org_binds_process_context(self):
@@ -894,6 +898,134 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['execution_job']['state'], 'blocked')
         self.assertEqual(processing['case']['case_id'], 'case_demo')
         self.assertIsNone(processing['receiver_warrant'])
+
+    def test_sync_execution_job_for_warrant_review_marks_ready(self):
+        calls = {}
+        self.workspace.get_execution_job_by_local_warrant = lambda warrant_id, org_id: {
+            'job_id': 'fej_demo',
+            'local_warrant_id': warrant_id,
+            'state': 'pending_local_warrant',
+            'note': 'Queued',
+        }
+        def _sync(org_id, warrant_id, **kwargs):
+            calls['sync'] = {
+                'org_id': org_id,
+                'warrant_id': warrant_id,
+                **kwargs,
+            }
+            return {
+                'job_id': 'fej_demo',
+                'local_warrant_id': warrant_id,
+                'state': kwargs['state'],
+                'note': kwargs['note'],
+                'metadata': kwargs['metadata'],
+            }
+        self.workspace.sync_execution_job_for_local_warrant = _sync
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: {
+            'warrant_id': warrant_id,
+            'court_review_state': 'approved',
+            'execution_state': 'ready',
+            'expires_at': '2026-03-22T01:00:00Z',
+        }
+
+        job = self.workspace._sync_execution_job_for_warrant_review(
+            'org_a',
+            {
+                'warrant_id': 'war_local_demo',
+                'action_class': 'federated_execution',
+                'boundary_name': 'federation_gateway',
+                'court_review_state': 'approved',
+                'execution_state': 'ready',
+                'reviewed_by': 'user_owner',
+                'reviewed_at': '2026-03-22T00:30:00Z',
+            },
+            decision='approve',
+            note='Reviewed locally',
+        )
+
+        self.assertEqual(calls['sync']['state'], 'ready')
+        self.assertEqual(calls['sync']['metadata']['review_decision'], 'approve')
+        self.assertEqual(job['state'], 'ready')
+        self.assertEqual(job['local_warrant']['court_review_state'], 'approved')
+
+    def test_sync_execution_job_for_warrant_review_rejects_non_federated_warrant(self):
+        self.workspace.get_execution_job_by_local_warrant = lambda warrant_id, org_id: self.fail('should not query job')
+        self.workspace.sync_execution_job_for_local_warrant = lambda *args, **kwargs: self.fail('should not sync job')
+
+        job = self.workspace._sync_execution_job_for_warrant_review(
+            'org_a',
+            {
+                'warrant_id': 'war_demo',
+                'action_class': 'payout_execution',
+                'boundary_name': 'payouts',
+                'court_review_state': 'approved',
+                'execution_state': 'ready',
+            },
+            decision='approve',
+        )
+
+        self.assertIsNone(job)
+
+    def test_sync_execution_job_for_warrant_review_blocks_or_rejects_local_warrant(self):
+        cases = (
+            ('stayed', 'stay', 'blocked'),
+            ('revoked', 'revoke', 'rejected'),
+        )
+
+        for court_review_state, decision, expected_state in cases:
+            with self.subTest(court_review_state=court_review_state, decision=decision):
+                calls = {}
+                self.workspace.get_execution_job_by_local_warrant = lambda warrant_id, org_id: {
+                    'job_id': 'fej_demo',
+                    'local_warrant_id': warrant_id,
+                    'state': 'pending_local_warrant',
+                    'note': 'Queued',
+                }
+
+                def _sync(org_id, warrant_id, **kwargs):
+                    calls['sync'] = {
+                        'org_id': org_id,
+                        'warrant_id': warrant_id,
+                        **kwargs,
+                    }
+                    return {
+                        'job_id': 'fej_demo',
+                        'local_warrant_id': warrant_id,
+                        'state': kwargs['state'],
+                        'note': kwargs['note'],
+                        'metadata': kwargs['metadata'],
+                    }
+
+                self.workspace.sync_execution_job_for_local_warrant = _sync
+                self.workspace.get_warrant = lambda warrant_id, org_id=None, state=court_review_state: {
+                    'warrant_id': warrant_id,
+                    'action_class': 'federated_execution',
+                    'boundary_name': 'federation_gateway',
+                    'court_review_state': state,
+                    'execution_state': 'ready',
+                    'reviewed_by': 'user_owner',
+                    'reviewed_at': '2026-03-22T00:30:00Z',
+                }
+
+                job = self.workspace._sync_execution_job_for_warrant_review(
+                    'org_a',
+                    {
+                        'warrant_id': 'war_local_demo',
+                        'action_class': 'federated_execution',
+                        'boundary_name': 'federation_gateway',
+                        'court_review_state': court_review_state,
+                        'execution_state': 'ready',
+                        'reviewed_by': 'user_owner',
+                        'reviewed_at': '2026-03-22T00:30:00Z',
+                    },
+                    decision=decision,
+                    note='Reviewed locally',
+                )
+
+                self.assertEqual(calls['sync']['state'], expected_state)
+                self.assertEqual(calls['sync']['metadata']['review_decision'], decision)
+                self.assertEqual(job['state'], expected_state)
+                self.assertEqual(job['local_warrant']['court_review_state'], court_review_state)
 
     def test_mutate_federation_peer_upserts_registry(self):
         from runtime_host import default_host_identity

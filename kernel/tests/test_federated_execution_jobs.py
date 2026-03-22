@@ -110,6 +110,27 @@ class FederatedExecutionJobTests(unittest.TestCase):
         summary = jobs.execution_job_summary(self.org_id)
         self.assertEqual(summary['executed'], 1)
 
+    def test_sync_execution_job_for_local_warrant_updates_state(self):
+        created = jobs.upsert_execution_job(
+            self.org_id,
+            self._job('fed_job_3', state='pending_local_warrant'),
+            local_warrant_id='war_local_demo',
+        )
+        self.assertEqual(created['state'], 'pending_local_warrant')
+
+        updated = jobs.sync_execution_job_for_local_warrant(
+            self.org_id,
+            'war_local_demo',
+            state='ready',
+            note='Local warrant approved',
+            metadata={'review_decision': 'approve'},
+        )
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated['job_id'], created['job_id'])
+        self.assertEqual(updated['state'], 'ready')
+        self.assertEqual(updated['metadata']['review_decision'], 'approve')
+        self.assertEqual(updated['note'], 'Local warrant approved')
+
 
 if __name__ == '__main__':
     unittest.main()

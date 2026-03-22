@@ -159,6 +159,8 @@ incoming cross-host work:
 - the receiver issues a local `federated_execution` warrant in
   `pending_review` state rather than treating the sender's warrant as
   sufficient local authority
+- approving that local warrant transitions the job to `ready`; staying or
+  revoking it transitions the job to `blocked` or `rejected`
 - `GET /api/federation/execution-jobs` exposes that queue for the bound
   institution
 

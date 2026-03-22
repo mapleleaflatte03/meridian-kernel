@@ -152,6 +152,9 @@ incoming `execution_request` envelopes that have been converted into local
 review objects. The receiver issues a local `federated_execution` warrant in
 `pending_review` state for that job instead of trusting the sender's warrant
 as sufficient local authorization.
+Receiver-side warrant review now also drives that queue honestly: approving the
+local warrant moves the execution job to `ready`, while staying or revoking it
+moves the job to `blocked` or `rejected`.
 When the received message is a valid `settlement_notice` with a settlement-ready
 `commitment_id`, the receiver can now apply that notice directly to the local
 commitment record and mark the inbox entry as `processed`; if an active case

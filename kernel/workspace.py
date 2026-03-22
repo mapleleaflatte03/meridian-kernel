@@ -785,6 +785,20 @@ def _execution_job_view(bound_org_id, job):
     return record
 
 
+def _execution_job_state_for_warrant(warrant):
+    review_state = (warrant or {}).get('court_review_state', '')
+    execution_state = (warrant or {}).get('execution_state', '')
+    if execution_state == 'executed':
+        return 'executed'
+    if review_state in ('approved', 'auto_issued') and execution_state == 'ready':
+        return 'ready'
+    if review_state == 'stayed':
+        return 'blocked'
+    if review_state == 'revoked':
+        return 'rejected'
+    return ''
+
+
 def _federation_execution_jobs_snapshot(bound_org_id, *, limit=50):
     jobs = [
         _execution_job_view(bound_org_id, job)
@@ -888,6 +902,104 @@ def _queue_received_execution_request(bound_org_id, claims, receipt, *, payload=
         },
     })
     return _execution_job_view(bound_org_id, job), receiver_warrant, None
+
+
+def _execution_job_state_for_warrant(warrant):
+    record = dict(warrant or {})
+    execution_state = (record.get('execution_state') or '').strip()
+    review_state = (record.get('court_review_state') or '').strip()
+    if execution_state == 'executed':
+        return 'executed'
+    if review_state in ('auto_issued', 'approved') and execution_state == 'ready':
+        return 'ready'
+    if review_state == 'pending_review':
+        return 'pending_local_warrant'
+    if review_state == 'stayed':
+        return 'blocked'
+    if review_state == 'revoked':
+        return 'rejected'
+    return ''
+
+
+def get_execution_job_by_local_warrant(warrant_id, org_id):
+    warrant_id = (warrant_id or '').strip()
+    if not warrant_id:
+        return None
+    return next(
+        (
+            job for job in list_execution_jobs(org_id)
+            if (job.get('local_warrant_id') or '').strip() == warrant_id
+        ),
+        None,
+    )
+
+
+def sync_execution_job_for_local_warrant(org_id, warrant_id, *, state, note='', metadata=None):
+    existing = get_execution_job_by_local_warrant(warrant_id, org_id)
+    if not existing:
+        return None
+    merged_metadata = dict(existing.get('metadata') or {})
+    merged_metadata.update(metadata or {})
+    return upsert_execution_job(
+        org_id,
+        job_id=existing.get('job_id', ''),
+        state=state,
+        note=note or existing.get('note', ''),
+        metadata=merged_metadata,
+    )
+
+
+def _sync_execution_job_for_warrant_review(bound_org_id, warrant, *, decision='', note='', actor_id='', session_id=None, reason=''):
+    warrant = dict(warrant or {})
+    if warrant.get('action_class') != 'federated_execution':
+        return None
+    if warrant.get('boundary_name') != 'federation_gateway':
+        return None
+    warrant_id = (warrant.get('warrant_id') or '').strip()
+    if not warrant_id:
+        return None
+    desired_state = _execution_job_state_for_warrant(warrant)
+    if not desired_state:
+        return None
+
+    existing = get_execution_job_by_local_warrant(warrant_id, bound_org_id)
+    if not existing:
+        return None
+
+    review_decision = (decision or warrant.get('court_review_state') or '').strip()
+    synced = sync_execution_job_for_local_warrant(
+        bound_org_id,
+        warrant_id,
+        state=desired_state,
+        note=note or reason or f"Local warrant {warrant.get('court_review_state', '')} via workspace review",
+        metadata={
+            'review_decision': review_decision,
+            'reviewed_by': warrant.get('reviewed_by', ''),
+            'reviewed_at': warrant.get('reviewed_at', ''),
+            'court_review_state': warrant.get('court_review_state', ''),
+            'execution_state': warrant.get('execution_state', ''),
+        },
+    )
+    if not synced:
+        return None
+    job = synced
+    job = _execution_job_view(bound_org_id, job)
+    if actor_id:
+        log_event(
+            bound_org_id,
+            actor_id,
+            'federation_execution_job_review_synced',
+            resource=job.get('job_id', ''),
+            outcome='success',
+            details={
+                'local_warrant_id': warrant_id,
+                'court_review_state': warrant.get('court_review_state', ''),
+                'job_state': job.get('state', ''),
+                'reason': reason or 'workspace_warrant_review',
+            },
+            session_id=session_id,
+        )
+    return job
 
 
 def _settlement_notice_ref(claims, receipt, payload=None):
@@ -1694,6 +1806,13 @@ def _maybe_stay_warrant_for_case(case_record, actor_id, *, org_id, session_id=No
         org_id=org_id,
         note=note or f"Automatically stayed because case {case_record.get('case_id', '')} is active",
     )
+    execution_job = _sync_execution_job_for_warrant_review(
+        org_id,
+        stayed,
+        actor_id=actor_id,
+        session_id=session_id,
+        reason='case_hold_applied',
+    )
     log_event(
         org_id,
         actor_id,
@@ -1705,10 +1824,12 @@ def _maybe_stay_warrant_for_case(case_record, actor_id, *, org_id, session_id=No
             'claim_type': case_record.get('claim_type', ''),
             'previous_court_review_state': review_state,
             'court_review_state': stayed.get('court_review_state', ''),
+            'execution_job_id': (execution_job or {}).get('job_id', ''),
+            'job_state': (execution_job or {}).get('state', ''),
         },
         session_id=session_id,
     )
-    return {
+    result = {
         'applied': True,
         'warrant_id': warrant_id,
         'reason': 'case_hold_applied',
@@ -1716,6 +1837,9 @@ def _maybe_stay_warrant_for_case(case_record, actor_id, *, org_id, session_id=No
         'execution_state': stayed.get('execution_state', ''),
         'warrant': stayed,
     }
+    if execution_job:
+        result['execution_job'] = execution_job
+    return result
 
 
 def _maybe_block_commitment_settlement(commitment_id, actor_id, *, org_id, session_id=None, note=''):
@@ -3446,14 +3570,30 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     org_id=org_id,
                     note=body.get('note', ''),
                 )
+                execution_job = _sync_execution_job_for_warrant_review(
+                    org_id,
+                    warrant,
+                    decision=decision,
+                    note=body.get('note', ''),
+                    actor_id=by,
+                    session_id=_sid,
+                    reason=f'workspace_warrant_{decision}',
+                )
                 log_event(org_id, by, f'warrant_{decision}', outcome='success',
                           resource=warrant_id,
-                          details={'court_review_state': warrant['court_review_state']},
+                          details={
+                              'court_review_state': warrant['court_review_state'],
+                              'execution_job_id': (execution_job or {}).get('job_id', ''),
+                              'execution_job_state': (execution_job or {}).get('state', ''),
+                          },
                           session_id=_sid)
-                return self._json({
+                response = {
                     'message': f"Warrant {decision_past[decision]}: {warrant_id}",
                     'warrant': warrant,
-                })
+                }
+                if execution_job:
+                    response['execution_job'] = execution_job
+                return self._json(response)
 
             elif path == '/api/commitments/propose':
                 target_host_id = (body.get('target_host_id') or '').strip()

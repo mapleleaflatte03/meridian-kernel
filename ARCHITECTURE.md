@@ -126,6 +126,9 @@ handling. Today that proof is still intentionally narrow:
 - open or stayed cases surface blocking commitment IDs / peer host IDs
 - risky case classes can auto-suspend a trusted peer and block sender-side
   federation delivery
+- `/api/cases/open`, `/api/cases/stay`, and `/api/cases/resolve` can federate
+  a `case_notice` message type so the receiver can mirror the case state
+  against the source host / source institution / source_case_id key
 - active case state also blocks commitment settlement until court review clears
   the linked commitment
 - contradictory delivery receipts can now auto-open sender-side case records

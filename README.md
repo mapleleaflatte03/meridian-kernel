@@ -200,6 +200,10 @@ counts, and the reference workspace can mutate those records through
 Commitment breach can now open a linked local case record, but this is still
 the start of the cross-institution court program rather than the full network
 dispute system.
+Those case endpoints can also federate a `case_notice` protocol object: the
+sender can mirror open/stay/resolve to the target host, and the receiver
+applies that notice idempotently against the source host/institution/source
+case key while keeping federation fail-closed.
 `POST /api/treasury/settlement-adapters/preflight` now exposes the same
 settlement-adapter contract as a preflight surface: it tells the caller
 whether an adapter is merely registered, whether payout execution is enabled on

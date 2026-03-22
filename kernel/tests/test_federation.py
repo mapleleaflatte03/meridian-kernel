@@ -1104,7 +1104,6 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(jobs_body['jobs'][0]['envelope_id'], delivery['claims']['envelope_id'])
                 self.assertEqual(jobs_body['jobs'][0]['receipt_id'], delivery['receipt']['receipt_id'])
                 self.assertEqual(jobs_body['jobs'][0]['state'], 'pending_local_warrant')
-                self.assertEqual(jobs_body['jobs'][0]['state'], 'pending_local_warrant')
                 self.assertEqual(jobs_body['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
                 self.assertEqual(jobs_body['jobs'][0]['local_warrant']['execution_state'], 'ready')
                 self.assertEqual(jobs_body['jobs'][0]['local_warrant']['warrant_id'], jobs_body['jobs'][0]['local_warrant_id'])

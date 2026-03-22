@@ -166,7 +166,6 @@ def _manual_init():
 
     for name, role, ekey, purpose in AGENTS:
         if name not in existing_names:
-            import uuid
             agent_id = f'agent_{name.lower()}'
             reg['agents'][agent_id] = {
                 'id': agent_id,

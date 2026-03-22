@@ -1088,7 +1088,25 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(inbox_body['entries'][0]['receipt_id'], delivery['receipt']['receipt_id'])
                 self.assertEqual(inbox_body['entries'][0]['warrant_id'], warrant['warrant_id'])
                 self.assertEqual(inbox_body['entries'][0]['payload'], request_payload)
-                self.assertEqual(inbox_body['entries'][0]['state'], 'received')
+                self.assertEqual(inbox_body['entries'][0]['state'], 'processed')
+
+                jobs_status, jobs_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/execution-jobs',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(jobs_status, 200, jobs_body)
+                self.assertEqual(jobs_body['summary']['total'], 1)
+                self.assertEqual(jobs_body['summary']['pending_local_warrant'], 1)
+                self.assertEqual(jobs_body['summary']['message_type_counts'], {
+                    'execution_request': 1,
+                })
+                self.assertEqual(jobs_body['jobs'][0]['envelope_id'], delivery['claims']['envelope_id'])
+                self.assertEqual(jobs_body['jobs'][0]['receipt_id'], delivery['receipt']['receipt_id'])
+                self.assertEqual(jobs_body['jobs'][0]['state'], 'pending_local_warrant')
+                self.assertEqual(jobs_body['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
+                self.assertEqual(jobs_body['jobs'][0]['local_warrant']['execution_state'], 'ready')
+                self.assertEqual(jobs_body['jobs'][0]['local_warrant']['warrant_id'], jobs_body['jobs'][0]['local_warrant_id'])
 
             alpha_events = _read_jsonl(alpha['audit_log'])
             beta_events = _read_jsonl(beta['audit_log'])

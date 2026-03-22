@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Capsule-backed receiver-side execution jobs for federated Meridian work.
+Capsule-backed receiver-side execution jobs for incoming federation requests.
 
-This is a narrow storage primitive only. It intentionally does not execute
-work. It records incoming cross-host execution requests as institution-scoped
-jobs that can be reviewed, blocked, rejected, or marked ready/executed.
+This store is intentionally narrow:
+
+- jobs are institution-scoped and file-backed
+- jobs are keyed idempotently by envelope_id
+- the first tranche only materializes local review state for received
+  `execution_request` envelopes; it does not execute remote work yet
 """
 from __future__ import annotations
 
-import collections
 import contextlib
 import datetime
 import fcntl
@@ -17,7 +19,6 @@ import json
 import os
 import sys
 import tempfile
-import uuid
 
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +35,8 @@ except ImportError:
         return os.path.join(ECONOMY_DIR, filename)
 
 
+STORE_FILE = 'federated_execution_jobs.json'
+LOCK_FILE = '.federated_execution_jobs.lock'
 JOB_STATES = (
     'pending_local_warrant',
     'ready',
@@ -68,13 +71,20 @@ def _missing_org_error(org_id):
 def _store_path(org_id):
     if not (org_id or '').strip():
         raise ValueError('org_id is required')
-    return capsule_path(org_id, 'federated_execution_jobs.json')
+    return capsule_path(org_id, STORE_FILE)
 
 
 def _lock_path(org_id):
     if not (org_id or '').strip():
         raise ValueError('org_id is required')
-    return capsule_path(org_id, '.federated_execution_jobs.lock')
+    return capsule_path(org_id, LOCK_FILE)
+
+
+def _job_id_for_envelope(envelope_id):
+    envelope_id = (envelope_id or '').strip()
+    if not envelope_id:
+        raise ValueError('envelope_id is required')
+    return 'fej_' + hashlib.sha256(envelope_id.encode('utf-8')).hexdigest()[:12]
 
 
 def _empty_store(org_id):
@@ -95,7 +105,9 @@ def _normalize_state(state, *, existing_state=''):
     existing_state = (existing_state or '').strip().lower()
     if state and state not in JOB_STATES:
         raise ValueError(f"Unknown execution job state {state!r}. Must be one of {JOB_STATES}")
-    return state or existing_state or 'pending_local_warrant'
+    if state:
+        return state
+    return existing_state or 'pending_local_warrant'
 
 
 def _normalize_store(data, org_id):
@@ -112,14 +124,14 @@ def _normalize_store(data, org_id):
     jobs = {}
     if isinstance(raw_jobs, list):
         for item in raw_jobs:
-            if isinstance(item, dict) and item.get('envelope_id'):
-                jobs[item['envelope_id']] = dict(item)
+            if isinstance(item, dict) and item.get('job_id'):
+                jobs[item['job_id']] = dict(item)
     elif isinstance(raw_jobs, dict):
-        for envelope_id, item in raw_jobs.items():
+        for job_id, item in raw_jobs.items():
             if isinstance(item, dict):
                 record = dict(item)
-                record['envelope_id'] = record.get('envelope_id') or envelope_id
-                jobs[record['envelope_id']] = record
+                record['job_id'] = record.get('job_id') or job_id
+                jobs[record['job_id']] = record
     store['jobs'] = jobs
     if 'states' not in store or not store['states']:
         store['states'] = list(JOB_STATES)
@@ -177,7 +189,7 @@ def _jobs_lock(org_id):
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
-def _normalize_job(job, existing=None):
+def _normalize_job(job, org_id, existing=None):
     job = dict(job or {})
     existing = dict(existing or {})
     envelope_id = (job.get('envelope_id') or existing.get('envelope_id') or '').strip()
@@ -185,23 +197,26 @@ def _normalize_job(job, existing=None):
         raise ValueError('envelope_id is required')
 
     record = dict(existing)
+    record['job_id'] = (job.get('job_id') or existing.get('job_id') or _job_id_for_envelope(envelope_id)).strip()
+    record['institution_id'] = (org_id or '').strip()
     record['envelope_id'] = envelope_id
-    record['job_id'] = (job.get('job_id') or existing.get('job_id') or f'fej_{uuid.uuid4().hex[:12]}').strip()
 
     required_fields = (
         'source_host_id',
         'source_institution_id',
         'target_host_id',
         'target_institution_id',
+        'boundary_name',
+        'identity_model',
         'message_type',
     )
     for field in required_fields:
         if field in job:
-            value = (job.get(field) or '').strip()
+            value = str(job.get(field) or '').strip()
             if not value:
                 raise ValueError(f'{field} is required')
             record[field] = value
-        elif not record.get(field):
+        elif not str(record.get(field) or '').strip():
             raise ValueError(f'{field} is required')
 
     optional_text_fields = (
@@ -209,11 +224,10 @@ def _normalize_job(job, existing=None):
         'actor_type',
         'actor_id',
         'session_id',
-        'boundary_name',
-        'identity_model',
         'sender_warrant_id',
         'local_warrant_id',
         'commitment_id',
+        'payload_hash',
         'received_at',
         'updated_at',
         'executed_at',
@@ -221,25 +235,14 @@ def _normalize_job(job, existing=None):
     )
     for field in optional_text_fields:
         if field in job:
-            record[field] = (job.get(field) or '').strip()
+            record[field] = str(job.get(field) or '').strip()
         elif field not in record:
             record[field] = ''
-
-    if 'state' in job:
-        record['state'] = _normalize_state(job.get('state'), existing_state=record.get('state', ''))
-    else:
-        record['state'] = _normalize_state(record.get('state', ''), existing_state=record.get('state', ''))
 
     if 'payload' in job:
         record['payload'] = job.get('payload')
     elif 'payload' not in record:
         record['payload'] = None
-
-    if 'payload_hash' in job:
-        supplied = job.get('payload_hash')
-        record['payload_hash'] = supplied.strip() if supplied else _payload_hash(record.get('payload'))
-    elif 'payload_hash' not in record:
-        record['payload_hash'] = _payload_hash(record.get('payload'))
 
     if 'execution_refs' in job:
         record['execution_refs'] = dict(job.get('execution_refs') or {})
@@ -251,77 +254,115 @@ def _normalize_job(job, existing=None):
     elif 'metadata' not in record:
         record['metadata'] = {}
 
+    if job.get('payload_hash') in (None, ''):
+        record['payload_hash'] = record.get('payload_hash') or _payload_hash(record.get('payload'))
+
+    record['state'] = _normalize_state(job.get('state', ''), existing_state=record.get('state', ''))
     if not record.get('received_at'):
         record['received_at'] = _now()
-    if not record.get('updated_at'):
-        record['updated_at'] = record['received_at']
+    record['updated_at'] = _now()
     if record['state'] == 'executed' and not record.get('executed_at'):
         record['executed_at'] = record['updated_at']
-    if record['state'] != 'executed':
-        record.setdefault('executed_at', '')
-
+    if record['state'] != 'executed' and 'executed_at' not in job:
+        record['executed_at'] = record.get('executed_at', '')
     return record
 
 
-def upsert_execution_job(org_id, job):
-    if not isinstance(job, dict):
-        raise TypeError('job must be a dict')
-    with _jobs_lock(org_id):
-        store = _load_store(org_id)
-        envelope_id = (job.get('envelope_id') or '').strip()
-        existing = store.get('jobs', {}).get(envelope_id, {})
-        record = _normalize_job(job, existing=existing)
-        record['updated_at'] = _now()
-        if record['state'] == 'executed' and not record.get('executed_at'):
-            record['executed_at'] = record['updated_at']
-        store.setdefault('jobs', {})[envelope_id] = record
-        return _save_store(store, org_id)['jobs'][envelope_id]
+def get_execution_job(job_or_envelope_id, org_id):
+    job_or_envelope_id = (job_or_envelope_id or '').strip()
+    if not job_or_envelope_id:
+        return None
+    store = _load_store(org_id)
+    record = store.get('jobs', {}).get(job_or_envelope_id)
+    if record:
+        return record
+    for record in store.get('jobs', {}).values():
+        if (record.get('envelope_id') or '').strip() == job_or_envelope_id:
+            return record
+    return None
 
 
-def get_execution_job(envelope_id, org_id=None):
+def get_execution_job_by_envelope(envelope_id, org_id):
+    envelope_id = (envelope_id or '').strip()
     if not envelope_id:
         return None
     store = _load_store(org_id)
-    return store.get('jobs', {}).get(envelope_id)
+    for record in store.get('jobs', {}).values():
+        if (record.get('envelope_id') or '').strip() == envelope_id:
+            return record
+    return None
 
 
-def list_execution_jobs(org_id=None, *, state=None):
+def list_execution_jobs(org_id, *, state=None):
+    parent = os.path.dirname(_store_path(org_id))
+    if org_id and not os.path.isdir(parent):
+        return []
     store = _load_store(org_id)
     jobs = list(store.get('jobs', {}).values())
     if state:
         jobs = [row for row in jobs if row.get('state') == state]
-    jobs.sort(key=lambda row: (row.get('received_at', ''), row.get('envelope_id', '')), reverse=True)
+    jobs.sort(key=lambda row: row.get('received_at', ''), reverse=True)
     return jobs
 
 
-def execution_job_summary(org_id=None):
-    jobs = list_execution_jobs(org_id)
-    summary = {
-        'total': len(jobs),
-        'pending_local_warrant': 0,
-        'ready': 0,
-        'executed': 0,
-        'blocked': 0,
-        'rejected': 0,
-        'message_type_counts': {},
-    }
-    message_type_counts = collections.Counter()
-    for record in jobs:
+def upsert_execution_job(org_id, job=None, **job_fields):
+    payload = dict(job or {})
+    payload.update(job_fields)
+    with _jobs_lock(org_id):
+        store = _load_store(org_id)
+        existing = None
+        if payload.get('job_id'):
+            existing = store.get('jobs', {}).get(payload['job_id'])
+        if existing is None and payload.get('envelope_id'):
+            existing = get_execution_job_by_envelope(payload['envelope_id'], org_id)
+        record = _normalize_job(payload, org_id, existing=existing)
+        store.setdefault('jobs', {})[record['job_id']] = record
+        _save_store(store, org_id)
+        return record
+
+
+def execution_job_summary(org_id):
+    parent = os.path.dirname(_store_path(org_id))
+    if org_id and not os.path.isdir(parent):
+        return {
+            'org_id': (org_id or '').strip(),
+            'total': 0,
+            'pending_local_warrant': 0,
+            'ready': 0,
+            'executed': 0,
+            'blocked': 0,
+            'rejected': 0,
+            'state_counts': {},
+            'message_type_counts': {},
+            'updatedAt': _now(),
+        }
+    store = _load_store(org_id)
+    counts = {}
+    message_type_counts = {}
+    for record in store.get('jobs', {}).values():
         state = (record.get('state') or '').strip()
-        if state in summary:
-            summary[state] += 1
-        message_type_counts[(record.get('message_type') or '').strip() or 'unknown'] += 1
-    summary['message_type_counts'] = dict(sorted(message_type_counts.items()))
+        if state:
+            counts[state] = counts.get(state, 0) + 1
+        message_type = (record.get('message_type') or '').strip() or 'unknown'
+        message_type_counts[message_type] = message_type_counts.get(message_type, 0) + 1
+    summary = {
+        'org_id': (org_id or '').strip(),
+        'total': len(store.get('jobs', {})),
+        'pending_local_warrant': counts.get('pending_local_warrant', 0),
+        'ready': counts.get('ready', 0),
+        'executed': counts.get('executed', 0),
+        'blocked': counts.get('blocked', 0),
+        'rejected': counts.get('rejected', 0),
+        'state_counts': counts,
+        'message_type_counts': dict(sorted(message_type_counts.items())),
+        'updatedAt': store.get('updatedAt', _now()),
+    }
     return summary
 
 
-def summary(org_id=None):
+def summarize_execution_jobs(org_id):
     return execution_job_summary(org_id)
 
 
-def main():
-    raise SystemExit('This module is a storage primitive only.')
-
-
-if __name__ == '__main__':
-    main()
+def summary(org_id):
+    return execution_job_summary(org_id)

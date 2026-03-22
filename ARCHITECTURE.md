@@ -53,6 +53,10 @@ deliberately narrow:
 - one receiver-side settlement notice application path now exists as a kernel
   reference: a valid `settlement_notice` can settle a linked commitment on the
   receiver and transition the inbox entry from `received` to `processed`
+- one receiver-side execution review path now exists as a kernel reference:
+  a valid `execution_request` can materialize a local federated execution job
+  plus a pending local warrant, instead of overclaiming that the sender's
+  warrant is enough to authorize receiver-side work
 - one first-class warrant primitive now exists as a kernel reference:
   file-backed warrant records, warrant review state, and sender-side
   federation execution gating for `execution_request`
@@ -142,6 +146,24 @@ can also apply a valid `settlement_notice` onto a local accepted commitment and
 append the resulting settlement reference, while still leaving blocked notices
 in `received` state when case review prevents settlement. It is not yet the
 full warrant-first cross-host execution program.
+
+## Receiver-Side Federated Execution Jobs
+
+Meridian now also has a first receiver-side execution review object for
+incoming cross-host work:
+
+- accepted `execution_request` envelopes can create capsule-backed
+  federated execution jobs keyed by `envelope_id`
+- those jobs surface sender provenance, payload hash, linked commitment, and a
+  local receiver warrant ID
+- the receiver issues a local `federated_execution` warrant in
+  `pending_review` state rather than treating the sender's warrant as
+  sufficient local authority
+- `GET /api/federation/execution-jobs` exposes that queue for the bound
+  institution
+
+This is the local-review half of court-first cross-host execution. It is not
+yet remote work execution or settlement finality.
 
 ## Payout Proposal Primitive
 

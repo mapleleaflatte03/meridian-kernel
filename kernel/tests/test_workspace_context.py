@@ -40,6 +40,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
         self.orig_log_event = self.workspace.log_event
         self.orig_list_warrants = self.workspace.list_warrants
+        self.orig_get_warrant = self.workspace.get_warrant
+        self.orig_issue_warrant = self.workspace.issue_warrant
         self.orig_review_warrant = self.workspace.review_warrant
         self.orig_commitment_summary = self.workspace.commitment_summary
         self.orig_list_commitments = self.workspace.list_commitments
@@ -58,6 +60,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_set_peer_trust_state = self.workspace.set_peer_trust_state
         self.orig_ensure_case_for_delivery_failure = self.workspace.ensure_case_for_delivery_failure
         self.orig_summarize_inbox_entries = self.workspace.summarize_inbox_entries
+        self.orig_get_execution_job = self.workspace.get_execution_job
+        self.orig_list_execution_jobs = self.workspace.list_execution_jobs
+        self.orig_execution_job_summary = self.workspace.execution_job_summary
+        self.orig_upsert_execution_job = self.workspace.upsert_execution_job
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -75,6 +81,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
         self.workspace.log_event = self.orig_log_event
         self.workspace.list_warrants = self.orig_list_warrants
+        self.workspace.get_warrant = self.orig_get_warrant
+        self.workspace.issue_warrant = self.orig_issue_warrant
         self.workspace.review_warrant = self.orig_review_warrant
         self.workspace.commitment_summary = self.orig_commitment_summary
         self.workspace.list_commitments = self.orig_list_commitments
@@ -93,6 +101,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.set_peer_trust_state = self.orig_set_peer_trust_state
         self.workspace.ensure_case_for_delivery_failure = self.orig_ensure_case_for_delivery_failure
         self.workspace.summarize_inbox_entries = self.orig_summarize_inbox_entries
+        self.workspace.get_execution_job = self.orig_get_execution_job
+        self.workspace.list_execution_jobs = self.orig_list_execution_jobs
+        self.workspace.execution_job_summary = self.orig_execution_job_summary
+        self.workspace.upsert_execution_job = self.orig_upsert_execution_job
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -458,6 +470,54 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(snap['management_mode'], 'workspace_api_file_backed')
             self.assertTrue(snap['mutation_enabled'])
 
+    def test_federation_execution_jobs_snapshot_surfaces_local_warrant(self):
+        self.workspace.list_execution_jobs = lambda org_id, state=None: [
+            {
+                'job_id': 'fej_demo',
+                'envelope_id': 'fed_exec_demo',
+                'receipt_id': 'fedrcpt_demo',
+                'state': 'pending_local_warrant',
+                'local_warrant_id': 'war_local_demo',
+                'message_type': 'execution_request',
+                'received_at': '2026-03-22T00:00:00Z',
+                'source_host_id': 'host_alpha',
+                'source_institution_id': 'org_alpha',
+                'target_host_id': 'host_beta',
+                'target_institution_id': 'org_a',
+                'boundary_name': 'federation_gateway',
+                'identity_model': 'signed_host_service',
+                'payload': {'task': 'demo'},
+                'payload_hash': 'hash_demo',
+            }
+        ]
+        self.workspace.execution_job_summary = lambda org_id: {
+            'org_id': org_id,
+            'total': 1,
+            'pending_local_warrant': 1,
+            'ready': 0,
+            'executed': 0,
+            'blocked': 0,
+            'rejected': 0,
+            'state_counts': {'pending_local_warrant': 1},
+            'message_type_counts': {'execution_request': 1},
+            'updatedAt': '2026-03-22T00:00:00Z',
+        }
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: {
+            'warrant_id': warrant_id,
+            'court_review_state': 'pending_review',
+            'execution_state': 'ready',
+            'expires_at': '2026-03-22T01:00:00Z',
+        }
+        snapshot = self.workspace._federation_execution_jobs_snapshot('org_a')
+        self.assertEqual(snapshot['summary']['total'], 1)
+        self.assertEqual(snapshot['summary']['pending_local_warrant'], 1)
+        self.assertEqual(snapshot['summary']['message_type_counts'], {'execution_request': 1})
+        self.assertEqual(snapshot['jobs'][0]['envelope_id'], 'fed_exec_demo')
+        self.assertEqual(snapshot['jobs'][0]['state'], 'pending_local_warrant')
+        self.assertEqual(snapshot['jobs'][0]['local_warrant']['warrant_id'], 'war_local_demo')
+        self.assertEqual(snapshot['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
+        self.assertEqual(snapshot['jobs'][0]['local_warrant']['execution_state'], 'ready')
+
     def test_federation_manifest_surfaces_host_admission_and_service_registry(self):
         from runtime_host import default_host_identity
 
@@ -665,6 +725,175 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['reason'], 'case_blocked')
         self.assertEqual(processing['state'], 'received')
         self.assertEqual(processing['case']['case_id'], 'case_demo')
+
+    def test_process_received_execution_request_creates_local_warranted_job(self):
+        from federation import FederationEnvelopeClaims
+
+        calls = {}
+        self.workspace.get_execution_job = lambda envelope_id, org_id=None: None
+        self.workspace.issue_warrant = lambda *args, **kwargs: {
+            'warrant_id': 'war_local_demo',
+            'court_review_state': 'pending_review',
+            'execution_state': 'ready',
+            'expires_at': '2026-03-22T01:00:00Z',
+        }
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: {
+            'warrant_id': warrant_id,
+            'court_review_state': 'pending_review',
+            'execution_state': 'ready',
+            'expires_at': '2026-03-22T01:00:00Z',
+        }
+        self.workspace.upsert_execution_job = lambda org_id, job: calls.setdefault(
+            'job',
+            dict(job, job_id='fej_demo'),
+        )
+        self.workspace.log_event = lambda *args, **kwargs: calls.setdefault('audit', []).append((args, kwargs))
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_exec_demo',
+            'state': kwargs.get('state', 'received'),
+        }
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_exec_demo',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_alpha',
+                session_id='ses_alpha',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='execution_request',
+                payload_hash='hash_demo',
+                warrant_id='war_sender_demo',
+                commitment_id='cmt_demo',
+            )
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                {'receipt_id': 'fedrcpt_demo', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={'task': 'demo'},
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+
+        self.assertTrue(processing['applied'])
+        self.assertEqual(processing['reason'], 'execution_job_created')
+        self.assertEqual(processing['state'], 'processed')
+        self.assertEqual(processing['execution_job']['job_id'], 'fej_demo')
+        self.assertEqual(processing['execution_job']['state'], 'pending_local_warrant')
+        self.assertEqual(processing['receiver_warrant']['warrant_id'], 'war_local_demo')
+        self.assertEqual(processing['inbox_entry']['state'], 'processed')
+        self.assertEqual(calls['job']['local_warrant_id'], 'war_local_demo')
+        self.assertEqual(calls['job']['sender_warrant_id'], 'war_sender_demo')
+        self.assertEqual(calls['audit'][-1][0][2], 'federation_execution_job_created')
+
+    def test_process_received_execution_request_reuses_existing_job(self):
+        from federation import FederationEnvelopeClaims
+
+        existing_job = {
+            'job_id': 'fej_demo',
+            'envelope_id': 'fed_exec_demo',
+            'local_warrant_id': 'war_local_demo',
+            'state': 'pending_local_warrant',
+        }
+        self.workspace.get_execution_job = lambda envelope_id, org_id=None: existing_job
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: {
+            'warrant_id': warrant_id,
+            'court_review_state': 'pending_review',
+            'execution_state': 'ready',
+            'expires_at': '2026-03-22T01:00:00Z',
+        }
+        self.workspace.issue_warrant = lambda *args, **kwargs: self.fail('should not issue duplicate warrant')
+        self.workspace.upsert_execution_job = lambda *args, **kwargs: self.fail('should not upsert duplicate job')
+        self.workspace.log_event = lambda *args, **kwargs: None
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_exec_demo',
+            'state': kwargs.get('state', 'received'),
+        }
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_exec_demo',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_alpha',
+                session_id='ses_alpha',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='execution_request',
+                payload_hash='hash_demo',
+                warrant_id='war_sender_demo',
+                commitment_id='cmt_demo',
+            )
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                {'receipt_id': 'fedrcpt_demo', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={'task': 'demo'},
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+
+        self.assertTrue(processing['applied'])
+        self.assertEqual(processing['execution_job']['job_id'], 'fej_demo')
+        self.assertEqual(processing['receiver_warrant']['warrant_id'], 'war_local_demo')
+
+    def test_process_received_execution_request_blocks_on_case(self):
+        from federation import FederationEnvelopeClaims
+
+        self.workspace.get_execution_job = lambda envelope_id, org_id=None: None
+        self.workspace.issue_warrant = lambda *args, **kwargs: self.fail('blocked execution should not issue warrant')
+        original_blocking_case = self.workspace._blocking_case_for_delivery
+        self.workspace._blocking_case_for_delivery = lambda **kwargs: {
+            'case_id': 'case_demo',
+            'claim_type': 'non_delivery',
+            'status': 'open',
+        }
+        self.workspace.upsert_execution_job = lambda org_id, job: dict(job, job_id='fej_demo')
+        self.workspace.log_event = lambda *args, **kwargs: None
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_exec_demo',
+            'state': kwargs.get('state', 'received'),
+        }
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_exec_demo',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_alpha',
+                session_id='ses_alpha',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='execution_request',
+                payload_hash='hash_demo',
+                warrant_id='war_sender_demo',
+                commitment_id='cmt_demo',
+            )
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                {'receipt_id': 'fedrcpt_demo', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={'task': 'demo'},
+            )
+        finally:
+            self.workspace._blocking_case_for_delivery = original_blocking_case
+            self.workspace._federation_inbox_entry = original_inbox_entry
+
+        self.assertTrue(processing['applied'])
+        self.assertEqual(processing['reason'], 'case_blocked')
+        self.assertEqual(processing['execution_job']['state'], 'blocked')
+        self.assertEqual(processing['case']['case_id'], 'case_demo')
+        self.assertIsNone(processing['receiver_warrant'])
 
     def test_mutate_federation_peer_upserts_registry(self):
         from runtime_host import default_host_identity

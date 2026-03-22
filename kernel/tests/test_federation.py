@@ -452,7 +452,25 @@ class FederationTests(unittest.TestCase):
             federation_enabled=True,
             peer_transport='https',
         )
-        receiver = FederationAuthority(receiver_host, signing_secret='beta-secret')
+        receiver = FederationAuthority(
+            receiver_host,
+            signing_secret='beta-secret',
+            peer_registry={
+                'source': 'test',
+                'host_id': 'host_beta',
+                'trusted_peer_ids': ['host_alpha'],
+                'peers': {
+                    'host_alpha': FederationPeer(
+                        'host_alpha',
+                        transport='https',
+                        endpoint_url='http://127.0.0.1:0',
+                        trust_state='trusted',
+                        shared_secret='alpha-secret',
+                        admitted_org_ids=['org_alpha'],
+                    ),
+                },
+            },
+        )
         received_claims = []
 
         class PeerHandler(BaseHTTPRequestHandler):

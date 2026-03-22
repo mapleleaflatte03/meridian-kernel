@@ -38,6 +38,8 @@ CAPSULE_FILES = (
     'warrants.json',
     'federation_inbox.json',
     '.federation_inbox.lock',
+    'federated_execution_jobs.json',
+    '.federated_execution_jobs.lock',
     'subscriptions.json',
     'subscriptions.json.bak',
     '.subscriptions.lock',
@@ -235,6 +237,22 @@ _EMPTY_FEDERATION_INBOX = {
         'bound_org_id': '',
     },
 }
+_EMPTY_FEDERATED_EXECUTION_JOBS = {
+    'version': 1,
+    'updatedAt': '',
+    'jobs': {},
+    'states': [
+        'pending_local_warrant',
+        'ready',
+        'executed',
+        'blocked',
+        'rejected',
+    ],
+    '_meta': {
+        'service_scope': 'institution_owned_service',
+        'bound_org_id': '',
+    },
+}
 _EMPTY_SUBSCRIPTIONS = {
     'subscribers': {},
     'delivery_log': [],
@@ -368,6 +386,8 @@ _CAPSULE_DEFAULTS = {
     'warrants.json': _EMPTY_WARRANTS,
     'federation_inbox.json': _EMPTY_FEDERATION_INBOX,
     '.federation_inbox.lock': '',
+    'federated_execution_jobs.json': _EMPTY_FEDERATED_EXECUTION_JOBS,
+    '.federated_execution_jobs.lock': '',
     'subscriptions.json': _EMPTY_SUBSCRIPTIONS,
     'subscriptions.json.bak': _EMPTY_SUBSCRIPTIONS,
     '.subscriptions.lock': '',
@@ -444,6 +464,10 @@ def owner_ledger_path(org_id=None):
 
 def federation_inbox_path(org_id=None):
     return capsule_path(org_id, 'federation_inbox.json')
+
+
+def federated_execution_jobs_path(org_id=None):
+    return capsule_path(org_id, 'federated_execution_jobs.json')
 
 
 def ensure_subscription_aliases(org_id=None):

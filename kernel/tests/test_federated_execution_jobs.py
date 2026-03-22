@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+import importlib.util
+import pathlib
+import shutil
+import unittest
+import uuid
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+JOBS_PATH = ROOT / 'kernel' / 'federated_execution_jobs.py'
+CAPSULE_PATH = ROOT / 'kernel' / 'capsule.py'
+CAPSULES_DIR = ROOT / 'capsules'
+
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+jobs = _load_module('kernel_federated_execution_jobs_test', JOBS_PATH)
+capsule = _load_module('kernel_capsule_test_for_federated_execution_jobs', CAPSULE_PATH)
+
+
+class FederatedExecutionJobTests(unittest.TestCase):
+    def setUp(self):
+        self.org_id = f'org_execution_job_test_{uuid.uuid4().hex[:8]}'
+        self.capsule_dir = CAPSULES_DIR / self.org_id
+        capsule.init_capsule(self.org_id)
+
+    def tearDown(self):
+        shutil.rmtree(self.capsule_dir, ignore_errors=True)
+
+    def _job(self, envelope_id, *, state='pending_local_warrant', message_type='execution_request'):
+        return {
+            'envelope_id': envelope_id,
+            'source_host_id': 'host_alpha',
+            'source_institution_id': 'org_alpha',
+            'target_host_id': 'host_beta',
+            'target_institution_id': 'org_beta',
+            'actor_type': 'service',
+            'actor_id': 'peer:host_alpha',
+            'session_id': 'ses_demo',
+            'boundary_name': 'federation_gateway',
+            'identity_model': 'signed_host_service',
+            'message_type': message_type,
+            'sender_warrant_id': 'war_sender',
+            'local_warrant_id': '',
+            'commitment_id': 'cmt_demo',
+            'payload': {'task': envelope_id},
+            'payload_hash': '',
+            'state': state,
+            'received_at': '2026-03-22T00:00:00Z',
+            'metadata': {'demo': True},
+        }
+
+    def test_capsule_initializes_federated_execution_jobs_file(self):
+        path = pathlib.Path(capsule.capsule_path(self.org_id, 'federated_execution_jobs.json'))
+        self.assertTrue(path.exists())
+        payload = jobs._load_store(self.org_id)
+        self.assertEqual(payload['jobs'], {})
+        self.assertIn('pending_local_warrant', payload['states'])
+
+    def test_upsert_get_list_and_summary(self):
+        created = jobs.upsert_execution_job(self.org_id, self._job('fed_job_1'))
+        self.assertEqual(created['envelope_id'], 'fed_job_1')
+        self.assertEqual(created['state'], 'pending_local_warrant')
+        self.assertTrue(created['job_id'].startswith('fej_'))
+
+        fetched = jobs.get_execution_job('fed_job_1', self.org_id)
+        self.assertEqual(fetched['envelope_id'], 'fed_job_1')
+
+        listed = jobs.list_execution_jobs(self.org_id)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]['envelope_id'], 'fed_job_1')
+
+        summary = jobs.execution_job_summary(self.org_id)
+        self.assertEqual(summary['total'], 1)
+        self.assertEqual(summary['pending_local_warrant'], 1)
+        self.assertEqual(summary['message_type_counts'], {'execution_request': 1})
+
+    def test_upsert_is_idempotent_by_envelope_id_and_tracks_state(self):
+        jobs.upsert_execution_job(self.org_id, self._job('fed_job_2'))
+        updated = jobs.upsert_execution_job(
+            self.org_id,
+            self._job(
+                'fed_job_2',
+                state='ready',
+            ),
+        )
+        self.assertEqual(updated['envelope_id'], 'fed_job_2')
+        self.assertEqual(updated['state'], 'ready')
+
+        updated = jobs.upsert_execution_job(
+            self.org_id,
+            self._job(
+                'fed_job_2',
+                state='executed',
+            ),
+        )
+        self.assertEqual(updated['state'], 'executed')
+        self.assertTrue(updated['executed_at'])
+
+        listed = jobs.list_execution_jobs(self.org_id)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]['state'], 'executed')
+        self.assertEqual(jobs.list_execution_jobs(self.org_id, state='executed')[0]['envelope_id'], 'fed_job_2')
+
+        summary = jobs.execution_job_summary(self.org_id)
+        self.assertEqual(summary['executed'], 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -482,7 +482,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         proposal_after = treasury.get_payout_proposal(proposal['proposal_id'], org_id=self.org_id)
         self.assertEqual(proposal_after['status'], 'dispute_window')
 
-    def test_execute_payout_proposal_accepts_enabled_base_x402_when_host_supports_it(self):
+    def test_execute_payout_proposal_accepts_enabled_base_x402_with_ready_verifier(self):
         ledger_path = self.capsule_dir / 'ledger.json'
         ledger = json.loads(ledger_path.read_text())
         ledger['treasury']['cash_usd'] = 120.0
@@ -520,6 +520,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
                 'base_usdc_x402': {
                     'status': 'active',
                     'payout_execution_enabled': True,
+                    'verification_ready': True,
                 },
             },
         }, indent=2))
@@ -566,7 +567,13 @@ class TreasuryCapsuleTests(unittest.TestCase):
                 warrant_id='war_enabled_adapter',
                 settlement_adapter='base_usdc_x402',
                 tx_hash='0xbaseenabled',
-                settlement_proof={'reference': 'base://receipt/enabled'},
+                settlement_proof={
+                    'reference': 'base://receipt/enabled',
+                    'verification_attestation': {
+                        'type': 'x402_settlement_verifier',
+                        'reference': 'attest://base/enabled',
+                    },
+                },
                 host_supported_adapters=['base_usdc_x402'],
             )
 
@@ -590,6 +597,9 @@ class TreasuryCapsuleTests(unittest.TestCase):
             executed['execution_refs']['settlement_adapter_contract_snapshot']['adapter_id'],
             'base_usdc_x402',
         )
+        self.assertTrue(
+            executed['execution_refs']['settlement_adapter_contract_snapshot']['verification_ready']
+        )
         self.assertEqual(
             executed['execution_refs']['settlement_adapter_contract_digest'],
             treasury.settlement_adapter_contract_digest(
@@ -599,6 +609,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(
             executed['execution_refs']['proof']['reference'],
             'base://receipt/enabled',
+        )
+        self.assertEqual(
+            executed['execution_refs']['proof']['verification_attestation']['type'],
+            'x402_settlement_verifier',
         )
 
         ledger = json.loads((self.capsule_dir / 'ledger.json').read_text())
@@ -743,7 +757,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertTrue(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'host_ledger')
         self.assertEqual(result['contract']['settlement_path'], 'journal_append')
+        self.assertEqual(result['contract']['verification_mode'], 'host_ledger')
+        self.assertTrue(result['contract']['verification_ready'])
         self.assertFalse(result['contract']['requires_verifier_attestation'])
+        self.assertEqual(result['contract']['accepted_attestation_types'], [])
         self.assertEqual(
             result['contract']['contract_digest'],
             treasury.settlement_adapter_contract_digest(result['contract']['contract_snapshot']),
@@ -753,7 +770,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'host_ledger')
         self.assertEqual(result['requirements']['settlement_path'], 'journal_append')
+        self.assertEqual(result['requirements']['verification_mode'], 'host_ledger')
+        self.assertTrue(result['requirements']['verification_ready'])
         self.assertFalse(result['requirements']['requires_verifier_attestation'])
+        self.assertEqual(result['requirements']['accepted_attestation_types'], [])
         self.assertEqual(result['requirements']['dispute_model'], 'court_case')
         self.assertEqual(result['requirements']['finality_model'], 'host_local_final')
         self.assertEqual(result['normalized_proof']['proof']['mode'], 'institution_transactions_journal')
@@ -777,13 +797,26 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'external_chain')
         self.assertEqual(result['contract']['settlement_path'], 'x402_onchain')
+        self.assertEqual(result['contract']['verification_mode'], 'external_attestation')
+        self.assertFalse(result['contract']['verification_ready'])
         self.assertTrue(result['contract']['requires_verifier_attestation'])
+        self.assertEqual(
+            result['contract']['accepted_attestation_types'],
+            ['x402_settlement_verifier'],
+        )
         self.assertEqual(result['contract']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['contract']['finality_model'], 'external_chain_finality')
         self.assertIn('payout_execution_disabled', result['execution_blockers'])
+        self.assertIn('verification_not_ready', result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'external_chain')
         self.assertEqual(result['requirements']['settlement_path'], 'x402_onchain')
+        self.assertEqual(result['requirements']['verification_mode'], 'external_attestation')
+        self.assertFalse(result['requirements']['verification_ready'])
         self.assertTrue(result['requirements']['requires_verifier_attestation'])
+        self.assertEqual(
+            result['requirements']['accepted_attestation_types'],
+            ['x402_settlement_verifier'],
+        )
         self.assertEqual(result['requirements']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['requirements']['finality_model'], 'external_chain_finality')
 
@@ -803,15 +836,84 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'manual_offchain')
         self.assertEqual(result['contract']['settlement_path'], 'manual_bank_review')
+        self.assertEqual(result['contract']['verification_mode'], 'manual_attestation')
+        self.assertFalse(result['contract']['verification_ready'])
         self.assertTrue(result['contract']['requires_verifier_attestation'])
+        self.assertEqual(
+            result['contract']['accepted_attestation_types'],
+            ['manual_wire_verifier'],
+        )
         self.assertEqual(result['contract']['dispute_model'], 'manual_reversal_and_court_case')
         self.assertEqual(result['contract']['finality_model'], 'manual_settlement_pending')
         self.assertIn('payout_execution_disabled', result['execution_blockers'])
+        self.assertIn('verification_not_ready', result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'manual_offchain')
         self.assertEqual(result['requirements']['settlement_path'], 'manual_bank_review')
+        self.assertEqual(result['requirements']['verification_mode'], 'manual_attestation')
+        self.assertFalse(result['requirements']['verification_ready'])
         self.assertTrue(result['requirements']['requires_verifier_attestation'])
+        self.assertEqual(
+            result['requirements']['accepted_attestation_types'],
+            ['manual_wire_verifier'],
+        )
         self.assertEqual(result['requirements']['dispute_model'], 'manual_reversal_and_court_case')
         self.assertEqual(result['requirements']['finality_model'], 'manual_settlement_pending')
+
+    def test_preflight_settlement_adapter_blocks_enabled_external_adapter_without_verifier_readiness(self):
+        settlement_adapters_path = self.capsule_dir / 'settlement_adapters.json'
+        settlement_adapters_path.write_text(json.dumps({
+            'default_payout_adapter': 'base_usdc_x402',
+            'adapters': {
+                'base_usdc_x402': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                },
+            },
+        }, indent=2))
+
+        result = treasury.preflight_settlement_adapter(
+            'base_usdc_x402',
+            org_id=self.org_id,
+            currency='USDC',
+            tx_hash='0xdeadbeef',
+            settlement_proof={'reference': 'demo-proof'},
+            host_supported_adapters=['base_usdc_x402'],
+        )
+        self.assertTrue(result['known'])
+        self.assertFalse(result['preflight_ok'])
+        self.assertFalse(result['can_execute_now'])
+        self.assertEqual(result['error_type'], 'permission_error')
+        self.assertIn('verification path is not ready', result['error'])
+        self.assertIn('verification_not_ready', result['execution_blockers'])
+        self.assertFalse(result['execution_ready'])
+
+    def test_preflight_settlement_adapter_requires_verifier_attestation_when_ready(self):
+        settlement_adapters_path = self.capsule_dir / 'settlement_adapters.json'
+        settlement_adapters_path.write_text(json.dumps({
+            'default_payout_adapter': 'base_usdc_x402',
+            'adapters': {
+                'base_usdc_x402': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                    'verification_ready': True,
+                },
+            },
+        }, indent=2))
+
+        result = treasury.preflight_settlement_adapter(
+            'base_usdc_x402',
+            org_id=self.org_id,
+            currency='USDC',
+            tx_hash='0xdeadbeef',
+            settlement_proof={'reference': 'demo-proof'},
+            host_supported_adapters=['base_usdc_x402'],
+        )
+        self.assertTrue(result['known'])
+        self.assertFalse(result['preflight_ok'])
+        self.assertFalse(result['can_execute_now'])
+        self.assertEqual(result['error_type'], 'validation_error')
+        self.assertIn('verifier attestation', result['error'])
+        self.assertTrue(result['execution_ready'])
 
     def test_missing_org_fails_cleanly(self):
         with self.assertRaises(SystemExit) as ctx:

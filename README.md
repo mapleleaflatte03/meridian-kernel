@@ -242,7 +242,10 @@ primitive, not yet the full settlement-adapter ecosystem.
 `GET /api/treasury/settlement-adapters` now surfaces the institution payout
 adapter registry. On the current reference path only `internal_ledger` is
 execution-enabled; `base_usdc_x402` and `manual_bank_wire` are registered but
-still policy-disabled until a stronger settlement proof path exists.
+still policy-disabled until a stronger settlement proof path exists. Even when
+an external adapter is policy-enabled in a reference test, execution now stays
+fail-closed until the adapter contract marks its verifier ready and the proof
+carries an accepted verifier attestation.
 `GET /api/subscriptions`, `GET /api/subscriptions/delivery-targets`, and
 `GET /api/accounting` now surface institution-owned service state directly from
 the bound capsule. The OSS workspace also exposes mutation paths for those

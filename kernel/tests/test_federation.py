@@ -181,7 +181,7 @@ def _executed_payout_proposal_record(*, proposal_id, commitment_id, contribution
 
 def _base_usdc_x402_contract_snapshot():
     return {
-        'contract_version': 1,
+        'contract_version': 2,
         'adapter_id': 'base_usdc_x402',
         'status': 'active',
         'payout_execution_enabled': True,
@@ -191,6 +191,9 @@ def _base_usdc_x402_contract_snapshot():
         'requires_tx_hash': True,
         'requires_settlement_proof': True,
         'requires_verifier_attestation': True,
+        'verification_mode': 'external_attestation',
+        'verification_ready': True,
+        'accepted_attestation_types': ['x402_settlement_verifier'],
         'proof_type': 'onchain_receipt',
         'verification_state': 'external_verification_required',
         'finality_state': 'external_chain_finality',
@@ -2432,6 +2435,7 @@ class FederationTests(unittest.TestCase):
                         'base_usdc_x402': {
                             'status': 'active',
                             'payout_execution_enabled': True,
+                            'verification_ready': True,
                         },
                     },
                 },
@@ -2444,6 +2448,7 @@ class FederationTests(unittest.TestCase):
                         'base_usdc_x402': {
                             'status': 'active',
                             'payout_execution_enabled': True,
+                            'verification_ready': True,
                         },
                     },
                 },
@@ -2471,6 +2476,10 @@ class FederationTests(unittest.TestCase):
                             'proof': {
                                 'reference': 'base://receipt/demo',
                                 'payer_wallet': '0xabc123',
+                                'verification_attestation': {
+                                    'type': 'x402_settlement_verifier',
+                                    'reference': 'attest://base/demo',
+                                },
                             },
                         },
                     },
@@ -2507,6 +2516,10 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(
                     processing['settlement_ref']['proof']['reference'],
                     'base://receipt/demo',
+                )
+                self.assertEqual(
+                    processing['settlement_ref']['proof']['verification_attestation']['type'],
+                    'x402_settlement_verifier',
                 )
 
             with open(os.path.join(beta['economy'], 'commitments.json')) as f:
@@ -2723,7 +2736,7 @@ class FederationTests(unittest.TestCase):
                             'settlement_adapter': 'internal_ledger',
                             'proof': {'mode': 'institution_transactions_journal'},
                             'settlement_adapter_contract_snapshot': {
-                                'contract_version': 1,
+                                'contract_version': 2,
                                 'adapter_id': 'internal_ledger',
                                 'status': 'active',
                                 'payout_execution_enabled': True,
@@ -2732,6 +2745,10 @@ class FederationTests(unittest.TestCase):
                                 'supported_currencies': ['USD', 'USDC'],
                                 'requires_tx_hash': False,
                                 'requires_settlement_proof': False,
+                                'requires_verifier_attestation': False,
+                                'verification_mode': 'host_ledger',
+                                'verification_ready': True,
+                                'accepted_attestation_types': [],
                                 'proof_type': 'ledger_transaction',
                                 'verification_state': 'host_ledger_final',
                                 'finality_state': 'host_local_final',

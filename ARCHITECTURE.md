@@ -214,7 +214,8 @@ deliberately narrow:
 - execution also enforces wallet eligibility, reserve-floor surplus, and a
   phase-5 contributor-payout gate before funds move
 - payout execution validates a file-backed settlement adapter contract before
-  funds move
+  funds move, including verifier-readiness and accepted attestation types for
+  non-ledger adapters
 - successful execution appends a `payout_execution` row to the institution
   transaction journal and links warrant execution refs back to the proposal
   with normalized proof / verification / finality fields

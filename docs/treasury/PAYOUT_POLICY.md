@@ -72,7 +72,9 @@ Execution additionally validates the chosen settlement adapter against the
 institution-local `settlement_adapters.json` policy. The current reference
 path only enables `internal_ledger` for payout execution. Other registered
 adapters may appear in the policy surface, but they remain non-executable until
-their proof contract is enabled.
+their proof contract is enabled. Non-ledger adapters must also declare a ready
+verification path and present an accepted verifier attestation before
+execution or received settlement notices can pass preflight.
 
 Receiver-side federation execution closes the loop by reusing an already
 persisted linked payout execution or settlement reference. The

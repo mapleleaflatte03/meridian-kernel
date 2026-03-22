@@ -111,16 +111,74 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertEqual(verified['subscription']['payment_verified_by'], 'owner')
         self.assertEqual(verified['subscription']['payment_evidence']['order_id'], 'ord_777')
 
-    def test_paid_subscription_is_blocked_without_payment_evidence(self):
-        with self.assertRaises(ValueError):
-            self.service.add_subscription(
-                '777',
-                plan='premium-brief-weekly',
-                payment_ref='missing',
+    def test_convert_trial_subscription_marks_trial_and_creates_paid_record(self):
+        self.service.add_subscription('333', org_id=self.org_a, actor='owner')
+        with mock.patch.object(self.service._revenue_mod, 'find_customer_payment_evidence', return_value={
+            'order_id': 'ord_333',
+            'payment_key': 'ref:oid-333',
+            'payment_ref': 'oid-333',
+            'tx_hash': 'tx-333',
+            'amount': 9.99,
+        }):
+            result = self.service.convert_trial_subscription(
+                '333',
+                'premium-brief-monthly',
+                payment_ref='oid-333',
                 confirm_payment=True,
                 org_id=self.org_a,
                 actor='owner',
             )
+
+        records = self.service.list_subscriptions(org_id=self.org_a, telegram_id='333')
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0]['status'], 'converted')
+        self.assertTrue(result['subscription']['converted_from_trial'])
+        self.assertTrue(result['subscription']['payment_verified'])
+
+    def test_paid_subscription_is_blocked_without_payment_evidence(self):
+        with mock.patch.object(self.service._revenue_mod, 'find_customer_payment_evidence', return_value=None):
+            with self.assertRaises(ValueError):
+                self.service.add_subscription(
+                    '777',
+                    plan='premium-brief-weekly',
+                    payment_ref='missing',
+                    confirm_payment=True,
+                    org_id=self.org_a,
+                    actor='owner',
+                )
+
+    def test_payment_verification_is_scoped_to_org_transactions(self):
+        def evidence_lookup(*, payment_ref='', min_amount_usd=0.0, org_id=None, **_kwargs):
+            if payment_ref == 'oid-org-b' and org_id == self.org_b:
+                return {
+                    'order_id': 'ord_org_b',
+                    'payment_key': 'ref:oid-org-b',
+                    'payment_ref': payment_ref,
+                    'tx_hash': 'tx-org-b',
+                    'amount': min_amount_usd,
+                }
+            return None
+
+        with mock.patch.object(self.service._revenue_mod, 'find_customer_payment_evidence', side_effect=evidence_lookup):
+            with self.assertRaises(ValueError):
+                self.service.add_subscription(
+                    '888',
+                    plan='premium-brief-monthly',
+                    payment_ref='oid-org-b',
+                    confirm_payment=True,
+                    org_id=self.org_a,
+                    actor='owner',
+                )
+
+            created = self.service.add_subscription(
+                '888',
+                plan='premium-brief-monthly',
+                payment_ref='oid-org-b',
+                confirm_payment=True,
+                org_id=self.org_b,
+                actor='owner',
+            )
+        self.assertTrue(created['subscription']['payment_verified'])
 
     def test_active_delivery_targets_respects_internal_ids(self):
         payload = self.service.load_subscriptions(self.org_a)

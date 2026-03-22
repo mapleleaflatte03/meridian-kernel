@@ -199,6 +199,10 @@ class InstitutionContextSerializationTests(unittest.TestCase):
         self.assertIn('cli', registry)
         self.assertTrue(registry['workspace']['supports_institution_routing'])
         self.assertFalse(registry['mcp_service']['supports_institution_routing'])
+        self.assertTrue(registry['subscriptions']['supports_institution_routing'])
+        self.assertTrue(registry['accounting']['supports_institution_routing'])
+        self.assertEqual(registry['subscriptions']['identity_model'], 'session')
+        self.assertEqual(registry['accounting']['identity_model'], 'session')
 
     def test_runtime_core_snapshot_for_process_bound_admission(self):
         from institution_context import (
@@ -324,13 +328,13 @@ class PredefinedBoundaryTests(unittest.TestCase):
 
     def test_subscriptions_boundary(self):
         from institution_context import SUBSCRIPTIONS_BOUNDARY
-        self.assertEqual(SUBSCRIPTIONS_BOUNDARY.identity_model, 'none')
-        self.assertEqual(SUBSCRIPTIONS_BOUNDARY.scope, 'founding_service_only')
+        self.assertEqual(SUBSCRIPTIONS_BOUNDARY.identity_model, 'session')
+        self.assertEqual(SUBSCRIPTIONS_BOUNDARY.scope, 'institution_bound')
 
     def test_accounting_boundary(self):
         from institution_context import ACCOUNTING_BOUNDARY
-        self.assertEqual(ACCOUNTING_BOUNDARY.identity_model, 'none')
-        self.assertEqual(ACCOUNTING_BOUNDARY.scope, 'founding_service_only')
+        self.assertEqual(ACCOUNTING_BOUNDARY.identity_model, 'session')
+        self.assertEqual(ACCOUNTING_BOUNDARY.scope, 'institution_bound')
 
     def test_cli_boundary(self):
         from institution_context import CLI_BOUNDARY

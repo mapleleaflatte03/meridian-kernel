@@ -36,6 +36,11 @@ CAPSULE_FILES = (
     'commitments.json',
     'cases.json',
     'warrants.json',
+    'subscriptions.json',
+    'subscriptions.json.bak',
+    '.subscriptions.lock',
+    '.accounting.lock',
+    'owner_ledger.json',
     'wallets.json',
     'treasury_accounts.json',
     'maintainers.json',
@@ -218,6 +223,30 @@ _EMPTY_WARRANTS = {
     'court_review_states': ['auto_issued', 'pending_review', 'approved', 'stayed', 'revoked'],
     'execution_states': ['ready', 'executed'],
 }
+_EMPTY_SUBSCRIPTIONS = {
+    'subscribers': {},
+    'delivery_log': [],
+    'updatedAt': '',
+    '_meta': {
+        'service_scope': 'institution_owned_service',
+        'bound_org_id': '',
+        'internal_test_ids': [],
+    },
+}
+_EMPTY_OWNER_LEDGER = {
+    'version': 1,
+    'owner': '',
+    'created_at': '',
+    'capital_contributed_usd': 0.0,
+    'expenses_paid_usd': 0.0,
+    'reimbursements_received_usd': 0.0,
+    'draws_taken_usd': 0.0,
+    'entries': [],
+    '_meta': {
+        'service_scope': 'institution_owned_service',
+        'bound_org_id': '',
+    },
+}
 _EMPTY_WALLETS = {
     'wallets': {},
     'verification_levels': {
@@ -325,6 +354,11 @@ _CAPSULE_DEFAULTS = {
     'commitments.json': _EMPTY_COMMITMENTS,
     'cases.json': _EMPTY_CASES,
     'warrants.json': _EMPTY_WARRANTS,
+    'subscriptions.json': _EMPTY_SUBSCRIPTIONS,
+    'subscriptions.json.bak': _EMPTY_SUBSCRIPTIONS,
+    '.subscriptions.lock': '',
+    '.accounting.lock': '',
+    'owner_ledger.json': _EMPTY_OWNER_LEDGER,
     'wallets.json': _EMPTY_WALLETS,
     'treasury_accounts.json': _EMPTY_TREASURY_ACCOUNTS,
     'maintainers.json': _EMPTY_MAINTAINERS,
@@ -364,6 +398,71 @@ def init_capsule(org_id, ledger_template=None):
                 json.dump(data, f, indent=2)
 
     return target
+
+
+def ledger_path(org_id=None):
+    return capsule_path(org_id, 'ledger.json')
+
+
+def revenue_path(org_id=None):
+    return capsule_path(org_id, 'revenue.json')
+
+
+def transactions_path(org_id=None):
+    return capsule_path(org_id, 'transactions.jsonl')
+
+
+def subscriptions_path(org_id=None):
+    return capsule_path(org_id, 'subscriptions.json')
+
+
+def subscriptions_backup_path(org_id=None):
+    return capsule_path(org_id, 'subscriptions.json.bak')
+
+
+def subscriptions_lock_path(org_id=None):
+    return capsule_path(org_id, '.subscriptions.lock')
+
+
+def owner_ledger_path(org_id=None):
+    return capsule_path(org_id, 'owner_ledger.json')
+
+
+def ensure_subscription_aliases(org_id=None):
+    target = ensure_capsule(org_id)
+    payload = dict(_EMPTY_SUBSCRIPTIONS)
+    payload['_meta'] = dict(payload.get('_meta', {}))
+    payload['_meta']['bound_org_id'] = org_id or ''
+    primary = os.path.join(target, 'subscriptions.json')
+    backup = os.path.join(target, 'subscriptions.json.bak')
+    lock = os.path.join(target, '.subscriptions.lock')
+    if not os.path.exists(primary):
+        with open(primary, 'w') as f:
+            json.dump(payload, f, indent=2)
+    if not os.path.exists(backup):
+        with open(backup, 'w') as f:
+            json.dump(payload, f, indent=2)
+    if not os.path.exists(lock):
+        open(lock, 'a').close()
+    return {
+        'subscriptions': primary,
+        'subscriptions_backup': backup,
+        'subscriptions_lock': lock,
+    }
+
+
+def ensure_accounting_aliases(org_id=None):
+    target = ensure_capsule(org_id)
+    payload = dict(_EMPTY_OWNER_LEDGER)
+    payload['_meta'] = dict(payload.get('_meta', {}))
+    payload['_meta']['bound_org_id'] = org_id or ''
+    owner = os.path.join(target, 'owner_ledger.json')
+    if not os.path.exists(owner):
+        with open(owner, 'w') as f:
+            json.dump(payload, f, indent=2)
+    return {
+        'owner_ledger': owner,
+    }
 
 
 def list_capsules():

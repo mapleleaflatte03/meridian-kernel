@@ -19,6 +19,9 @@ Endpoints:
   GET  /api/treasury/proposals    -> Payout proposals
   GET  /api/treasury/settlement-adapters -> Settlement adapter registry
   GET  /api/treasury/funding-sources -> Funding source records
+  GET  /api/subscriptions         -> Institution-owned subscription service state
+  GET  /api/subscriptions/delivery-targets -> Institution delivery-target calculation
+  GET  /api/accounting            -> Institution-owned accounting owner-ledger state
   GET  /api/payouts               -> Payout proposals and summary
   GET  /api/admission             -> Host admission state
   GET  /api/federation            -> Federation gateway state
@@ -55,6 +58,15 @@ Endpoints:
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
   POST /api/treasury/settlement-adapters/preflight -> Validate settlement-adapter execution requirements
+  POST /api/subscriptions/add     -> Create a subscription record
+  POST /api/subscriptions/convert -> Convert a trial into a paid subscription
+  POST /api/subscriptions/verify-payment -> Bind payment evidence to a subscription
+  POST /api/subscriptions/remove  -> Cancel active subscriptions for a Telegram user
+  POST /api/subscriptions/set-email -> Update subscription email metadata
+  POST /api/subscriptions/record-delivery -> Append a delivery record
+  POST /api/accounting/expense    -> Record an owner-paid expense in the owner ledger
+  POST /api/accounting/reimburse  -> Reimburse an owner-paid expense from treasury
+  POST /api/accounting/draw       -> Take an owner draw from treasury above reserve floor
   POST /api/payouts/propose       -> Create a payout proposal draft
   POST /api/payouts/submit        -> Submit a payout proposal for review
   POST /api/payouts/review        -> Move a payout proposal into review
@@ -163,6 +175,23 @@ from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       review_payout_proposal, approve_payout_proposal,
                       open_payout_dispute_window, reject_payout_proposal,
                       cancel_payout_proposal, execute_payout_proposal)
+from subscription_service import (
+    add_subscription,
+    active_delivery_targets,
+    cancel_active,
+    convert_trial_subscription,
+    load_subscriptions,
+    record_delivery,
+    set_email,
+    subscription_summary,
+    verify_subscription_payment,
+)
+from accounting_service import (
+    accounting_snapshot,
+    record_owner_expense,
+    reimburse_owner,
+    take_owner_draw,
+)
 from runtime_adapter import load_runtimes, get_runtime, check_all_contracts
 from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
@@ -290,6 +319,15 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/treasury/settlement-adapters/preflight': 'member',
+    '/api/subscriptions/add': 'admin',
+    '/api/subscriptions/convert': 'admin',
+    '/api/subscriptions/verify-payment': 'admin',
+    '/api/subscriptions/remove': 'admin',
+    '/api/subscriptions/set-email': 'admin',
+    '/api/subscriptions/record-delivery': 'admin',
+    '/api/accounting/expense': 'owner',
+    '/api/accounting/reimburse': 'owner',
+    '/api/accounting/draw': 'owner',
     '/api/payouts/propose': 'member',
     '/api/payouts/submit': 'member',
     '/api/payouts/review': 'admin',
@@ -1182,6 +1220,33 @@ def _case_snapshot(org_id):
     }
 
 
+def _subscription_snapshot(org_id):
+    payload = load_subscriptions(org_id)
+    return {
+        'bound_org_id': org_id,
+        'management_mode': 'workspace_api_file_backed',
+        'mutation_enabled': True,
+        'mutation_disabled_reason': '',
+        'storage_model': 'capsule_canonical',
+        'boundary_name': 'subscriptions',
+        'identity_model': 'session',
+        'mutation_paths': [
+            '/api/subscriptions/add',
+            '/api/subscriptions/convert',
+            '/api/subscriptions/verify-payment',
+            '/api/subscriptions/remove',
+            '/api/subscriptions/set-email',
+            '/api/subscriptions/record-delivery',
+        ],
+        'summary': subscription_summary(org_id),
+        'meta': payload.get('_meta', {}),
+        'state': payload,
+        'subscribers': payload.get('subscribers', {}),
+        'delivery_log_tail': payload.get('delivery_log', [])[-20:],
+        'active_delivery_targets': active_delivery_targets(org_id, external_only=True),
+    }
+
+
 def _maybe_open_case_for_commitment_breach(commitment_record, actor_id, *, org_id, note=''):
     return ensure_case_for_commitment_breach(
         commitment_record,
@@ -1548,6 +1613,10 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
         'warrants': _warrant_summary(org_id),
         'commitments': _commitment_snapshot(org_id),
         'cases': _case_snapshot(org_id),
+        'service_state': {
+            'subscriptions': _subscription_snapshot(org_id),
+            'accounting': accounting_snapshot(org_id),
+        },
         'remediations': remediations,
         'timestamp': _now(),
     }
@@ -2033,6 +2102,16 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'delegations': list(queue['delegations'].values()),
                 'sprint_lead': {'agent_id': lead_id, 'auth': lead_auth},
             })
+        elif path == '/api/subscriptions':
+            return self._json(_subscription_snapshot(org_id))
+        elif path == '/api/subscriptions/delivery-targets':
+            return self._json({
+                'bound_org_id': org_id,
+                'targets': active_delivery_targets(org_id),
+                'external_targets': active_delivery_targets(org_id, external_only=True),
+            })
+        elif path == '/api/accounting':
+            return self._json(accounting_snapshot(org_id))
         elif path == '/api/treasury':
             return self._json(treasury_snapshot(org_id))
         elif path == '/api/treasury/wallets':
@@ -2372,6 +2451,226 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     session_id=_sid,
                 )
                 return self._json(result)
+
+            elif path == '/api/subscriptions/add':
+                result = add_subscription(
+                    body.get('telegram_id'),
+                    plan=body.get('plan') or 'trial',
+                    duration_days=body.get('duration_days'),
+                    payment_method=body.get('payment_method'),
+                    payment_ref=body.get('payment_ref'),
+                    confirm_payment=bool(body.get('confirm_payment')),
+                    trial=bool(body.get('trial')),
+                    email=body.get('email'),
+                    org_id=org_id,
+                    actor=by,
+                )
+                subscription = result['subscription']
+                log_event(
+                    org_id,
+                    by,
+                    'subscription_created',
+                    outcome='success',
+                    resource=subscription['id'],
+                    details={
+                        'telegram_id': result['telegram_id'],
+                        'plan': subscription['plan'],
+                        'payment_verified': bool(subscription.get('payment_verified')),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Subscription created: {subscription['id']}",
+                    'result': result,
+                    'service_state': _subscription_snapshot(org_id),
+                })
+
+            elif path == '/api/subscriptions/convert':
+                result = convert_trial_subscription(
+                    body.get('telegram_id'),
+                    body.get('plan'),
+                    payment_method=body.get('payment_method'),
+                    payment_ref=body.get('payment_ref'),
+                    confirm_payment=bool(body.get('confirm_payment')),
+                    email=body.get('email'),
+                    org_id=org_id,
+                    actor=by,
+                )
+                subscription = result['subscription']
+                log_event(
+                    org_id,
+                    by,
+                    'subscription_converted',
+                    outcome='success',
+                    resource=subscription['id'],
+                    details={
+                        'telegram_id': result['telegram_id'],
+                        'plan': subscription['plan'],
+                        'payment_verified': bool(subscription.get('payment_verified')),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Trial converted: {subscription['id']}",
+                    'result': result,
+                    'service_state': _subscription_snapshot(org_id),
+                })
+
+            elif path == '/api/subscriptions/verify-payment':
+                result = verify_subscription_payment(
+                    body.get('telegram_id'),
+                    subscription_id=(body.get('subscription_id') or '').strip() or None,
+                    payment_ref=body.get('payment_ref'),
+                    org_id=org_id,
+                    actor=by,
+                )
+                subscription = result['subscription']
+                log_event(
+                    org_id,
+                    by,
+                    'subscription_payment_verified',
+                    outcome='success',
+                    resource=subscription['id'],
+                    details={
+                        'telegram_id': result['telegram_id'],
+                        'payment_ref': subscription.get('payment_ref', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Subscription payment verified: {subscription['id']}",
+                    'result': result,
+                    'service_state': _subscription_snapshot(org_id),
+                })
+
+            elif path == '/api/subscriptions/remove':
+                result = cancel_active(
+                    body.get('telegram_id'),
+                    org_id=org_id,
+                    actor=by,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'subscription_cancelled',
+                    outcome='success',
+                    resource=result['telegram_id'],
+                    details={'cancelled_count': result['cancelled_count']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Subscriptions cancelled for telegram:{result['telegram_id']}",
+                    'result': result,
+                    'service_state': _subscription_snapshot(org_id),
+                })
+
+            elif path == '/api/subscriptions/set-email':
+                subscription = set_email(
+                    (body.get('telegram_id') or '').strip(),
+                    (body.get('email') or '').strip(),
+                    org_id=org_id,
+                    actor=by,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'subscription_email_updated',
+                    outcome='success',
+                    resource=subscription.get('id', ''),
+                    details={'telegram_id': str(body.get('telegram_id') or '').strip()},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Subscription email updated: {subscription.get('id', '')}",
+                    'subscription': subscription,
+                    'service_state': _subscription_snapshot(org_id),
+                })
+
+            elif path == '/api/subscriptions/record-delivery':
+                entry = record_delivery(
+                    (body.get('telegram_id') or '').strip(),
+                    (body.get('product') or '').strip(),
+                    brief_date=(body.get('brief_date') or '').strip(),
+                    org_id=org_id,
+                    actor=by,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'subscription_delivery_recorded',
+                    outcome='success',
+                    resource=entry['telegram_id'],
+                    details={'product': entry['product']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f"Delivery recorded: {entry['telegram_id']}",
+                    'entry': entry,
+                    'service_state': _subscription_snapshot(org_id),
+                })
+
+            elif path == '/api/accounting/expense':
+                result = record_owner_expense(
+                    body.get('amount_usd'),
+                    note=body.get('note', ''),
+                    by=by,
+                    org_id=org_id,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'owner_expense_recorded',
+                    outcome='success',
+                    details={'amount_usd': result['amount_usd']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': 'Owner expense recorded',
+                    'result': result,
+                    'service_state': accounting_snapshot(org_id),
+                })
+
+            elif path == '/api/accounting/reimburse':
+                result = reimburse_owner(
+                    body.get('amount_usd'),
+                    note=body.get('note', ''),
+                    by=by,
+                    org_id=org_id,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'owner_reimbursement_recorded',
+                    outcome='success',
+                    details={'amount_usd': result['amount_usd']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': 'Owner reimbursement recorded',
+                    'result': result,
+                    'service_state': accounting_snapshot(org_id),
+                })
+
+            elif path == '/api/accounting/draw':
+                result = take_owner_draw(
+                    body.get('amount_usd'),
+                    note=body.get('note', ''),
+                    by=by,
+                    org_id=org_id,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'owner_draw_recorded',
+                    outcome='success',
+                    details={'amount_usd': result['amount_usd']},
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': 'Owner draw recorded',
+                    'result': result,
+                    'service_state': accounting_snapshot(org_id),
+                })
 
             elif path == '/api/payouts/propose':
                 proposal = create_payout_proposal(

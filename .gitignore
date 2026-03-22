@@ -18,6 +18,13 @@ economy/ledger.json
 economy/revenue.json
 economy/transactions.jsonl
 economy/auto_score.log
+economy/subscriptions.json
+economy/subscriptions.json.bak
+economy/.subscriptions.lock
+economy/.accounting.lock
+economy/owner_ledger.json
+economy/settlement_adapters.json
+capsules/
 
 # Runtime
 .openclaw/

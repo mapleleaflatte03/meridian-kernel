@@ -241,13 +241,13 @@ FEDERATION_GATEWAY_BOUNDARY = ServiceBoundary(
 )
 
 SUBSCRIPTIONS_BOUNDARY = ServiceBoundary(
-    'subscriptions', 'none', 'founding_service_only',
-    'Subscription entitlement state — founding-service-only internal boundary',
+    'subscriptions', 'session', 'institution_bound',
+    'Subscription entitlement state — institution-bound session surface',
 )
 
 ACCOUNTING_BOUNDARY = ServiceBoundary(
-    'accounting', 'none', 'founding_service_only',
-    'Accounting writer — founding-service-only internal ledger boundary',
+    'accounting', 'session', 'institution_bound',
+    'Accounting ledger — institution-bound session surface',
 )
 
 SERVICE_BOUNDARIES = {

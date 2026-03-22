@@ -50,6 +50,9 @@ deliberately narrow:
 - one first-class warrant primitive now exists as a kernel reference:
   file-backed warrant records, warrant review state, and sender-side
   federation execution gating for `execution_request`
+- two institution-owned service surfaces now exist as kernel references:
+  capsule-backed `subscriptions` and `accounting`, both surfaced through the
+  reference workspace as institution-bound session services
 
 What is not yet broadly proven in public code:
 - live end-to-end OpenClaw-compatible deployment wiring
@@ -141,6 +144,22 @@ deliberately narrow:
 
 This is the first public payout object in Meridian. It is not yet the full
 settlement-adapter, multi-institution payout network.
+
+## Institution-Owned Service Surfaces
+
+Meridian now also has two public institution-owned service surfaces beyond the
+core five primitives:
+
+- `subscriptions` is capsule-backed and exposed through the reference
+  workspace as an institution-bound session surface for entitlement state,
+  payment verification, delivery targeting, and delivery logging
+- `accounting` is capsule-backed and exposed through the reference workspace as
+  an institution-bound session surface for owner-ledger state, expense
+  recording, reimbursement, and owner draws
+
+These are real kernel-side services, not yet a full cross-institution service
+network. The reference workspace proves the single-process institution-bound
+path; it does not yet claim general multi-org request routing.
 
 ## System Diagram
 

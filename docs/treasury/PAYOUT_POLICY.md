@@ -107,6 +107,8 @@ The payout surface now carries a machine-readable settlement adapter registry.
 Each adapter declares:
 
 - whether payout execution is enabled
+- the adapter's execution mode (`host_ledger`, `external_chain`, `manual_offchain`, or `external_reference`)
+- the settlement path the execution follows
 - which currencies are supported
 - whether `tx_hash` is required
 - whether structured `settlement_proof` is required
@@ -114,6 +116,10 @@ Each adapter declares:
 - the expected verification state
 - the expected finality state
 - the reversal or dispute capability
+- the dispute model
+- the finality model
+- whether the current host can execute the adapter now
+- the execution blockers when it cannot
 
 On the current reference path:
 
@@ -125,7 +131,28 @@ On the current reference path:
 
 `internal_ledger` normalizes proof as an institution transaction journal
 reference and marks execution as `host_ledger_final`. The other adapters remain
-public policy stubs until a stronger settlement verification path is wired.
+registered-only policy stubs. Their contract is still surfaced in preflight and
+execution planning, but their payout execution path stays disabled until a
+stronger settlement verification path is wired.
+
+On the reference host, `internal_ledger` is treated as the implicit local
+settlement path even when host metadata does not explicitly enumerate a
+settlement adapter list. That is a host-local ledger assumption, not a claim
+that external adapters are executable.
+
+Execution and preflight now surface a contract snapshot with:
+
+- `execution_mode`
+- `settlement_path`
+- `requirements`
+- `execution_blockers`
+- `execution_blocker_messages`
+- `finality_model`
+- `dispute_model`
+- `settlement_adapter_contract` on execution records and transaction rows
+
+That makes the payout path honest about whether an adapter is merely known,
+contractually described, or actually executable on this host.
 
 ---
 

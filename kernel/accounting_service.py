@@ -8,10 +8,13 @@ state, while the treasury ledger remains the source of truth for capital
 contributions.
 """
 
+import contextlib
 import datetime
+import fcntl
 import json
 import os
 import sys
+import tempfile
 
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -49,10 +52,23 @@ def _load_json(path, default):
         return json.load(f)
 
 
-def _save_json(path, payload):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
-        json.dump(payload, f, indent=2)
+def _write_json_atomic(path, payload):
+    directory = os.path.dirname(path) or '.'
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=os.path.basename(path) + '.',
+        suffix='.tmp',
+        dir=directory,
+    )
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def _owner_ledger_path(org_id=None):
@@ -67,6 +83,22 @@ def _transactions_path(org_id=None):
     return capsule_path(org_id, 'transactions.jsonl')
 
 
+def _lock_path(org_id=None):
+    return capsule_path(org_id, '.accounting.lock')
+
+
+@contextlib.contextmanager
+def _accounting_lock(org_id=None):
+    path = _lock_path(org_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'a+') as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def _append_transaction(org_id, entry):
     entry = dict(entry)
     entry['ts'] = _now()
@@ -74,6 +106,8 @@ def _append_transaction(org_id, entry):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'a') as f:
         f.write(json.dumps(entry) + '\n')
+        f.flush()
+        os.fsync(f.fileno())
     return entry
 
 
@@ -114,7 +148,7 @@ def _normalize_owner_ledger(payload, org_id=None):
     return normalized
 
 
-def load_owner_ledger_state(org_id=None):
+def _load_owner_ledger_state_unlocked(org_id=None):
     payload = _normalize_owner_ledger(_load_json(_owner_ledger_path(org_id), {}), org_id)
     treasury = _load_json(_ledger_path(org_id), {'treasury': {}}).get('treasury', {})
     treasury_owner_capital = round(float(treasury.get('owner_capital_contributed_usd', 0.0) or 0.0), 4)
@@ -140,11 +174,16 @@ def load_owner_ledger_state(org_id=None):
                     'target_owner_capital_usd': treasury_owner_capital,
                 },
             })
-        _save_json(_owner_ledger_path(org_id), payload)
+        _write_json_atomic(_owner_ledger_path(org_id), payload)
     else:
         payload['_meta'].setdefault('capital_sync_backfilled', False)
         payload['_meta'].setdefault('capital_sync_source', 'owner_ledger')
     return payload
+
+
+def load_owner_ledger_state(org_id=None):
+    with _accounting_lock(org_id):
+        return _load_owner_ledger_state_unlocked(org_id)
 
 
 def accounting_snapshot(org_id=None):
@@ -184,33 +223,34 @@ def contribute_capital(amount_usd, note='', by='owner', org_id=None):
     if amount <= 0:
         raise ValueError('Capital contribution must be greater than 0')
 
-    owner = load_owner_ledger_state(org_id)
-    ledger = _load_json(_ledger_path(org_id), {'treasury': {}})
-    treasury = ledger.setdefault('treasury', {})
+    with _accounting_lock(org_id):
+        owner = _load_owner_ledger_state_unlocked(org_id)
+        ledger = _load_json(_ledger_path(org_id), {'treasury': {}})
+        treasury = ledger.setdefault('treasury', {})
 
-    owner['capital_contributed_usd'] = round(float(owner.get('capital_contributed_usd', 0.0)) + amount, 4)
-    owner['entries'].append({
-        'type': 'capital_contribution',
-        'amount_usd': amount,
-        'note': note,
-        'by': by,
-        'at': _now(),
-    })
-    _save_json(_owner_ledger_path(org_id), owner)
+        owner['capital_contributed_usd'] = round(float(owner.get('capital_contributed_usd', 0.0)) + amount, 4)
+        owner['entries'].append({
+            'type': 'capital_contribution',
+            'amount_usd': amount,
+            'note': note,
+            'by': by,
+            'at': _now(),
+        })
+        _write_json_atomic(_owner_ledger_path(org_id), owner)
 
-    treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) + amount, 4)
-    treasury['owner_capital_contributed_usd'] = round(float(treasury.get('owner_capital_contributed_usd', 0.0)) + amount, 4)
-    ledger['updatedAt'] = _now()
-    _save_json(_ledger_path(org_id), ledger)
+        treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) + amount, 4)
+        treasury['owner_capital_contributed_usd'] = round(float(treasury.get('owner_capital_contributed_usd', 0.0)) + amount, 4)
+        ledger['updatedAt'] = _now()
+        _write_json_atomic(_ledger_path(org_id), ledger)
 
-    _append_transaction(org_id, {
-        'type': 'treasury_deposit',
-        'deposit_type': 'owner_capital',
-        'amount_usd': amount,
-        'cash_after': treasury['cash_usd'],
-        'note': note,
-        'by': by,
-    })
+        _append_transaction(org_id, {
+            'type': 'treasury_deposit',
+            'deposit_type': 'owner_capital',
+            'amount_usd': amount,
+            'cash_after': treasury['cash_usd'],
+            'note': note,
+            'by': by,
+        })
     return {
         'amount_usd': amount,
         'cash_after_usd': treasury['cash_usd'],
@@ -224,22 +264,23 @@ def record_owner_expense(amount_usd, note='', by='owner', org_id=None):
     if amount <= 0:
         raise ValueError('Expense amount must be greater than 0')
 
-    owner = load_owner_ledger_state(org_id)
-    owner['expenses_paid_usd'] = round(float(owner.get('expenses_paid_usd', 0.0)) + amount, 4)
-    owner['entries'].append({
-        'type': 'owner_expense',
-        'amount_usd': amount,
-        'note': note,
-        'by': by,
-        'at': _now(),
-    })
-    _save_json(_owner_ledger_path(org_id), owner)
-    _append_transaction(org_id, {
-        'type': 'owner_expense_recorded',
-        'amount_usd': amount,
-        'note': note,
-        'by': by,
-    })
+    with _accounting_lock(org_id):
+        owner = _load_owner_ledger_state_unlocked(org_id)
+        owner['expenses_paid_usd'] = round(float(owner.get('expenses_paid_usd', 0.0)) + amount, 4)
+        owner['entries'].append({
+            'type': 'owner_expense',
+            'amount_usd': amount,
+            'note': note,
+            'by': by,
+            'at': _now(),
+        })
+        _write_json_atomic(_owner_ledger_path(org_id), owner)
+        _append_transaction(org_id, {
+            'type': 'owner_expense_recorded',
+            'amount_usd': amount,
+            'note': note,
+            'by': by,
+        })
     return {
         'amount_usd': amount,
         'unreimbursed_expenses_usd': round(
@@ -255,42 +296,43 @@ def reimburse_owner(amount_usd, note='', by='owner', org_id=None):
     if amount <= 0:
         raise ValueError('Reimbursement amount must be greater than 0')
 
-    owner = load_owner_ledger_state(org_id)
-    ledger = _load_json(_ledger_path(org_id), {'treasury': {}})
-    treasury = ledger.setdefault('treasury', {})
+    with _accounting_lock(org_id):
+        owner = _load_owner_ledger_state_unlocked(org_id)
+        ledger = _load_json(_ledger_path(org_id), {'treasury': {}})
+        treasury = ledger.setdefault('treasury', {})
 
-    unreimbursed = float(owner.get('expenses_paid_usd', 0.0)) - float(owner.get('reimbursements_received_usd', 0.0))
-    if amount > unreimbursed:
-        raise ValueError(
-            f'Reimbursement ${amount:.2f} exceeds unreimbursed expenses ${unreimbursed:.2f}'
-        )
-    reserve_floor = float(treasury.get('reserve_floor_usd', 50.0))
-    if float(treasury.get('cash_usd', 0.0)) - amount < reserve_floor:
-        raise PermissionError(
-            f"Reimbursement ${amount:.2f} would breach reserve floor ${reserve_floor:.2f}"
-        )
+        unreimbursed = float(owner.get('expenses_paid_usd', 0.0)) - float(owner.get('reimbursements_received_usd', 0.0))
+        if amount > unreimbursed:
+            raise ValueError(
+                f'Reimbursement ${amount:.2f} exceeds unreimbursed expenses ${unreimbursed:.2f}'
+            )
+        reserve_floor = float(treasury.get('reserve_floor_usd', 50.0))
+        if float(treasury.get('cash_usd', 0.0)) - amount < reserve_floor:
+            raise PermissionError(
+                f"Reimbursement ${amount:.2f} would breach reserve floor ${reserve_floor:.2f}"
+            )
 
-    treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) - amount, 4)
-    treasury['owner_draws_usd'] = round(float(treasury.get('owner_draws_usd', 0.0)) + amount, 4)
-    owner['reimbursements_received_usd'] = round(float(owner.get('reimbursements_received_usd', 0.0)) + amount, 4)
-    owner['entries'].append({
-        'type': 'reimbursement',
-        'amount_usd': amount,
-        'note': note,
-        'by': by,
-        'at': _now(),
-    })
-    _save_json(_owner_ledger_path(org_id), owner)
-    ledger['updatedAt'] = _now()
-    _save_json(_ledger_path(org_id), ledger)
-    _append_transaction(org_id, {
-        'type': 'treasury_withdraw',
-        'withdraw_type': 'owner_reimbursement',
-        'amount_usd': amount,
-        'cash_after': treasury['cash_usd'],
-        'note': note,
-        'by': by,
-    })
+        treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) - amount, 4)
+        treasury['owner_draws_usd'] = round(float(treasury.get('owner_draws_usd', 0.0)) + amount, 4)
+        owner['reimbursements_received_usd'] = round(float(owner.get('reimbursements_received_usd', 0.0)) + amount, 4)
+        owner['entries'].append({
+            'type': 'reimbursement',
+            'amount_usd': amount,
+            'note': note,
+            'by': by,
+            'at': _now(),
+        })
+        _write_json_atomic(_owner_ledger_path(org_id), owner)
+        ledger['updatedAt'] = _now()
+        _write_json_atomic(_ledger_path(org_id), ledger)
+        _append_transaction(org_id, {
+            'type': 'treasury_withdraw',
+            'withdraw_type': 'owner_reimbursement',
+            'amount_usd': amount,
+            'cash_after': treasury['cash_usd'],
+            'note': note,
+            'by': by,
+        })
     return {
         'amount_usd': amount,
         'cash_after_usd': treasury['cash_usd'],
@@ -307,38 +349,39 @@ def take_owner_draw(amount_usd, note='', by='owner', org_id=None):
     if amount <= 0:
         raise ValueError('Draw amount must be greater than 0')
 
-    owner = load_owner_ledger_state(org_id)
-    ledger = _load_json(_ledger_path(org_id), {'treasury': {}})
-    treasury = ledger.setdefault('treasury', {})
+    with _accounting_lock(org_id):
+        owner = _load_owner_ledger_state_unlocked(org_id)
+        ledger = _load_json(_ledger_path(org_id), {'treasury': {}})
+        treasury = ledger.setdefault('treasury', {})
 
-    reserve_floor = float(treasury.get('reserve_floor_usd', 50.0))
-    available = max(0.0, float(treasury.get('cash_usd', 0.0)) - reserve_floor)
-    if amount > available:
-        raise ValueError(
-            f'Draw ${amount:.2f} exceeds available above floor ${available:.2f}'
-        )
+        reserve_floor = float(treasury.get('reserve_floor_usd', 50.0))
+        available = max(0.0, float(treasury.get('cash_usd', 0.0)) - reserve_floor)
+        if amount > available:
+            raise ValueError(
+                f'Draw ${amount:.2f} exceeds available above floor ${available:.2f}'
+            )
 
-    treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) - amount, 4)
-    treasury['owner_draws_usd'] = round(float(treasury.get('owner_draws_usd', 0.0)) + amount, 4)
-    owner['draws_taken_usd'] = round(float(owner.get('draws_taken_usd', 0.0)) + amount, 4)
-    owner['entries'].append({
-        'type': 'owner_draw',
-        'amount_usd': amount,
-        'note': note,
-        'by': by,
-        'at': _now(),
-    })
-    _save_json(_owner_ledger_path(org_id), owner)
-    ledger['updatedAt'] = _now()
-    _save_json(_ledger_path(org_id), ledger)
-    _append_transaction(org_id, {
-        'type': 'treasury_withdraw',
-        'withdraw_type': 'owner_draw',
-        'amount_usd': amount,
-        'cash_after': treasury['cash_usd'],
-        'note': note,
-        'by': by,
-    })
+        treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) - amount, 4)
+        treasury['owner_draws_usd'] = round(float(treasury.get('owner_draws_usd', 0.0)) + amount, 4)
+        owner['draws_taken_usd'] = round(float(owner.get('draws_taken_usd', 0.0)) + amount, 4)
+        owner['entries'].append({
+            'type': 'owner_draw',
+            'amount_usd': amount,
+            'note': note,
+            'by': by,
+            'at': _now(),
+        })
+        _write_json_atomic(_owner_ledger_path(org_id), owner)
+        ledger['updatedAt'] = _now()
+        _write_json_atomic(_ledger_path(org_id), ledger)
+        _append_transaction(org_id, {
+            'type': 'treasury_withdraw',
+            'withdraw_type': 'owner_draw',
+            'amount_usd': amount,
+            'cash_after': treasury['cash_usd'],
+            'note': note,
+            'by': by,
+        })
     return {
         'amount_usd': amount,
         'cash_after_usd': treasury['cash_usd'],

@@ -187,6 +187,8 @@ _PROTOCOL_DEFAULTS = {
                 'label': 'Internal Ledger',
                 'status': 'active',
                 'payout_execution_enabled': True,
+                'execution_mode': 'host_ledger',
+                'settlement_path': 'journal_append',
                 'supported_currencies': ['USDC', 'USD'],
                 'requires_tx_hash': False,
                 'requires_settlement_proof': False,
@@ -194,12 +196,16 @@ _PROTOCOL_DEFAULTS = {
                 'verification_state': 'host_ledger_final',
                 'finality_state': 'host_local_final',
                 'reversal_or_dispute_capability': 'court_case',
+                'dispute_model': 'court_case',
+                'finality_model': 'host_local_final',
                 'notes': 'Reference payout adapter. Execution settles by appending an auditable institution-ledger transaction.',
             },
             'base_usdc_x402': {
                 'label': 'Base USDC via x402',
                 'status': 'registered',
                 'payout_execution_enabled': False,
+                'execution_mode': 'external_chain',
+                'settlement_path': 'x402_onchain',
                 'supported_currencies': ['USDC'],
                 'requires_tx_hash': True,
                 'requires_settlement_proof': True,
@@ -207,12 +213,16 @@ _PROTOCOL_DEFAULTS = {
                 'verification_state': 'external_verification_required',
                 'finality_state': 'external_chain_finality',
                 'reversal_or_dispute_capability': 'court_case_plus_chain_review',
+                'dispute_model': 'court_case_plus_chain_review',
+                'finality_model': 'external_chain_finality',
                 'notes': 'Registered contract target only. Reference payout execution stays disabled until adapter-specific verification exists.',
             },
             'manual_bank_wire': {
                 'label': 'Manual Bank Wire',
                 'status': 'registered',
                 'payout_execution_enabled': False,
+                'execution_mode': 'manual_offchain',
+                'settlement_path': 'manual_bank_review',
                 'supported_currencies': ['USD'],
                 'requires_tx_hash': False,
                 'requires_settlement_proof': True,
@@ -220,6 +230,8 @@ _PROTOCOL_DEFAULTS = {
                 'verification_state': 'manual_review_required',
                 'finality_state': 'manual_settlement_pending',
                 'reversal_or_dispute_capability': 'manual_reversal_and_court_case',
+                'dispute_model': 'manual_reversal_and_court_case',
+                'finality_model': 'manual_settlement_pending',
                 'notes': 'Registered but intentionally not executable on the reference path.',
             },
         },
@@ -594,6 +606,10 @@ def _settlement_store(org_id=None):
         merged.setdefault('verification_state', 'unknown')
         merged.setdefault('finality_state', 'unknown')
         merged.setdefault('reversal_or_dispute_capability', 'court_case')
+        merged.setdefault('execution_mode', 'external_reference')
+        merged.setdefault('settlement_path', 'external_reference')
+        merged.setdefault('dispute_model', merged.get('reversal_or_dispute_capability', 'court_case'))
+        merged.setdefault('finality_model', merged.get('finality_state', 'unknown'))
         adapters[adapter_id] = merged
     for adapter_id, raw in raw_adapters.items():
         if adapter_id in adapters:
@@ -610,6 +626,10 @@ def _settlement_store(org_id=None):
         merged.setdefault('verification_state', 'unknown')
         merged.setdefault('finality_state', 'unknown')
         merged.setdefault('reversal_or_dispute_capability', 'court_case')
+        merged.setdefault('execution_mode', 'external_reference')
+        merged.setdefault('settlement_path', 'external_reference')
+        merged.setdefault('dispute_model', merged.get('reversal_or_dispute_capability', 'court_case'))
+        merged.setdefault('finality_model', merged.get('finality_state', 'unknown'))
         adapters[adapter_id] = merged
     store['adapters'] = adapters
     return store
@@ -647,6 +667,53 @@ def settlement_adapter_summary(org_id=None, *, host_supported_adapters=None):
             if row.get('adapter_id', '') in host_supported
         ],
     }
+
+
+def _settlement_adapter_contract(adapter, *, host_supported_adapters=None):
+    adapter = dict(adapter or {})
+    adapter_id = (adapter.get('adapter_id') or '').strip()
+    host_supported = [item for item in (host_supported_adapters or []) if item]
+    host_supported_set = set(host_supported)
+    host_supported_known = host_supported_adapters is not None
+    host_supported_effective = adapter_id in host_supported_set
+    # The reference host always has a local ledger path even when the host
+    # identity does not explicitly enumerate settlement adapters.
+    if host_supported_known and not host_supported_effective and adapter_id == 'internal_ledger':
+        host_supported_effective = True
+    blockers = []
+    if not adapter.get('payout_execution_enabled'):
+        blockers.append('payout_execution_disabled')
+    if host_supported_known and adapter_id and not host_supported_effective:
+        blockers.append('host_not_supported')
+    contract = {
+        'adapter_id': adapter_id,
+        'label': adapter.get('label', adapter_id),
+        'status': adapter.get('status', 'registered'),
+        'payout_execution_enabled': bool(adapter.get('payout_execution_enabled')),
+        'execution_mode': adapter.get('execution_mode', 'external_reference'),
+        'settlement_path': adapter.get('settlement_path', 'external_reference'),
+        'supported_currencies': list(adapter.get('supported_currencies', [])),
+        'requires_tx_hash': bool(adapter.get('requires_tx_hash')),
+        'requires_settlement_proof': bool(adapter.get('requires_settlement_proof')),
+        'proof_type': adapter.get('proof_type', 'external_reference'),
+        'verification_state': adapter.get('verification_state', 'unknown'),
+        'finality_state': adapter.get('finality_state', 'unknown'),
+        'finality_model': adapter.get('finality_model', adapter.get('finality_state', 'unknown')),
+        'reversal_or_dispute_capability': adapter.get(
+            'reversal_or_dispute_capability',
+            'court_case',
+        ),
+        'dispute_model': adapter.get(
+            'dispute_model',
+            adapter.get('reversal_or_dispute_capability', 'court_case'),
+        ),
+        'host_supported': None if not host_supported_known else host_supported_effective,
+        'host_supported_adapters': host_supported,
+        'execution_readiness': 'ready' if not blockers else 'blocked',
+        'execution_blockers': list(blockers),
+        'execution_ready': not blockers,
+    }
+    return contract
 
 
 def _append_transaction(org_id, entry):
@@ -756,6 +823,13 @@ def _normalize_settlement_proof(adapter, *, tx_hash='', settlement_proof=None):
             'reversal_or_dispute_capability',
             'court_case',
         ),
+        'execution_mode': adapter.get('execution_mode', 'external_reference'),
+        'settlement_path': adapter.get('settlement_path', 'external_reference'),
+        'dispute_model': adapter.get(
+            'dispute_model',
+            adapter.get('reversal_or_dispute_capability', 'court_case'),
+        ),
+        'finality_model': adapter.get('finality_model', adapter.get('finality_state', 'unknown')),
     }
     tx_hash = (tx_hash or '').strip()
     if tx_hash:
@@ -790,20 +864,23 @@ def _validate_payout_execution_adapter(adapter_id, *, org_id=None, currency='USD
                                        tx_hash='', settlement_proof=None,
                                        host_supported_adapters=None):
     adapter = _require_known_settlement_adapter(adapter_id, org_id=org_id)
-    if not adapter.get('payout_execution_enabled'):
+    contract = _settlement_adapter_contract(
+        adapter,
+        host_supported_adapters=host_supported_adapters,
+    )
+    supported_currencies = {str(item).upper() for item in adapter.get('supported_currencies', [])}
+    currency = str(currency or '').upper()
+    if supported_currencies and currency not in supported_currencies:
+        raise PermissionError(
+            f"Settlement adapter '{adapter_id}' does not support currency {currency!r}"
+        )
+    if contract['payout_execution_enabled'] is False:
         raise PermissionError(
             f"Settlement adapter '{adapter_id}' is registered but not enabled for payout execution"
         )
-    if host_supported_adapters:
-        allowed = {item for item in host_supported_adapters if item}
-        if adapter_id not in allowed:
-            raise PermissionError(
-                f"Settlement adapter '{adapter_id}' is not supported on this host"
-            )
-    supported_currencies = {str(item).upper() for item in adapter.get('supported_currencies', [])}
-    if supported_currencies and str(currency or '').upper() not in supported_currencies:
+    if contract['host_supported'] is False:
         raise PermissionError(
-            f"Settlement adapter '{adapter_id}' does not support currency {currency!r}"
+            f"Settlement adapter '{adapter_id}' is not supported on this host"
         )
     if adapter.get('requires_tx_hash') and not (tx_hash or '').strip():
         raise ValueError(f"Settlement adapter '{adapter_id}' requires tx_hash")
@@ -814,7 +891,7 @@ def _validate_payout_execution_adapter(adapter_id, *, org_id=None, currency='USD
     )
     if adapter.get('requires_settlement_proof') and not normalized.get('proof'):
         raise ValueError(f"Settlement adapter '{adapter_id}' requires settlement_proof")
-    return adapter, normalized
+    return adapter, normalized, contract
 
 
 def preflight_settlement_adapter(adapter_id='', *, org_id=None, currency='USDC',
@@ -835,6 +912,8 @@ def preflight_settlement_adapter(adapter_id='', *, org_id=None, currency='USDC',
         'can_execute_now': False,
         'error_type': '',
         'error': '',
+        'execution_blockers': [],
+        'execution_blocker_messages': [],
     }
     adapter = get_settlement_adapter(requested_adapter_id, org_id)
     if not adapter:
@@ -842,19 +921,16 @@ def preflight_settlement_adapter(adapter_id='', *, org_id=None, currency='USDC',
         result['error'] = f'Unknown settlement_adapter {requested_adapter_id!r}'
         return result
 
-    normalized = _normalize_settlement_proof(
+    contract = _settlement_adapter_contract(
         adapter,
-        tx_hash=tx_hash,
-        settlement_proof=settlement_proof,
+        host_supported_adapters=host_supported_adapters,
     )
+    normalized = _normalize_settlement_proof(adapter, tx_hash=tx_hash, settlement_proof=settlement_proof)
     result.update({
         'known': True,
         'adapter': adapter,
-        'execution_enabled': bool(adapter.get('payout_execution_enabled')),
-        'host_supported': (
-            requested_adapter_id in {item for item in host_supported_adapters if item}
-            if host_supported_adapters is not None else None
-        ),
+        'execution_enabled': contract['payout_execution_enabled'],
+        'host_supported': contract['host_supported'],
         'requirements': {
             'supported_currencies': list(adapter.get('supported_currencies', [])),
             'requires_tx_hash': bool(adapter.get('requires_tx_hash')),
@@ -866,11 +942,21 @@ def preflight_settlement_adapter(adapter_id='', *, org_id=None, currency='USDC',
                 'reversal_or_dispute_capability',
                 'court_case',
             ),
+            'execution_mode': adapter.get('execution_mode', 'external_reference'),
+            'settlement_path': adapter.get('settlement_path', 'external_reference'),
+            'finality_model': adapter.get('finality_model', adapter.get('finality_state', 'unknown')),
+            'dispute_model': adapter.get(
+                'dispute_model',
+                adapter.get('reversal_or_dispute_capability', 'court_case'),
+            ),
         },
+        'contract': contract,
         'normalized_proof': normalized,
+        'execution_blockers': list(contract['execution_blockers']),
+        'execution_ready': contract['execution_ready'],
     })
     try:
-        _validated_adapter, normalized = _validate_payout_execution_adapter(
+        _validated_adapter, normalized, contract = _validate_payout_execution_adapter(
             requested_adapter_id,
             org_id=org_id,
             currency=result['currency'],
@@ -881,12 +967,19 @@ def preflight_settlement_adapter(adapter_id='', *, org_id=None, currency='USDC',
         result['preflight_ok'] = True
         result['can_execute_now'] = True
         result['normalized_proof'] = normalized
+        result['contract'] = contract
+        result['execution_blockers'] = []
+        result['execution_ready'] = True
     except PermissionError as exc:
         result['error_type'] = 'permission_error'
         result['error'] = str(exc)
+        result['execution_blockers'] = list(contract['execution_blockers'])
+        result['execution_blocker_messages'] = [str(exc)]
     except ValueError as exc:
         result['error_type'] = 'validation_error'
         result['error'] = str(exc)
+        result['execution_blockers'] = list(contract['execution_blockers'])
+        result['execution_blocker_messages'] = [str(exc)]
     return result
 
 
@@ -1169,7 +1262,7 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
         )
 
     settlement_adapter = (settlement_adapter or record.get('settlement_adapter') or 'internal_ledger').strip()
-    adapter, normalized_proof = _validate_payout_execution_adapter(
+    adapter, normalized_proof, contract = _validate_payout_execution_adapter(
         settlement_adapter,
         org_id=org_id,
         currency=record.get('currency', 'USDC'),
@@ -1211,6 +1304,7 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
         'by': actor_id,
         'note': note or '',
         'settlement_proof': normalized_proof.get('proof', {}),
+        'settlement_adapter_contract': contract,
     })
     timestamp = _now()
     record['status'] = 'executed'
@@ -1219,10 +1313,12 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
     record['executed_by'] = actor_id
     record['warrant_id'] = (warrant_id or '').strip()
     record['settlement_adapter'] = settlement_adapter
+    record['settlement_adapter_contract'] = contract
     record['tx_hash'] = normalized_proof.get('tx_hash', '')
     record['execution_refs'] = {
         'tx_ref': tx_row['tx_ref'],
         'settlement_adapter': settlement_adapter,
+        'settlement_adapter_contract': contract,
         'tx_hash': normalized_proof.get('tx_hash', ''),
         'proof_type': adapter.get('proof_type', ''),
         'verification_state': normalized_proof.get('verification_state', ''),

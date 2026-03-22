@@ -259,6 +259,9 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(proposal['execution_refs']['proof_type'], 'ledger_transaction')
         self.assertEqual(proposal['execution_refs']['verification_state'], 'host_ledger_final')
         self.assertEqual(proposal['execution_refs']['finality_state'], 'host_local_final')
+        self.assertEqual(proposal['execution_refs']['settlement_adapter_contract']['execution_mode'], 'host_ledger')
+        self.assertEqual(proposal['execution_refs']['settlement_adapter_contract']['dispute_model'], 'court_case')
+        self.assertEqual(proposal['execution_refs']['settlement_adapter_contract']['finality_model'], 'host_local_final')
         self.assertEqual(proposal['execution_refs']['proof']['mode'], 'institution_transactions_journal')
 
         summary = treasury.payout_proposal_summary(self.org_id)
@@ -275,6 +278,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(tx_lines[-1]['proposal_id'], proposal['proposal_id'])
         self.assertEqual(tx_lines[-1]['warrant_id'], 'war_exec_123')
         self.assertEqual(tx_lines[-1]['verification_state'], 'host_ledger_final')
+        self.assertEqual(tx_lines[-1]['settlement_adapter_contract']['execution_mode'], 'host_ledger')
 
     def test_create_payout_proposal_blocks_ineligible_wallet(self):
         (self.capsule_dir / 'wallets.json').write_text(json.dumps({
@@ -574,7 +578,19 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertTrue(result['can_execute_now'])
         self.assertTrue(result['execution_enabled'])
         self.assertTrue(result['host_supported'])
+        self.assertTrue(result['execution_ready'])
+        self.assertEqual(result['contract']['execution_mode'], 'host_ledger')
+        self.assertEqual(result['contract']['settlement_path'], 'journal_append')
+        self.assertEqual(result['contract']['dispute_model'], 'court_case')
+        self.assertEqual(result['contract']['finality_model'], 'host_local_final')
+        self.assertFalse(result['execution_blockers'])
+        self.assertEqual(result['requirements']['execution_mode'], 'host_ledger')
+        self.assertEqual(result['requirements']['settlement_path'], 'journal_append')
+        self.assertEqual(result['requirements']['dispute_model'], 'court_case')
+        self.assertEqual(result['requirements']['finality_model'], 'host_local_final')
         self.assertEqual(result['normalized_proof']['proof']['mode'], 'institution_transactions_journal')
+        self.assertEqual(result['normalized_proof']['execution_mode'], 'host_ledger')
+        self.assertEqual(result['normalized_proof']['settlement_path'], 'journal_append')
 
     def test_preflight_settlement_adapter_reports_disabled_adapter(self):
         result = treasury.preflight_settlement_adapter(
@@ -590,6 +606,40 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['can_execute_now'])
         self.assertEqual(result['error_type'], 'permission_error')
         self.assertIn('not enabled', result['error'])
+        self.assertFalse(result['execution_ready'])
+        self.assertEqual(result['contract']['execution_mode'], 'external_chain')
+        self.assertEqual(result['contract']['settlement_path'], 'x402_onchain')
+        self.assertEqual(result['contract']['dispute_model'], 'court_case_plus_chain_review')
+        self.assertEqual(result['contract']['finality_model'], 'external_chain_finality')
+        self.assertIn('payout_execution_disabled', result['execution_blockers'])
+        self.assertEqual(result['requirements']['execution_mode'], 'external_chain')
+        self.assertEqual(result['requirements']['settlement_path'], 'x402_onchain')
+        self.assertEqual(result['requirements']['dispute_model'], 'court_case_plus_chain_review')
+        self.assertEqual(result['requirements']['finality_model'], 'external_chain_finality')
+
+    def test_preflight_settlement_adapter_surfaces_manual_wire_contract_but_blocks_execution(self):
+        result = treasury.preflight_settlement_adapter(
+            'manual_bank_wire',
+            org_id=self.org_id,
+            currency='USD',
+            settlement_proof={'reference': 'manual-receipt'},
+            host_supported_adapters=['internal_ledger'],
+        )
+        self.assertTrue(result['known'])
+        self.assertFalse(result['preflight_ok'])
+        self.assertFalse(result['can_execute_now'])
+        self.assertEqual(result['error_type'], 'permission_error')
+        self.assertIn('not enabled', result['error'])
+        self.assertFalse(result['execution_ready'])
+        self.assertEqual(result['contract']['execution_mode'], 'manual_offchain')
+        self.assertEqual(result['contract']['settlement_path'], 'manual_bank_review')
+        self.assertEqual(result['contract']['dispute_model'], 'manual_reversal_and_court_case')
+        self.assertEqual(result['contract']['finality_model'], 'manual_settlement_pending')
+        self.assertIn('payout_execution_disabled', result['execution_blockers'])
+        self.assertEqual(result['requirements']['execution_mode'], 'manual_offchain')
+        self.assertEqual(result['requirements']['settlement_path'], 'manual_bank_review')
+        self.assertEqual(result['requirements']['dispute_model'], 'manual_reversal_and_court_case')
+        self.assertEqual(result['requirements']['finality_model'], 'manual_settlement_pending')
 
     def test_missing_org_fails_cleanly(self):
         with self.assertRaises(SystemExit) as ctx:

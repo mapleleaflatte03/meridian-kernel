@@ -49,6 +49,7 @@ What is real today:
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, and sender-side federation validation when `commitment_id` is supplied
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
+- two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
 
 What is not yet broadly proven:
 - live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
@@ -193,6 +194,11 @@ primitive, not yet the full settlement-adapter ecosystem.
 adapter registry. On the current reference path only `internal_ledger` is
 execution-enabled; `base_usdc_x402` and `manual_bank_wire` are registered but
 still policy-disabled until a stronger settlement proof path exists.
+`GET /api/subscriptions`, `GET /api/subscriptions/delivery-targets`, and
+`GET /api/accounting` now surface institution-owned service state directly from
+the bound capsule. The OSS workspace also exposes mutation paths for those
+services, but that proof is still process-bound to one institution per
+workspace process, not general request-level multi-org routing.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

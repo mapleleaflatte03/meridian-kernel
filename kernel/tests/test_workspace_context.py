@@ -2,6 +2,7 @@
 import importlib.util
 import os
 import unittest
+from unittest import mock
 from urllib.parse import urlparse
 
 
@@ -200,6 +201,10 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/payouts/review']['allowed'])
         self.assertFalse(permissions['/api/payouts/approve']['allowed'])
         self.assertTrue(permissions['/api/treasury/settlement-adapters/preflight']['allowed'])
+        self.assertTrue(permissions['/api/subscriptions/add']['allowed'])
+        self.assertTrue(permissions['/api/subscriptions/record-delivery']['allowed'])
+        self.assertFalse(permissions['/api/accounting/draw']['allowed'])
+        self.assertEqual(permissions['/api/accounting/draw']['required_role'], 'owner')
         self.assertEqual(
             permissions['/api/treasury/settlement-adapters/preflight']['required_role'],
             'member',
@@ -312,6 +317,18 @@ class WorkspaceContextTests(unittest.TestCase):
             },
             'admitted_org_ids': ['org_a', 'org_b'],
         }
+        self.workspace.load_subscriptions = lambda org_id=None: {
+            'subscribers': {'111': []},
+            'delivery_log': [],
+            '_meta': {'storage_model': 'capsule_canonical'},
+        }
+        self.workspace.subscription_summary = lambda org_id=None: {'subscriber_count': 1}
+        self.workspace.active_delivery_targets = lambda org_id=None, external_only=False: ['111']
+        self.workspace.accounting_snapshot = lambda org_id=None: {
+            'bound_org_id': org_id,
+            'summary': {'entry_count': 0},
+            'mutation_enabled': True,
+        }
         ctx = self.workspace._resolve_workspace_context()
         status = self.workspace.api_status(institution_context=ctx)
         self.assertEqual(status['runtime_core']['institution_context']['org_id'], 'org_a')
@@ -339,6 +356,53 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(status['cases']['blocking_commitment_ids'], ['cmt_demo'])
         self.assertEqual(status['cases']['blocked_peer_host_ids'], ['host_beta'])
         self.assertIn('federation', status['runtime_core'])
+        self.assertTrue(status['runtime_core']['service_registry']['subscriptions']['supports_institution_routing'])
+        self.assertTrue(status['runtime_core']['service_registry']['accounting']['supports_institution_routing'])
+        self.assertEqual(status['service_state']['subscriptions']['summary']['subscriber_count'], 1)
+        self.assertEqual(status['service_state']['accounting']['summary']['entry_count'], 0)
+
+    def test_workspace_get_surfaces_subscriptions_and_accounting(self):
+        class FakeContext:
+            def __init__(self, org_id='org_a'):
+                self.org_id = org_id
+                self.org = {'id': org_id, 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/subscriptions'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()), \
+             mock.patch.object(self.workspace, '_enforce_request_context', return_value={'mode': 'process_bound'}), \
+             mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}), \
+             mock.patch.object(self.workspace, 'load_subscriptions', return_value={'subscribers': {'111': []}, 'delivery_log': [], '_meta': {'storage_model': 'capsule_canonical'}}), \
+             mock.patch.object(self.workspace, 'subscription_summary', return_value={'subscriber_count': 1}), \
+             mock.patch.object(self.workspace, 'active_delivery_targets', return_value=['111']), \
+             mock.patch.object(self.workspace, 'accounting_snapshot', return_value={'bound_org_id': 'org_a', 'summary': {'entry_count': 0}}):
+            handler.do_GET()
+            self.assertEqual(captured['status'], 200)
+            self.assertEqual(captured['data']['bound_org_id'], 'org_a')
+            self.assertEqual(captured['data']['summary']['subscriber_count'], 1)
+            self.assertEqual(captured['data']['state']['subscribers'], {'111': []})
+
+            handler.path = '/api/subscriptions/delivery-targets'
+            captured.clear()
+            handler.do_GET()
+            self.assertEqual(captured['status'], 200)
+            self.assertEqual(captured['data']['targets'], ['111'])
+            self.assertEqual(captured['data']['external_targets'], ['111'])
+
+            handler.path = '/api/accounting'
+            captured.clear()
+            handler.do_GET()
+            self.assertEqual(captured['status'], 200)
+            self.assertEqual(captured['data']['bound_org_id'], 'org_a')
+            self.assertEqual(captured['data']['summary']['entry_count'], 0)
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
         from runtime_host import default_host_identity

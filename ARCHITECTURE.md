@@ -163,9 +163,15 @@ incoming cross-host work:
   revoking it transitions the job to `blocked` or `rejected`
 - `GET /api/federation/execution-jobs` exposes that queue for the bound
   institution
+- `POST /api/federation/execution-jobs/execute` can complete a `ready` job on
+  the reference path, persist local execution refs, mark the local warrant
+  executed, and reuse those refs to send one `settlement_notice` back to the
+  source host when the job is linked to a commitment
 
-This is the local-review half of court-first cross-host execution. It is not
-yet remote work execution or settlement finality.
+This is still a reference-path close-loop, not distributed settlement
+finality: the job proves local completion and transport back to the sender,
+but higher-order economic trust still depends on commitment, court, and peer
+state.
 
 ## Payout Proposal Primitive
 

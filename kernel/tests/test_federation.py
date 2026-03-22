@@ -1160,6 +1160,198 @@ class FederationTests(unittest.TestCase):
                 delivery['receipt']['receipt_id'],
             )
 
+    def test_workspace_federation_execution_job_execute_sends_settlement_notice_once(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            commitment_id = 'cmt_execution_loop'
+            _seed_commitments(
+                os.path.join(alpha['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_alpha',
+                        commitment_id=commitment_id,
+                        target_host_id='host_beta',
+                        target_institution_id='org_beta',
+                    ),
+                ],
+            )
+            _seed_commitments(
+                os.path.join(beta['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_beta',
+                        commitment_id=commitment_id,
+                        target_host_id='host_alpha',
+                        target_institution_id='org_alpha',
+                    ),
+                ],
+            )
+
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                request_payload = {'task': 'demo'}
+                warrant = _issue_workspace_warrant(
+                    alpha,
+                    session['token'],
+                    request_payload,
+                )
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'execution_request',
+                        'commitment_id': commitment_id,
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                delivery = body['delivery']
+                self.assertEqual(delivery['claims']['commitment_id'], commitment_id)
+
+                jobs_status, jobs_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/execution-jobs',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(jobs_status, 200, jobs_body)
+                self.assertEqual(jobs_body['summary']['pending_local_warrant'], 1)
+                job_id = jobs_body['jobs'][0]['job_id']
+                local_warrant_id = jobs_body['jobs'][0]['local_warrant_id']
+
+                status, review_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/warrants/approve',
+                    payload={'warrant_id': local_warrant_id},
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(status, 200, review_body)
+                self.assertEqual(review_body['execution_job']['state'], 'ready')
+
+                execution_refs = {
+                    'proof_type': 'local_execution',
+                    'verification_state': 'host_local_final',
+                    'finality_state': 'host_local_final',
+                    'tx_ref': 'tx_local_beta',
+                    'proof': {
+                        'job_id': job_id,
+                        'note': 'receiver-side execution proof',
+                    },
+                }
+                status, execute_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/federation/execution-jobs/execute',
+                    payload={
+                        'job_id': job_id,
+                        'execution_refs': execution_refs,
+                    },
+                    headers={
+                        'Authorization': beta['auth_header'],
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, execute_body)
+                self.assertEqual(execute_body['execution_job']['state'], 'executed')
+                self.assertEqual(execute_body['warrant']['execution_state'], 'executed')
+                self.assertEqual(execute_body['settlement_notice']['message_type'], 'settlement_notice')
+                first_notice_id = execute_body['settlement_notice']['envelope_id']
+                self.assertTrue(first_notice_id)
+
+                status, replay_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/federation/execution-jobs/execute',
+                    payload={'job_id': job_id},
+                    headers={
+                        'Authorization': beta['auth_header'],
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, replay_body)
+                self.assertEqual(replay_body['execution_job']['state'], 'executed')
+                self.assertEqual(replay_body['settlement_notice']['envelope_id'], first_notice_id)
+
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['processed'], 1)
+                self.assertEqual(inbox_body['entries'][0]['message_type'], 'settlement_notice')
+                self.assertEqual(inbox_body['entries'][0]['commitment_id'], commitment_id)
+
+                beta_jobs_status, beta_jobs_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/execution-jobs',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(beta_jobs_status, 200, beta_jobs_body)
+                self.assertEqual(beta_jobs_body['summary']['executed'], 1)
+                self.assertEqual(beta_jobs_body['summary']['ready'], 0)
+                self.assertEqual(
+                    beta_jobs_body['jobs'][0]['execution_refs']['settlement_notice_envelope_id'],
+                    first_notice_id,
+                )
+
+            with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+                beta_commitments = json.load(f)
+            beta_record = beta_commitments['commitments'][commitment_id]
+            self.assertEqual(len(beta_record['delivery_refs']), 1)
+            self.assertEqual(beta_record['delivery_refs'][0]['message_type'], 'settlement_notice')
+
+            with open(os.path.join(alpha['economy'], 'commitments.json')) as f:
+                alpha_commitments = json.load(f)
+            alpha_record = alpha_commitments['commitments'][commitment_id]
+            self.assertEqual(alpha_record['state'], 'settled')
+            self.assertEqual(len(alpha_record['settlement_refs']), 1)
+
     def test_workspace_federation_settlement_notice_applies_on_receiver(self):
         try:
             port_alpha = _find_free_port()

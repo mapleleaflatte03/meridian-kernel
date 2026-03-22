@@ -241,6 +241,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/cases/open']['allowed'])
         self.assertTrue(permissions['/api/cases/resolve']['allowed'])
         self.assertTrue(permissions['/api/federation/send']['allowed'])
+        self.assertTrue(permissions['/api/federation/execution-jobs/execute']['allowed'])
+        self.assertEqual(permissions['/api/federation/execution-jobs/execute']['required_role'], 'admin')
         self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
         self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
 
@@ -521,6 +523,124 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(snapshot['jobs'][0]['local_warrant']['warrant_id'], 'war_local_demo')
         self.assertEqual(snapshot['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
         self.assertEqual(snapshot['jobs'][0]['local_warrant']['execution_state'], 'ready')
+
+    def test_execute_federated_execution_job_records_settlement_notice_once(self):
+        job = {
+            'job_id': 'fej_demo',
+            'envelope_id': 'fed_demo',
+            'source_host_id': 'host_alpha',
+            'source_institution_id': 'org_alpha',
+            'target_host_id': 'host_beta',
+            'target_institution_id': 'org_beta',
+            'actor_type': 'service',
+            'actor_id': 'peer:host_alpha',
+            'session_id': 'ses_demo',
+            'boundary_name': 'federation_gateway',
+            'identity_model': 'signed_host_service',
+            'message_type': 'execution_request',
+            'receipt_id': 'fedrcpt_demo',
+            'sender_warrant_id': 'war_sender',
+            'local_warrant_id': 'war_local_demo',
+            'commitment_id': 'cmt_demo',
+            'payload': {'task': 'demo'},
+            'payload_hash': 'hash_demo',
+            'state': 'ready',
+            'received_at': '2026-03-22T00:00:00Z',
+            'note': 'Receiver-side execution request queued for local warrant review',
+            'metadata': {},
+            'execution_refs': {},
+        }
+        warrant = {
+            'warrant_id': 'war_local_demo',
+            'court_review_state': 'approved',
+            'execution_state': 'ready',
+            'execution_refs': {},
+        }
+        commitment = {
+            'commitment_id': 'cmt_demo',
+            'state': 'accepted',
+            'status': 'accepted',
+            'target_host_id': 'host_alpha',
+            'target_institution_id': 'org_alpha',
+            'delivery_refs': [],
+        }
+        stored_job = dict(job)
+        stored_warrant = dict(warrant)
+        delivery = {
+            'claims': {
+                'envelope_id': 'fed_notice_1',
+                'target_host_id': 'host_alpha',
+                'target_institution_id': 'org_alpha',
+            },
+            'receipt': {
+                'receipt_id': 'fedrcpt_notice_1',
+                'accepted_at': '2026-03-22T00:00:01Z',
+            },
+            'response': {'processing': {'applied': True}},
+        }
+
+        def fake_upsert(_org_id, **fields):
+            stored_job.update(fields)
+            if 'execution_refs' in fields:
+                stored_job['execution_refs'] = dict(fields['execution_refs'] or {})
+            if 'metadata' in fields:
+                stored_job['metadata'] = dict(fields['metadata'] or {})
+            return dict(stored_job)
+
+        def fake_mark_warrant_executed(_warrant_id, *, org_id=None, execution_refs=None):
+            stored_warrant['execution_state'] = 'executed'
+            stored_warrant['executed_at'] = '2026-03-22T00:00:01Z'
+            stored_warrant['execution_refs'] = dict(execution_refs or {})
+            return dict(stored_warrant)
+
+        with mock.patch.object(self.workspace, 'get_warrant', return_value=stored_warrant), \
+             mock.patch.object(self.workspace, 'validate_warrant_for_execution') as validate, \
+             mock.patch.object(self.workspace, 'mark_warrant_executed', side_effect=fake_mark_warrant_executed), \
+             mock.patch.object(self.workspace, 'get_commitment', return_value=commitment), \
+             mock.patch.object(self.workspace, 'upsert_execution_job', side_effect=fake_upsert), \
+             mock.patch.object(self.workspace, '_deliver_federation_envelope', return_value=(delivery, {'host_id': 'host_beta'})) as deliver, \
+             mock.patch.object(self.workspace, 'log_event'):
+            executed = self.workspace._complete_federated_execution_job(
+                'org_a',
+                job,
+                actor_id='user_owner',
+                session_id='ses_demo',
+                execution_refs={
+                    'proof_type': 'local_execution',
+                    'verification_state': 'host_local_final',
+                    'finality_state': 'host_local_final',
+                    'proof': {'job_id': 'fej_demo'},
+                },
+            )
+
+            self.assertEqual(executed['execution_job']['state'], 'executed')
+            self.assertEqual(executed['warrant']['execution_state'], 'executed')
+            self.assertEqual(executed['settlement_notice']['message_type'], 'settlement_notice')
+            self.assertEqual(executed['settlement_notice']['envelope_id'], 'fed_notice_1')
+            self.assertEqual(deliver.call_count, 1)
+            validate.assert_called_once()
+
+            commitment['delivery_refs'] = [
+                {
+                    'message_type': 'settlement_notice',
+                    'envelope_id': 'fed_notice_1',
+                    'receipt_id': 'fedrcpt_notice_1',
+                    'target_host_id': 'host_alpha',
+                    'target_institution_id': 'org_alpha',
+                    'recorded_at': '2026-03-22T00:00:01Z',
+                },
+            ]
+            stored_job['execution_refs'] = {}
+
+            replay = self.workspace._complete_federated_execution_job(
+                'org_a',
+                dict(stored_job, state='executed'),
+                actor_id='user_owner',
+                session_id='ses_demo',
+            )
+
+            self.assertEqual(replay['settlement_notice']['envelope_id'], 'fed_notice_1')
+            self.assertEqual(deliver.call_count, 1)
 
     def test_federation_manifest_surfaces_host_admission_and_service_registry(self):
         from runtime_host import default_host_identity

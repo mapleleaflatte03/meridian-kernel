@@ -155,6 +155,11 @@ as sufficient local authorization.
 Receiver-side warrant review now also drives that queue honestly: approving the
 local warrant moves the execution job to `ready`, while staying or revoking it
 moves the job to `blocked` or `rejected`.
+`POST /api/federation/execution-jobs/execute` now closes that receiver-side
+loop for the reference path: a `ready` job can be marked locally executed,
+its local warrant is marked `executed`, and the same persisted proof is reused
+to emit one idempotent `settlement_notice` back to the source host when the
+job is linked to a commitment.
 When the received message is a valid `settlement_notice` with a settlement-ready
 `commitment_id`, the receiver can now apply that notice directly to the local
 commitment record and mark the inbox entry as `processed`; if an active case

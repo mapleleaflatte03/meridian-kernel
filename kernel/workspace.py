@@ -57,6 +57,7 @@ Endpoints:
   POST /api/cases/open            -> Open an inter-institution case
   POST /api/cases/stay            -> Stay an inter-institution case
   POST /api/cases/resolve         -> Resolve an inter-institution case
+  POST /api/federation/execution-jobs/execute -> Execute a ready receiver-side federated execution job
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
   POST /api/treasury/settlement-adapters/preflight -> Validate settlement-adapter execution requirements
@@ -212,6 +213,7 @@ from commitments import (
     accept_commitment,
     breach_commitment,
     commitment_summary,
+    get_commitment,
     list_commitments,
     record_delivery_ref,
     record_settlement_ref,
@@ -332,6 +334,7 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/cases/open': 'admin',
     '/api/cases/stay': 'admin',
     '/api/cases/resolve': 'admin',
+    '/api/federation/execution-jobs/execute': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/treasury/settlement-adapters/preflight': 'member',
@@ -770,6 +773,22 @@ def _receiver_execution_warrant_payload(claims, payload=None):
     }
 
 
+def _receiver_execution_warrant_payload_from_job(job):
+    record = dict(job or {})
+    return {
+        'source_host_id': (record.get('source_host_id') or '').strip(),
+        'source_institution_id': (record.get('source_institution_id') or '').strip(),
+        'target_host_id': (record.get('target_host_id') or '').strip(),
+        'target_institution_id': (record.get('target_institution_id') or '').strip(),
+        'message_type': (record.get('message_type') or '').strip(),
+        'boundary_name': (record.get('boundary_name') or '').strip(),
+        'identity_model': (record.get('identity_model') or '').strip(),
+        'sender_warrant_id': (record.get('sender_warrant_id') or '').strip(),
+        'commitment_id': (record.get('commitment_id') or '').strip(),
+        'payload': record.get('payload') if isinstance(record.get('payload'), dict) else {},
+    }
+
+
 def _execution_job_view(bound_org_id, job):
     record = dict(job or {})
     local_warrant_id = (record.get('local_warrant_id') or '').strip()
@@ -792,11 +811,13 @@ def _federation_execution_jobs_snapshot(bound_org_id, *, limit=50):
     ]
     return {
         'management_mode': 'capsule_backed',
-        'mutation_enabled': False,
-        'mutation_disabled_reason': 'review_via_warrants',
+        'mutation_enabled': True,
+        'mutation_disabled_reason': '',
         'storage_model': 'capsule_canonical',
         'boundary_name': 'federation_gateway',
         'identity_model': 'signed_host_service',
+        'execution_route': '/api/federation/execution-jobs/execute',
+        'required_local_warrant_state': 'approved',
         'summary': execution_job_summary(bound_org_id),
         'jobs': jobs,
     }
@@ -988,6 +1009,86 @@ def _sync_execution_job_for_warrant_review(bound_org_id, warrant, *, decision=''
     return job
 
 
+def _execution_job_proof_ref(job):
+    job_id = (job.get('job_id') or '').strip()
+    if not job_id:
+        raise ValueError('job_id is required')
+    return f"fexec_{job_id}"
+
+
+def _execution_job_execution_refs(bound_org_id, job, *, actor_id='', note=''):
+    record = dict(job or {})
+    executed_at = _now()
+    tx_ref = (record.get('execution_refs') or {}).get('tx_ref') or _execution_job_proof_ref(record)
+    return {
+        'tx_ref': tx_ref,
+        'tx_hash': '',
+        'settlement_adapter': 'federated_execution_proof',
+        'proof_type': 'federated_execution_job',
+        'verification_state': 'receiver_local_final',
+        'finality_state': 'receiver_local_final',
+        'linked_commitment_id': (record.get('commitment_id') or '').strip(),
+        'proof': {
+            'mode': 'receiver_local_execution_job',
+            'job_id': record.get('job_id', ''),
+            'envelope_id': record.get('envelope_id', ''),
+            'payload_hash': record.get('payload_hash', ''),
+            'receipt_id': record.get('receipt_id', ''),
+            'local_warrant_id': record.get('local_warrant_id', ''),
+            'sender_warrant_id': record.get('sender_warrant_id', ''),
+            'source_host_id': record.get('source_host_id', ''),
+            'source_institution_id': record.get('source_institution_id', ''),
+            'target_host_id': record.get('target_host_id', ''),
+            'target_institution_id': record.get('target_institution_id', ''),
+            'executed_by': (actor_id or '').strip(),
+            'executed_at': executed_at,
+            'note': note or '',
+            'bound_org_id': (bound_org_id or '').strip(),
+        },
+    }
+
+
+def _execution_job_settlement_notice_payload(job, execution_refs):
+    refs = dict(execution_refs or {})
+    return {
+        'tx_ref': refs.get('tx_ref', ''),
+        'tx_hash': refs.get('tx_hash', ''),
+        'settlement_adapter': refs.get('settlement_adapter', ''),
+        'proof_type': refs.get('proof_type', ''),
+        'verification_state': refs.get('verification_state', ''),
+        'finality_state': refs.get('finality_state', ''),
+        'proof': refs.get('proof') or {},
+        'execution_refs': refs,
+        'job_id': (job.get('job_id') or '').strip(),
+        'local_warrant_id': (job.get('local_warrant_id') or '').strip(),
+    }
+
+
+def _execute_federated_execution_job(bound_org_id, job_id, *, actor_id, session_id=None, note=''):
+    job_id = (job_id or '').strip()
+    if not job_id:
+        raise ValueError('job_id is required')
+    job = get_execution_job(job_id, org_id=bound_org_id)
+    if not job:
+        raise LookupError(f'Execution job not found: {job_id}')
+    if (job.get('message_type') or '').strip() != 'execution_request':
+        raise PermissionError(
+            f"Execution job '{job_id}' is not an execution_request "
+            f"(message_type={job.get('message_type', '')})"
+        )
+    if (job.get('boundary_name') or '').strip() != 'federation_gateway':
+        raise PermissionError(
+            f"Execution job '{job_id}' is not scoped to federation_gateway "
+            f"(boundary_name={job.get('boundary_name', '')})"
+        )
+    return _complete_federated_execution_job(
+        bound_org_id,
+        job,
+        actor_id=actor_id,
+        session_id=session_id,
+    )
+
+
 def _settlement_notice_ref(claims, receipt, payload=None):
     payload = payload if isinstance(payload, dict) else {}
     execution_refs = payload.get('execution_refs') or {}
@@ -1013,6 +1114,277 @@ def _settlement_notice_ref(claims, receipt, payload=None):
         'proof': payload.get('proof') or execution_refs.get('proof') or {},
         'recorded_by': claim_data.get('actor_id') or f"peer:{claim_data.get('source_host_id', '')}",
         'recorded_at': (receipt or {}).get('accepted_at', '') or _now(),
+    }
+
+
+def _federated_execution_job_ref(job, *, execution_refs=None, settlement_notice=None, executed_by=''):
+    record = dict(job or {})
+    refs = dict(record.get('execution_refs') or {})
+    for key, value in dict(execution_refs or {}).items():
+        if value is not None:
+            refs[key] = value
+    if executed_by and not refs.get('executed_by'):
+        refs['executed_by'] = executed_by
+    if not refs.get('execution_channel'):
+        refs['execution_channel'] = 'workspace_api'
+    if not refs.get('proof_type'):
+        refs['proof_type'] = 'local_execution'
+    if not refs.get('verification_state'):
+        refs['verification_state'] = 'host_local_final'
+    if not refs.get('finality_state'):
+        refs['finality_state'] = 'host_local_final'
+    if not refs.get('proof'):
+        refs['proof'] = {
+            'job_id': record.get('job_id', ''),
+            'envelope_id': record.get('envelope_id', ''),
+            'local_warrant_id': record.get('local_warrant_id', ''),
+            'payload_hash': record.get('payload_hash', ''),
+        }
+    refs.setdefault('job_id', record.get('job_id', ''))
+    refs.setdefault('envelope_id', record.get('envelope_id', ''))
+    refs.setdefault('local_warrant_id', record.get('local_warrant_id', ''))
+    refs.setdefault('commitment_id', record.get('commitment_id', ''))
+    refs.setdefault('received_at', record.get('received_at', ''))
+    refs.setdefault('executed_at', record.get('executed_at', '') or _now())
+    refs.setdefault('executed_by', executed_by or record.get('metadata', {}).get('executed_by', ''))
+    if settlement_notice:
+        claims = dict(settlement_notice.get('claims') or {})
+        receipt = dict(settlement_notice.get('receipt') or {})
+        refs['settlement_notice_envelope_id'] = claims.get('envelope_id', '')
+        refs['settlement_notice_receipt_id'] = receipt.get('receipt_id', '')
+        refs['settlement_notice_target_host_id'] = claims.get('target_host_id', '')
+        refs['settlement_notice_target_institution_id'] = claims.get('target_institution_id', '')
+        refs['settlement_notice_sent_at'] = receipt.get('accepted_at', '') or settlement_notice.get('sent_at', '') or _now()
+        refs['settlement_notice_response'] = dict(settlement_notice.get('response') or {})
+    return refs
+
+
+def _federated_execution_job_settlement_notice_view(execution_refs):
+    refs = dict(execution_refs or {})
+    envelope_id = (refs.get('settlement_notice_envelope_id') or '').strip()
+    receipt_id = (refs.get('settlement_notice_receipt_id') or '').strip()
+    if not envelope_id and not receipt_id:
+        return None
+    return {
+        'message_type': 'settlement_notice',
+        'envelope_id': envelope_id,
+        'receipt_id': receipt_id,
+        'target_host_id': (refs.get('settlement_notice_target_host_id') or '').strip(),
+        'target_institution_id': (refs.get('settlement_notice_target_institution_id') or '').strip(),
+        'sent_at': (refs.get('settlement_notice_sent_at') or '').strip(),
+        'response': dict(refs.get('settlement_notice_response') or {}),
+    }
+
+
+def _existing_federated_execution_settlement_notice(job, commitment=None):
+    refs = dict((job or {}).get('execution_refs') or {})
+    if refs.get('settlement_notice_envelope_id') or refs.get('settlement_notice_receipt_id'):
+        return {
+            'message_type': 'settlement_notice',
+            'envelope_id': refs.get('settlement_notice_envelope_id', ''),
+            'receipt_id': refs.get('settlement_notice_receipt_id', ''),
+            'target_host_id': refs.get('settlement_notice_target_host_id', ''),
+            'target_institution_id': refs.get('settlement_notice_target_institution_id', ''),
+            'sent_at': refs.get('settlement_notice_sent_at', ''),
+            'response': dict(refs.get('settlement_notice_response') or {}),
+        }
+    for ref in (commitment or {}).get('delivery_refs', []) or []:
+        if (ref or {}).get('message_type') == 'settlement_notice' and (
+            (ref or {}).get('target_host_id') == (job or {}).get('source_host_id')
+            and (ref or {}).get('target_institution_id') == (job or {}).get('source_institution_id')
+        ):
+            return {
+                'message_type': 'settlement_notice',
+                'envelope_id': (ref or {}).get('envelope_id', ''),
+                'receipt_id': (ref or {}).get('receipt_id', ''),
+                'target_host_id': (ref or {}).get('target_host_id', ''),
+                'target_institution_id': (ref or {}).get('target_institution_id', ''),
+                'sent_at': (ref or {}).get('recorded_at', ''),
+                'claims': {
+                    'envelope_id': (ref or {}).get('envelope_id', ''),
+                    'target_host_id': (ref or {}).get('target_host_id', ''),
+                    'target_institution_id': (ref or {}).get('target_institution_id', ''),
+                },
+                'receipt': {
+                    'receipt_id': (ref or {}).get('receipt_id', ''),
+                    'accepted_at': (ref or {}).get('recorded_at', ''),
+                },
+                'response': {},
+            }
+    return None
+
+
+def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session_id=None, execution_refs=None):
+    record = dict(job or {})
+    job_id = (record.get('job_id') or '').strip()
+    if not job_id:
+        raise ValueError('job_id is required')
+    local_warrant_id = (record.get('local_warrant_id') or '').strip()
+    if not local_warrant_id:
+        raise ValueError(f"Execution job '{job_id}' is missing local_warrant_id")
+    state = (record.get('state') or '').strip()
+    if state not in ('ready', 'executed'):
+        raise PermissionError(
+            f"Execution job '{job_id}' is not executable (state={state or 'unknown'})"
+        )
+
+    warrant = get_warrant(local_warrant_id, org_id=bound_org_id)
+    if not warrant:
+        raise LookupError(f'Local warrant not found: {local_warrant_id}')
+
+    merged_refs = dict(record.get('execution_refs') or {})
+    if state != 'executed':
+        for key, value in dict(execution_refs or {}).items():
+            if value is not None:
+                merged_refs[key] = value
+        merged_refs = _federated_execution_job_ref(
+            record,
+            execution_refs=merged_refs,
+            executed_by=actor_id or '',
+        )
+        validate_warrant_for_execution(
+            local_warrant_id,
+            org_id=bound_org_id,
+            action_class='federated_execution',
+            boundary_name='federation_gateway',
+            request_payload=_receiver_execution_warrant_payload_from_job(record),
+        )
+        warrant = mark_warrant_executed(
+            local_warrant_id,
+            org_id=bound_org_id,
+            execution_refs=merged_refs,
+        )
+        record = upsert_execution_job(
+            bound_org_id,
+            job_id=job_id,
+            state='executed',
+            execution_refs=merged_refs,
+            note='Receiver-side execution completed',
+            metadata={
+                **dict(record.get('metadata') or {}),
+                'executed_by': actor_id or '',
+            },
+        )
+        log_event(
+            bound_org_id,
+            actor_id or f'peer:{record.get("source_host_id", "")}',
+            'federation_execution_job_executed',
+            resource=job_id,
+            outcome='success',
+            details={
+                'local_warrant_id': local_warrant_id,
+                'commitment_id': record.get('commitment_id', ''),
+                'job_state': 'executed',
+            },
+            session_id=session_id,
+        )
+    else:
+        if warrant.get('execution_state') != 'executed':
+            warrant = mark_warrant_executed(
+                local_warrant_id,
+                org_id=bound_org_id,
+                execution_refs=merged_refs or warrant.get('execution_refs') or {},
+            )
+
+    commitment = None
+    settlement_notice = None
+    commitment_id = (record.get('commitment_id') or '').strip()
+    if commitment_id:
+        commitment = get_commitment(commitment_id, org_id=bound_org_id)
+        settlement_notice = _existing_federated_execution_settlement_notice(record, commitment)
+        if settlement_notice:
+            if not merged_refs.get('settlement_notice_envelope_id') and not merged_refs.get('settlement_notice_receipt_id'):
+                merged_refs = _federated_execution_job_ref(
+                    record,
+                    execution_refs=merged_refs,
+                    settlement_notice=settlement_notice,
+                    executed_by=actor_id or '',
+                )
+                record = upsert_execution_job(
+                    bound_org_id,
+                    job_id=job_id,
+                    state='executed',
+                    execution_refs=merged_refs,
+                    note=record.get('note', ''),
+                    metadata=dict(record.get('metadata') or {}),
+                )
+            return {
+                'execution_job': _execution_job_view(bound_org_id, record),
+                'warrant': warrant,
+                'settlement_notice': _federated_execution_job_settlement_notice_view(merged_refs),
+            }
+
+        payload = {
+            'job_id': job_id,
+            'local_warrant_id': local_warrant_id,
+            'envelope_id': record.get('envelope_id', ''),
+            'commitment_id': commitment_id,
+            'execution_refs': dict(merged_refs),
+            'proof': merged_refs.get('proof') or {},
+            'proof_type': merged_refs.get('proof_type', ''),
+            'verification_state': merged_refs.get('verification_state', ''),
+            'finality_state': merged_refs.get('finality_state', ''),
+            'tx_ref': merged_refs.get('tx_ref', ''),
+            'tx_hash': merged_refs.get('tx_hash', ''),
+            'settlement_adapter': merged_refs.get('settlement_adapter', ''),
+        }
+        delivery, _federation_state = _deliver_federation_envelope(
+            bound_org_id,
+            record.get('source_host_id', ''),
+            record.get('source_institution_id', ''),
+            'settlement_notice',
+            payload=payload,
+            actor_type='service',
+            actor_id=actor_id or f'peer:{record.get("source_host_id", "")}',
+            session_id=session_id or '',
+            commitment_id=commitment_id,
+        )
+        settlement_notice = {
+            'message_type': 'settlement_notice',
+            'envelope_id': (delivery.get('claims') or {}).get('envelope_id', ''),
+            'receipt_id': (delivery.get('receipt') or {}).get('receipt_id', ''),
+            'target_host_id': (delivery.get('claims') or {}).get('target_host_id', ''),
+            'target_institution_id': (delivery.get('claims') or {}).get('target_institution_id', ''),
+            'sent_at': (delivery.get('receipt') or {}).get('accepted_at', '') or _now(),
+            'response': dict(delivery.get('response') or {}),
+        }
+        merged_refs = _federated_execution_job_ref(
+            record,
+            execution_refs=merged_refs,
+            settlement_notice=settlement_notice,
+            executed_by=actor_id or '',
+        )
+        record = upsert_execution_job(
+            bound_org_id,
+            job_id=job_id,
+            state='executed',
+            execution_refs=merged_refs,
+            note=record.get('note', ''),
+            metadata=dict(record.get('metadata') or {}),
+        )
+        log_event(
+            bound_org_id,
+            actor_id or f'peer:{record.get("source_host_id", "")}',
+            'federation_execution_job_settlement_notice_sent',
+            resource=job_id,
+            outcome='success',
+            details={
+                'commitment_id': commitment_id,
+                'envelope_id': settlement_notice['envelope_id'],
+                'receipt_id': settlement_notice['receipt_id'],
+            },
+            session_id=session_id,
+        )
+        return {
+            'execution_job': _execution_job_view(bound_org_id, record),
+            'warrant': warrant,
+            'settlement_notice': settlement_notice,
+        }
+
+    return {
+        'execution_job': _execution_job_view(bound_org_id, record),
+        'warrant': warrant,
+        'settlement_notice': None,
     }
 
 
@@ -1221,7 +1593,8 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                                  message_type, payload=None, *,
                                  actor_type='host_service', actor_id='',
                                  session_id='', warrant_id='',
-                                 commitment_id='', ttl_seconds=None):
+                                 commitment_id='', claims_commitment_id='',
+                                 ttl_seconds=None):
     host_identity, admission_registry = _runtime_host_state(bound_org_id)
     authority = _federation_authority(host_identity)
     authority.ensure_enabled()
@@ -1304,6 +1677,8 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                 session_id=session_id or None,
             )
             raise
+    delivery_commitment_id = (claims_commitment_id or commitment_id or '').strip()
+
     blocking_case = _blocking_case_for_delivery(
         org_id=bound_org_id,
         commitment_id=commitment_id,
@@ -1358,7 +1733,7 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
             actor_id=actor_id,
             session_id=session_id,
             warrant_id=warrant_id,
-            commitment_id=commitment_id,
+            commitment_id=delivery_commitment_id,
             ttl_seconds=ttl_seconds,
         )
     except FederationDeliveryError as exc:
@@ -3922,6 +4297,40 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     'runtime_core': {
                         'federation': federation_state,
                     },
+                })
+
+            elif path == '/api/federation/execution-jobs/execute':
+                job_ref = (body.get('job_id') or body.get('envelope_id') or body.get('local_warrant_id') or '').strip()
+                if not job_ref:
+                    return self._json({'error': 'job_id is required'}, 400)
+                job = get_execution_job(job_ref, org_id=org_id) or get_execution_job_by_local_warrant(job_ref, org_id)
+                if not job:
+                    return self._json({'error': f'Execution job not found: {job_ref}'}, 404)
+                try:
+                    execution = _complete_federated_execution_job(
+                        org_id,
+                        job,
+                        actor_id=by,
+                        session_id=_sid,
+                        execution_refs=body.get('execution_refs'),
+                    )
+                except FederationUnavailable as e:
+                    return self._json({'error': str(e)}, 503)
+                except FederationDeliveryError as e:
+                    return self._json({
+                        'error': str(e),
+                        'peer_host_id': e.peer_host_id,
+                        'claims': _federation_claims_dict(e.claims),
+                    }, 502)
+                except PermissionError as e:
+                    return self._json({'error': str(e)}, 403)
+                except LookupError as e:
+                    return self._json({'error': str(e)}, 404)
+                except ValueError as e:
+                    return self._json({'error': str(e)}, 400)
+                return self._json({
+                    'message': 'Federated execution job executed',
+                    **execution,
                 })
 
             elif path in (

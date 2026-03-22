@@ -1977,6 +1977,125 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(beta_record['state'], 'accepted')
             self.assertEqual(beta_record['settlement_refs'], [])
 
+    def test_workspace_federation_settlement_notice_rejects_contract_snapshot_drift(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            commitment_id = 'cmt_drifted_settlement'
+            _seed_commitments(
+                os.path.join(alpha['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_alpha',
+                        commitment_id=commitment_id,
+                        target_host_id='host_beta',
+                        target_institution_id='org_beta',
+                    ),
+                ],
+            )
+            _seed_commitments(
+                os.path.join(beta['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_beta',
+                        commitment_id=commitment_id,
+                        target_host_id='host_beta',
+                        target_institution_id='org_beta',
+                    ),
+                ],
+            )
+
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'settlement_notice',
+                        'commitment_id': commitment_id,
+                        'payload': {
+                            'proposal_id': 'ppo_invalid',
+                            'tx_ref': 'tx_invalid',
+                            'settlement_adapter': 'internal_ledger',
+                            'proof': {'mode': 'institution_transactions_journal'},
+                            'settlement_adapter_contract_snapshot': {
+                                'contract_version': 1,
+                                'adapter_id': 'internal_ledger',
+                                'status': 'active',
+                                'payout_execution_enabled': True,
+                                'execution_mode': 'host_ledger',
+                                'settlement_path': 'tampered_path',
+                                'supported_currencies': ['USD', 'USDC'],
+                                'requires_tx_hash': False,
+                                'requires_settlement_proof': False,
+                                'proof_type': 'ledger_transaction',
+                                'verification_state': 'host_ledger_final',
+                                'finality_state': 'host_local_final',
+                                'finality_model': 'host_local_final',
+                                'reversal_or_dispute_capability': 'court_case',
+                                'dispute_model': 'court_case',
+                            },
+                            'settlement_adapter_contract_digest': 'bad-digest',
+                        },
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                processing = body['delivery']['response']['processing']
+                self.assertFalse(processing['applied'])
+                self.assertEqual(processing['reason'], 'invalid_settlement_notice')
+                self.assertEqual(processing['case']['claim_type'], 'invalid_settlement_notice')
+                self.assertTrue(processing['case_created'])
+                self.assertEqual(processing['federation_peer']['trust_state'], 'suspended')
+                self.assertFalse(processing['settlement_preflight']['preflight_ok'])
+                self.assertEqual(processing['settlement_preflight']['error_type'], 'validation_error')
+                self.assertIn('contract drifted', processing['error'])
+
     def test_workspace_federation_settlement_notice_replay_is_idempotent(self):
         try:
             port_alpha = _find_free_port()

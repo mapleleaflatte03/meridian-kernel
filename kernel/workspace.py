@@ -178,6 +178,8 @@ from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       load_contributors, load_payout_proposals, load_funding_sources,
                       list_settlement_adapters, settlement_adapter_summary,
                       preflight_settlement_adapter,
+                      settlement_adapter_contract_snapshot,
+                      settlement_adapter_contract_digest,
                       get_payout_proposal,
                       list_payout_proposals, payout_proposal_summary,
                       create_payout_proposal, submit_payout_proposal,
@@ -1153,6 +1155,25 @@ def _settlement_notice_ref(claims, receipt, payload=None):
     execution_refs = payload.get('execution_refs') or {}
     if not isinstance(execution_refs, dict):
         execution_refs = {}
+    raw_contract = payload.get('settlement_adapter_contract') or execution_refs.get('settlement_adapter_contract') or {}
+    if not isinstance(raw_contract, dict):
+        raw_contract = {}
+    contract_snapshot = (
+        payload.get('settlement_adapter_contract_snapshot')
+        or execution_refs.get('settlement_adapter_contract_snapshot')
+        or raw_contract.get('contract_snapshot')
+        or {}
+    )
+    if not isinstance(contract_snapshot, dict):
+        contract_snapshot = {}
+    contract_digest = (
+        payload.get('settlement_adapter_contract_digest')
+        or execution_refs.get('settlement_adapter_contract_digest')
+        or raw_contract.get('contract_digest')
+        or ''
+    ).strip()
+    if contract_snapshot and not contract_digest:
+        contract_digest = settlement_adapter_contract_digest(contract_snapshot)
     claim_data = _federation_claims_dict(claims)
     return {
         'proposal_id': (payload.get('proposal_id') or '').strip(),
@@ -1171,6 +1192,9 @@ def _settlement_notice_ref(claims, receipt, payload=None):
         'target_institution_id': claim_data.get('target_institution_id', ''),
         'payload_hash': claim_data.get('payload_hash', ''),
         'proof': payload.get('proof') or execution_refs.get('proof') or {},
+        'settlement_adapter_contract': raw_contract,
+        'settlement_adapter_contract_snapshot': contract_snapshot,
+        'settlement_adapter_contract_digest': contract_digest,
         'recorded_by': claim_data.get('actor_id') or f"peer:{claim_data.get('source_host_id', '')}",
         'recorded_at': (receipt or {}).get('accepted_at', '') or _now(),
     }
@@ -1228,6 +1252,24 @@ def _validated_settlement_notice_ref(bound_org_id, claims, receipt, *, payload=N
         )
     normalized = dict(preflight.get('normalized_proof') or {})
     contract = dict(preflight.get('contract') or {})
+    expected_snapshot = dict(settlement_ref.get('settlement_adapter_contract_snapshot') or {})
+    expected_digest = (settlement_ref.get('settlement_adapter_contract_digest') or '').strip()
+    current_snapshot = dict(
+        contract.get('contract_snapshot')
+        or settlement_adapter_contract_snapshot(contract)
+    )
+    current_digest = (
+        contract.get('contract_digest')
+        or settlement_adapter_contract_digest(current_snapshot)
+    ).strip()
+    if expected_snapshot and current_snapshot != expected_snapshot:
+        raise ValueError(
+            f"Settlement notice adapter contract drifted for {adapter_id!r}"
+        )
+    if expected_digest and current_digest and not hmac.compare_digest(expected_digest, current_digest):
+        raise ValueError(
+            f"Settlement notice adapter contract digest mismatch for {adapter_id!r}"
+        )
     settlement_ref['settlement_adapter'] = adapter_id
     settlement_ref['tx_hash'] = normalized.get('tx_hash', settlement_ref.get('tx_hash', ''))
     settlement_ref['proof_type'] = normalized.get('proof_type', settlement_ref.get('proof_type', ''))
@@ -1246,6 +1288,8 @@ def _validated_settlement_notice_ref(bound_org_id, claims, receipt, *, payload=N
         '',
     )
     settlement_ref['settlement_adapter_contract'] = contract
+    settlement_ref['settlement_adapter_contract_snapshot'] = current_snapshot
+    settlement_ref['settlement_adapter_contract_digest'] = current_digest
     return settlement_ref, preflight
 
 
@@ -1529,6 +1573,7 @@ def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session
             'envelope_id': record.get('envelope_id', ''),
             'commitment_id': commitment_id,
             'execution_refs': dict(settlement_execution_refs),
+            'currency': settlement_execution_refs.get('currency', ''),
             'proof': settlement_execution_refs.get('proof') or {},
             'proof_type': settlement_execution_refs.get('proof_type', ''),
             'verification_state': settlement_execution_refs.get('verification_state', ''),
@@ -2044,16 +2089,24 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
         result.update({
             'reason': 'invalid_settlement_notice',
             'error': error,
-            'settlement_preflight': _settlement_notice_preflight(
-                bound_org_id,
-                claims,
-                receipt,
-                payload=payload,
-            )[1],
+            'settlement_preflight': None,
             'case': case_record,
             'case_created': created,
             'federation_peer': federation_peer,
         })
+        settlement_preflight = _settlement_notice_preflight(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+        )[1]
+        if not settlement_preflight.get('error_type'):
+            settlement_preflight = dict(settlement_preflight)
+            settlement_preflight['preflight_ok'] = False
+            settlement_preflight['can_execute_now'] = False
+            settlement_preflight['error_type'] = 'validation_error'
+            settlement_preflight['error'] = error
+        result['settlement_preflight'] = settlement_preflight
         return result
     record_settlement_ref(
         claims.commitment_id,

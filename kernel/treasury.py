@@ -26,6 +26,7 @@ Usage:
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -669,6 +670,48 @@ def settlement_adapter_summary(org_id=None, *, host_supported_adapters=None):
     }
 
 
+def settlement_adapter_contract_snapshot(contract_or_adapter):
+    contract = dict(contract_or_adapter or {})
+    return {
+        'contract_version': 1,
+        'adapter_id': (contract.get('adapter_id') or '').strip(),
+        'status': contract.get('status', 'registered'),
+        'payout_execution_enabled': bool(contract.get('payout_execution_enabled')),
+        'execution_mode': contract.get('execution_mode', 'external_reference'),
+        'settlement_path': contract.get('settlement_path', 'external_reference'),
+        'supported_currencies': sorted(
+            {
+                str(item).upper()
+                for item in contract.get('supported_currencies', [])
+                if str(item).strip()
+            }
+        ),
+        'requires_tx_hash': bool(contract.get('requires_tx_hash')),
+        'requires_settlement_proof': bool(contract.get('requires_settlement_proof')),
+        'proof_type': contract.get('proof_type', 'external_reference'),
+        'verification_state': contract.get('verification_state', 'unknown'),
+        'finality_state': contract.get('finality_state', 'unknown'),
+        'finality_model': contract.get(
+            'finality_model',
+            contract.get('finality_state', 'unknown'),
+        ),
+        'reversal_or_dispute_capability': contract.get(
+            'reversal_or_dispute_capability',
+            'court_case',
+        ),
+        'dispute_model': contract.get(
+            'dispute_model',
+            contract.get('reversal_or_dispute_capability', 'court_case'),
+        ),
+    }
+
+
+def settlement_adapter_contract_digest(contract_or_adapter):
+    snapshot = settlement_adapter_contract_snapshot(contract_or_adapter)
+    raw = json.dumps(snapshot, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _settlement_adapter_contract(adapter, *, host_supported_adapters=None):
     adapter = dict(adapter or {})
     adapter_id = (adapter.get('adapter_id') or '').strip()
@@ -713,6 +756,8 @@ def _settlement_adapter_contract(adapter, *, host_supported_adapters=None):
         'execution_blockers': list(blockers),
         'execution_ready': not blockers,
     }
+    contract['contract_snapshot'] = settlement_adapter_contract_snapshot(contract)
+    contract['contract_digest'] = settlement_adapter_contract_digest(contract)
     return contract
 
 
@@ -1305,6 +1350,8 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
         'note': note or '',
         'settlement_proof': normalized_proof.get('proof', {}),
         'settlement_adapter_contract': contract,
+        'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
     })
     timestamp = _now()
     record['status'] = 'executed'
@@ -1314,12 +1361,17 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
     record['warrant_id'] = (warrant_id or '').strip()
     record['settlement_adapter'] = settlement_adapter
     record['settlement_adapter_contract'] = contract
+    record['settlement_adapter_contract_snapshot'] = contract.get('contract_snapshot', {})
+    record['settlement_adapter_contract_digest'] = contract.get('contract_digest', '')
     record['tx_hash'] = normalized_proof.get('tx_hash', '')
     record['execution_refs'] = {
         'tx_ref': tx_row['tx_ref'],
         'settlement_adapter': settlement_adapter,
         'settlement_adapter_contract': contract,
+        'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
         'tx_hash': normalized_proof.get('tx_hash', ''),
+        'currency': record.get('currency', 'USDC'),
         'proof_type': adapter.get('proof_type', ''),
         'verification_state': normalized_proof.get('verification_state', ''),
         'finality_state': normalized_proof.get('finality_state', ''),
@@ -1340,7 +1392,11 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
                 'proposal_id': proposal_id,
                 'tx_ref': tx_row['tx_ref'],
                 'settlement_adapter': settlement_adapter,
+                'settlement_adapter_contract': contract,
+                'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+                'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
                 'tx_hash': normalized_proof.get('tx_hash', ''),
+                'currency': record.get('currency', 'USDC'),
                 'proof_type': adapter.get('proof_type', ''),
                 'verification_state': normalized_proof.get('verification_state', ''),
                 'finality_state': normalized_proof.get('finality_state', ''),

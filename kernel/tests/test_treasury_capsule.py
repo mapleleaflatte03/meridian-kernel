@@ -262,6 +262,16 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(proposal['execution_refs']['settlement_adapter_contract']['execution_mode'], 'host_ledger')
         self.assertEqual(proposal['execution_refs']['settlement_adapter_contract']['dispute_model'], 'court_case')
         self.assertEqual(proposal['execution_refs']['settlement_adapter_contract']['finality_model'], 'host_local_final')
+        self.assertEqual(
+            proposal['execution_refs']['settlement_adapter_contract_snapshot']['adapter_id'],
+            'internal_ledger',
+        )
+        self.assertEqual(
+            proposal['execution_refs']['settlement_adapter_contract_digest'],
+            treasury.settlement_adapter_contract_digest(
+                proposal['execution_refs']['settlement_adapter_contract_snapshot']
+            ),
+        )
         self.assertEqual(proposal['execution_refs']['proof']['mode'], 'institution_transactions_journal')
 
         summary = treasury.payout_proposal_summary(self.org_id)
@@ -279,6 +289,14 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(tx_lines[-1]['warrant_id'], 'war_exec_123')
         self.assertEqual(tx_lines[-1]['verification_state'], 'host_ledger_final')
         self.assertEqual(tx_lines[-1]['settlement_adapter_contract']['execution_mode'], 'host_ledger')
+        self.assertEqual(
+            tx_lines[-1]['settlement_adapter_contract_snapshot']['adapter_id'],
+            'internal_ledger',
+        )
+        self.assertEqual(
+            tx_lines[-1]['settlement_adapter_contract_digest'],
+            proposal['execution_refs']['settlement_adapter_contract_digest'],
+        )
 
     def test_create_payout_proposal_blocks_ineligible_wallet(self):
         (self.capsule_dir / 'wallets.json').write_text(json.dumps({
@@ -569,6 +587,16 @@ class TreasuryCapsuleTests(unittest.TestCase):
             'x402_onchain',
         )
         self.assertEqual(
+            executed['execution_refs']['settlement_adapter_contract_snapshot']['adapter_id'],
+            'base_usdc_x402',
+        )
+        self.assertEqual(
+            executed['execution_refs']['settlement_adapter_contract_digest'],
+            treasury.settlement_adapter_contract_digest(
+                executed['execution_refs']['settlement_adapter_contract_snapshot']
+            ),
+        )
+        self.assertEqual(
             executed['execution_refs']['proof']['reference'],
             'base://receipt/enabled',
         )
@@ -584,6 +612,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(
             tx_lines[-1]['settlement_adapter_contract']['settlement_path'],
             'x402_onchain',
+        )
+        self.assertEqual(
+            tx_lines[-1]['settlement_adapter_contract_digest'],
+            executed['execution_refs']['settlement_adapter_contract_digest'],
         )
 
     def test_execute_payout_records_linked_commitment_settlement_ref(self):
@@ -685,6 +717,14 @@ class TreasuryCapsuleTests(unittest.TestCase):
             proposal['execution_refs']['tx_ref'],
         )
         self.assertEqual(
+            proposal['linked_commitment']['settlement_refs'][0]['settlement_adapter_contract_snapshot']['adapter_id'],
+            'internal_ledger',
+        )
+        self.assertEqual(
+            proposal['linked_commitment']['settlement_refs'][0]['settlement_adapter_contract_digest'],
+            proposal['execution_refs']['settlement_adapter_contract_digest'],
+        )
+        self.assertEqual(
             treasury.commitments.commitment_summary(self.org_id)['settlement_refs_total'],
             1,
         )
@@ -703,6 +743,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertTrue(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'host_ledger')
         self.assertEqual(result['contract']['settlement_path'], 'journal_append')
+        self.assertEqual(
+            result['contract']['contract_digest'],
+            treasury.settlement_adapter_contract_digest(result['contract']['contract_snapshot']),
+        )
         self.assertEqual(result['contract']['dispute_model'], 'court_case')
         self.assertEqual(result['contract']['finality_model'], 'host_local_final')
         self.assertFalse(result['execution_blockers'])

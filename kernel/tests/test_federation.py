@@ -1451,6 +1451,166 @@ class FederationTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
+    def test_workspace_federation_bad_receipt_auto_stays_warrant(self):
+        try:
+            port_alpha = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        class BadReceiptHandler(BaseHTTPRequestHandler):
+            receive_count = 0
+
+            def log_message(self, format, *args):
+                return
+
+            def do_GET(self):
+                if self.path != '/api/federation/manifest':
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = json.dumps({
+                    'manifest_version': 1,
+                    'host_identity': {'host_id': 'host_beta'},
+                    'admission': {'admitted_org_ids': ['org_beta']},
+                    'service_registry': {
+                        'federation_gateway': {
+                            'identity_model': 'signed_host_service',
+                            'supports_institution_routing': True,
+                        },
+                    },
+                    'federation': {
+                        'enabled': True,
+                        'boundary_name': 'federation_gateway',
+                        'identity_model': 'signed_host_service',
+                    },
+                }).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                if self.path != '/api/federation/receive':
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                type(self).receive_count += 1
+                length = int(self.headers.get('Content-Length', '0') or 0)
+                payload = json.loads(self.rfile.read(length).decode('utf-8') or '{}')
+                envelope = payload.get('envelope', '')
+                body_b64 = envelope.split('.', 1)[0]
+                padding = '=' * ((4 - len(body_b64) % 4) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(body_b64 + padding).decode('utf-8'))
+                body = json.dumps({
+                    'accepted': True,
+                    'receipt': {
+                        'receipt_id': 'fedrcpt_bad_warrant',
+                        'envelope_id': claims['envelope_id'],
+                        'accepted_at': '2026-03-22T00:00:00Z',
+                        'receiver_host_id': 'host_beta',
+                        'receiver_institution_id': 'org_wrong',
+                        'message_type': claims['message_type'],
+                        'boundary_name': claims['boundary_name'],
+                        'identity_model': 'signed_host_service',
+                    },
+                }).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        try:
+            server = ThreadingHTTPServer(('127.0.0.1', 0), BadReceiptHandler)
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                alpha = _seed_workspace_root(
+                    os.path.join(tmp, 'alpha'),
+                    org_id='org_alpha',
+                    user_id='user_owner_alpha',
+                    host_id='host_alpha',
+                    port=port_alpha,
+                    signing_secret='alpha-secret',
+                    peer_entries={
+                        'host_beta': {
+                            'label': 'Beta Host',
+                            'transport': 'https',
+                            'endpoint_url': f'http://127.0.0.1:{server.server_address[1]}',
+                            'trust_state': 'trusted',
+                            'shared_secret': 'beta-secret',
+                            'admitted_org_ids': ['org_beta'],
+                        },
+                    },
+                )
+                with _run_workspace(alpha):
+                    session = _issue_workspace_session(alpha)
+                    request_payload = {'task': 'demo'}
+                    warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
+                    status, body = _http_json(
+                        'POST',
+                        alpha['base_url'] + '/api/federation/send',
+                        payload={
+                            'target_host_id': 'host_beta',
+                            'target_org_id': 'org_beta',
+                            'message_type': 'execution_request',
+                            'payload': request_payload,
+                            'warrant_id': warrant['warrant_id'],
+                        },
+                        headers={
+                            'Authorization': f"Bearer {session['token']}",
+                            'Content-Type': 'application/json',
+                        },
+                    )
+                    self.assertEqual(status, 502, body)
+                    self.assertEqual(body['case']['claim_type'], 'misrouted_execution')
+                    self.assertTrue(body['warrant']['applied'])
+                    self.assertEqual(body['warrant']['warrant_id'], warrant['warrant_id'])
+                    self.assertEqual(body['warrant']['court_review_state'], 'stayed')
+                    self.assertEqual(BadReceiptHandler.receive_count, 1)
+
+                    warrants_path = os.path.join(alpha['economy'], 'warrants.json')
+                    with open(warrants_path) as f:
+                        warrant_store = json.load(f)
+                    warrant_record = warrant_store['warrants'][warrant['warrant_id']]
+                    self.assertEqual(warrant_record['court_review_state'], 'stayed')
+                    self.assertEqual(warrant_record['execution_state'], 'ready')
+
+                    blocked_status, blocked_body = _http_json(
+                        'POST',
+                        alpha['base_url'] + '/api/federation/send',
+                        payload={
+                            'target_host_id': 'host_beta',
+                            'target_org_id': 'org_beta',
+                            'message_type': 'execution_request',
+                            'payload': request_payload,
+                            'warrant_id': warrant['warrant_id'],
+                        },
+                        headers={
+                            'Authorization': f"Bearer {session['token']}",
+                            'Content-Type': 'application/json',
+                        },
+                    )
+                    self.assertEqual(blocked_status, 403, blocked_body)
+                    self.assertIn('court_review_state=stayed', blocked_body['error'])
+                    self.assertEqual(BadReceiptHandler.receive_count, 1)
+
+                alpha_events = _read_jsonl(alpha['audit_log'])
+                stayed = [e for e in alpha_events if e.get('action') == 'warrant_stayed_for_case']
+                blocked = [e for e in alpha_events if e.get('action') == 'federation_warrant_blocked']
+                self.assertTrue(stayed)
+                self.assertEqual(stayed[-1]['resource'], warrant['warrant_id'])
+                self.assertTrue(blocked)
+                self.assertEqual(blocked[-1]['details']['warrant_id'], warrant['warrant_id'])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_workspace_federation_send_rejects_missing_warrant(self):
         try:
             port_alpha = _find_free_port()

@@ -39,6 +39,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
         self.orig_log_event = self.workspace.log_event
         self.orig_list_warrants = self.workspace.list_warrants
+        self.orig_review_warrant = self.workspace.review_warrant
         self.orig_commitment_summary = self.workspace.commitment_summary
         self.orig_list_commitments = self.workspace.list_commitments
         self.orig_validate_commitment_for_delivery = self.workspace.validate_commitment_for_delivery
@@ -68,6 +69,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
         self.workspace.log_event = self.orig_log_event
         self.workspace.list_warrants = self.orig_list_warrants
+        self.workspace.review_warrant = self.orig_review_warrant
         self.workspace.commitment_summary = self.orig_commitment_summary
         self.workspace.list_commitments = self.orig_list_commitments
         self.workspace.validate_commitment_for_delivery = self.orig_validate_commitment_for_delivery
@@ -993,6 +995,44 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(result['peer_host_id'], 'host_beta')
         self.assertEqual(result['trust_state'], 'suspended')
         self.assertEqual(audit_events[0]['args'][2], 'federation_peer_auto_suspended')
+
+    def test_maybe_stay_warrant_for_case_stays_ready_warrant(self):
+        audit_events = []
+        self.workspace.list_warrants = lambda org_id=None, **_kwargs: [
+            {
+                'warrant_id': 'war_demo',
+                'court_review_state': 'approved',
+                'execution_state': 'ready',
+            }
+        ]
+        self.workspace.review_warrant = lambda warrant_id, decision, by, **_kwargs: {
+            'warrant_id': warrant_id,
+            'court_review_state': 'stayed',
+            'execution_state': 'ready',
+            'reviewed_by': by,
+        }
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        warrant = self.workspace._maybe_stay_warrant_for_case(
+            {
+                'case_id': 'case_demo',
+                'claim_type': 'misrouted_execution',
+                'linked_warrant_id': 'war_demo',
+            },
+            'user_owner',
+            org_id='org_a',
+            session_id='ses_demo',
+            note='Receipt contradiction',
+        )
+
+        self.assertTrue(warrant['applied'])
+        self.assertEqual(warrant['warrant_id'], 'war_demo')
+        self.assertEqual(warrant['court_review_state'], 'stayed')
+        self.assertEqual(audit_events[0]['args'][2], 'warrant_stayed_for_case')
+        self.assertEqual(audit_events[0]['kwargs']['details']['case_id'], 'case_demo')
 
     def test_maybe_open_case_for_delivery_failure_creates_case_and_suspends_peer(self):
         from federation import FederationDeliveryError, FederationEnvelopeClaims

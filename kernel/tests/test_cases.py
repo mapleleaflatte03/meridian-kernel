@@ -64,6 +64,7 @@ class CaseCapsuleTests(unittest.TestCase):
             'commitment_id': 'cmt_demo',
             'target_host_id': 'host_beta',
             'target_institution_id': 'org_beta',
+            'warrant_id': 'war_demo',
         }
         first, created_first = cases.ensure_case_for_commitment_breach(
             commitment,
@@ -80,6 +81,7 @@ class CaseCapsuleTests(unittest.TestCase):
         self.assertTrue(created_first)
         self.assertFalse(created_second)
         self.assertEqual(first['case_id'], second['case_id'])
+        self.assertEqual(first['linked_warrant_id'], 'war_demo')
 
     def test_blocking_helpers_surface_commitments_and_peers(self):
         blocking = cases.open_case(

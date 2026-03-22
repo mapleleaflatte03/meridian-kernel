@@ -1,15 +1,257 @@
 #!/usr/bin/env python3
 import base64
+import contextlib
 import json
 import os
+import shutil
+import socket
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+WORKSPACE = os.path.dirname(ROOT)
 sys.path.insert(0, ROOT)
+
+
+def _now_stub():
+    return '2026-03-22T00:00:00Z'
+
+
+def _write_json(path, payload):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+
+
+def _read_jsonl(path):
+    if not os.path.exists(path):
+        return []
+    rows = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def _find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(('127.0.0.1', 0))
+        sock.listen(1)
+        return sock.getsockname()[1]
+    finally:
+        sock.close()
+
+
+def _auth_header(user, password):
+    raw = f'{user}:{password}'.encode('utf-8')
+    return 'Basic ' + base64.b64encode(raw).decode('ascii')
+
+
+def _http_json(method, url, *, payload=None, headers=None):
+    req = urllib_request.Request(
+        url,
+        data=(json.dumps(payload).encode('utf-8') if payload is not None else None),
+        headers=headers or {},
+        method=method,
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=10) as response:
+            body = response.read().decode('utf-8')
+            return response.status, (json.loads(body) if body else {})
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        return exc.code, (json.loads(body) if body else {})
+
+
+def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_secret,
+                         peer_entries=None):
+    kernel_src = os.path.join(WORKSPACE, 'kernel')
+    economy_src = os.path.join(WORKSPACE, 'economy')
+    kernel_dst = os.path.join(root_dir, 'kernel')
+    economy_dst = os.path.join(root_dir, 'economy')
+    shutil.copytree(kernel_src, kernel_dst)
+    shutil.copytree(economy_src, economy_dst)
+
+    _write_json(
+        os.path.join(kernel_dst, 'organizations.json'),
+        {
+            'organizations': {
+                org_id: {
+                    'id': org_id,
+                    'name': f'{org_id} Institution',
+                    'slug': org_id,
+                    'owner_id': user_id,
+                    'members': [
+                        {
+                            'user_id': user_id,
+                            'role': 'owner',
+                            'added_at': _now_stub(),
+                        }
+                    ],
+                    'plan': 'enterprise',
+                    'status': 'active',
+                    'charter': '',
+                    'policy_defaults': {},
+                    'treasury_id': None,
+                    'lifecycle_state': 'active',
+                    'settings': {},
+                    'created_at': _now_stub(),
+                },
+            },
+            'updatedAt': _now_stub(),
+        },
+    )
+    _write_json(
+        os.path.join(kernel_dst, 'agent_registry.json'),
+        {'agents': {}, 'updatedAt': _now_stub()},
+    )
+    _write_json(
+        os.path.join(kernel_dst, 'host_identity.json'),
+        {
+            'host_id': host_id,
+            'label': host_id,
+            'role': 'institution_host',
+            'federation_enabled': True,
+            'peer_transport': 'https',
+            'supported_boundaries': [
+                'workspace',
+                'cli',
+                'federation_gateway',
+            ],
+            'settlement_adapters': [],
+        },
+    )
+    _write_json(
+        os.path.join(kernel_dst, 'institution_admissions.json'),
+        {
+            'host_id': host_id,
+            'institutions': {
+                org_id: {
+                    'status': 'admitted',
+                    'source': 'test_seed',
+                    'updated_at': _now_stub(),
+                    'admitted_at': _now_stub(),
+                },
+            },
+            'updated_at': _now_stub(),
+        },
+    )
+    _write_json(
+        os.path.join(kernel_dst, 'federation_peers.json'),
+        {
+            'host_id': host_id,
+            'peers': peer_entries or {},
+            'updated_at': _now_stub(),
+        },
+    )
+    open(os.path.join(kernel_dst, 'audit_log.jsonl'), 'w').close()
+    open(os.path.join(kernel_dst, '.federation_replay'), 'w').close()
+
+    env = os.environ.copy()
+    env.update({
+        'MERIDIAN_WORKSPACE_USER': f'{org_id}_user',
+        'MERIDIAN_WORKSPACE_PASS': f'{org_id}_pass',
+        'MERIDIAN_WORKSPACE_AUTH_ORG_ID': org_id,
+        'MERIDIAN_WORKSPACE_USER_ID': user_id,
+        'MERIDIAN_RUNTIME_HOST_IDENTITY_FILE': os.path.join(kernel_dst, 'host_identity.json'),
+        'MERIDIAN_RUNTIME_ADMISSION_FILE': os.path.join(kernel_dst, 'institution_admissions.json'),
+        'MERIDIAN_FEDERATION_PEERS_FILE': os.path.join(kernel_dst, 'federation_peers.json'),
+        'MERIDIAN_FEDERATION_REPLAY_FILE': os.path.join(kernel_dst, '.federation_replay'),
+        'MERIDIAN_FEDERATION_SIGNING_SECRET': signing_secret,
+        'MERIDIAN_SESSION_SECRET': f'{host_id}-session-secret',
+        'PYTHONUNBUFFERED': '1',
+    })
+    return {
+        'root': root_dir,
+        'kernel': kernel_dst,
+        'economy': economy_dst,
+        'port': port,
+        'org_id': org_id,
+        'user_id': user_id,
+        'host_id': host_id,
+        'workspace_py': os.path.join(kernel_dst, 'workspace.py'),
+        'audit_log': os.path.join(kernel_dst, 'audit_log.jsonl'),
+        'env': env,
+        'auth_header': _auth_header(env['MERIDIAN_WORKSPACE_USER'], env['MERIDIAN_WORKSPACE_PASS']),
+        'base_url': f'http://127.0.0.1:{port}',
+    }
+
+
+@contextlib.contextmanager
+def _run_workspace(instance):
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            instance['workspace_py'],
+            '--port',
+            str(instance['port']),
+            '--org-id',
+            instance['org_id'],
+        ],
+        cwd=instance['root'],
+        env=instance['env'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.time() + 10
+        last_error = ''
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                output = proc.stdout.read() if proc.stdout else ''
+                raise RuntimeError(
+                    f"workspace {instance['host_id']} exited early with code {proc.returncode}: {output}"
+                )
+            try:
+                status, body = _http_json('GET', instance['base_url'] + '/api/federation/manifest')
+                if status == 200 and body.get('host_identity', {}).get('host_id') == instance['host_id']:
+                    break
+                last_error = f'status={status} body={body}'
+            except Exception as exc:
+                last_error = str(exc)
+            time.sleep(0.1)
+        else:
+            raise RuntimeError(
+                f"workspace {instance['host_id']} did not become ready: {last_error}"
+            )
+        yield proc
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+
+def _issue_workspace_session(instance):
+    status, body = _http_json(
+        'POST',
+        instance['base_url'] + '/api/session/issue',
+        payload={},
+        headers={
+            'Authorization': instance['auth_header'],
+            'Content-Type': 'application/json',
+        },
+    )
+    if status != 200:
+        raise AssertionError(f'failed issuing session for {instance["host_id"]}: {status} {body}')
+    return body
 
 
 class FederationTests(unittest.TestCase):
@@ -670,6 +912,314 @@ class FederationTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_workspace_federation_send_round_trips_between_two_hosts_with_session_audit(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                session_id = session['session_id']
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'execution_request',
+                        'payload': {'task': 'demo'},
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                delivery = body['delivery']
+                self.assertEqual(delivery['receipt']['receiver_host_id'], 'host_beta')
+                self.assertEqual(delivery['receipt']['receiver_institution_id'], 'org_beta')
+                self.assertEqual(delivery['claims']['session_id'], session_id)
+                self.assertEqual(delivery['claims']['actor_id'], 'user_owner_alpha')
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            sent = [event for event in alpha_events if event.get('action') == 'federation_envelope_sent']
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertTrue(sent)
+            self.assertTrue(received)
+            self.assertEqual(sent[-1].get('session_id'), session_id)
+            self.assertEqual(received[-1].get('session_id'), session_id)
+            self.assertEqual(sent[-1]['details']['receiver_host_id'], 'host_beta')
+            self.assertEqual(received[-1]['details']['source_host_id'], 'host_alpha')
+            self.assertEqual(received[-1]['agent_id'], 'user_owner_alpha')
+
+    def test_workspace_federation_send_rejects_manifest_host_mismatch(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_gamma': {
+                        'label': 'Gamma Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'gamma-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_gamma',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'execution_request',
+                        'payload': {'task': 'demo'},
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 502, body)
+                self.assertIn("manifest host_id 'host_beta' does not match trusted peer 'host_gamma'", body['error'])
+
+            beta_events = _read_jsonl(beta['audit_log'])
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertEqual(received, [])
+
+    def test_workspace_federation_send_rejects_manifest_target_org_mismatch(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_wrong',
+                        'message_type': 'execution_request',
+                        'payload': {'task': 'demo'},
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 502, body)
+                self.assertIn("registry does not admit target institution 'org_wrong'", body['error'])
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            failed = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_envelope_delivery_failed'
+            ]
+            beta_events = _read_jsonl(beta['audit_log'])
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertTrue(failed)
+            self.assertEqual(failed[-1]['details']['target_institution_id'], 'org_wrong')
+            self.assertEqual(received, [])
+
+    def test_workspace_federation_send_rejects_forged_peer_signature(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'wrong-alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/send',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_org_id': 'org_beta',
+                        'message_type': 'execution_request',
+                        'payload': {'task': 'demo'},
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 502, body)
+                self.assertIn('HTTP 403', body['error'])
+                self.assertIn('Envelope signature verification failed', body['error'])
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            failed = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_envelope_delivery_failed'
+            ]
+            beta_events = _read_jsonl(beta['audit_log'])
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertTrue(failed)
+            self.assertEqual(failed[-1]['details']['target_host_id'], 'host_beta')
+            self.assertEqual(received, [])
 
     def test_upsert_peer_registry_entry_round_trips_file_backed_registry(self):
         from federation import load_peer_registry, upsert_peer_registry_entry

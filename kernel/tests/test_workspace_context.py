@@ -1733,6 +1733,11 @@ class WorkspaceContextTests(unittest.TestCase):
             'linked_commitment_id': commitment['commitment_id'],
             'linked_warrant_id': commitment['warrant_id'],
         }, True)
+        self.workspace._maybe_suspend_peer_for_case = lambda case_record, actor_id, **kwargs: {
+            'applied': True,
+            'peer_host_id': case_record.get('target_host_id', ''),
+            'trust_state': 'suspended',
+        }
         self.workspace._maybe_stay_warrant_for_case = lambda *args, **kwargs: {
             'applied': True,
             'warrant_id': 'war_commit_demo',
@@ -1770,6 +1775,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(processing['breached'])
         self.assertEqual(processing['commitment']['breached_by'], 'user_owner_beta')
         self.assertEqual(processing['case']['case_id'], 'case_breach_demo')
+        self.assertEqual(processing['federation_peer']['trust_state'], 'suspended')
         self.assertEqual(processing['warrant']['court_review_state'], 'stayed')
         self.assertEqual(processing['inbox_entry']['state'], 'processed')
         self.assertEqual(audit_events[-1][0][2], 'federation_commitment_breach_notice_recorded')

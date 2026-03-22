@@ -1885,6 +1885,12 @@ def _process_received_commitment_breach_notice(bound_org_id, claims, receipt, *,
         org_id=bound_org_id,
         note=payload.get('note', '') or 'Opened from received commitment_breach_notice envelope',
     )
+    federation_peer = _maybe_suspend_peer_for_case(
+        case_record,
+        actor_id,
+        org_id=bound_org_id,
+        session_id=claims.session_id or None,
+    )
     if created_case:
         log_event(
             bound_org_id,
@@ -1926,6 +1932,7 @@ def _process_received_commitment_breach_notice(bound_org_id, claims, receipt, *,
             breached=breached,
             case_id=case_record.get('case_id', ''),
             case_created=created_case,
+            federation_peer_state=(federation_peer or {}).get('trust_state', ''),
             warrant_state=(warrant or {}).get('court_review_state', ''),
         ),
         session_id=claims.session_id or None,
@@ -1938,6 +1945,7 @@ def _process_received_commitment_breach_notice(bound_org_id, claims, receipt, *,
         'commitment': commitment,
         'breached': breached,
         'case': case_record,
+        'federation_peer': federation_peer,
         'warrant': warrant,
         'inbox_entry': inbox_entry,
     }

@@ -4845,6 +4845,10 @@ class FederationTests(unittest.TestCase):
                     breach_body['delivery']['response']['processing']['reason'],
                     'commitment_breach_notice_recorded',
                 )
+                self.assertEqual(
+                    breach_body['delivery']['response']['processing']['federation_peer']['trust_state'],
+                    'suspended',
+                )
 
                 alpha_status, alpha_body = _http_json(
                     'GET',
@@ -4870,6 +4874,7 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(case_body['blocking_commitment_ids'], [commitment_id])
                 self.assertEqual(case_body['cases'][0]['claim_type'], 'breach_of_commitment')
                 self.assertEqual(case_body['cases'][0]['target_host_id'], 'host_beta')
+                self.assertEqual(case_body['blocked_peer_host_ids'], ['host_beta'])
 
                 inbox_status, inbox_body = _http_json(
                     'GET',

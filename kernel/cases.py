@@ -56,6 +56,7 @@ PEER_SUSPENSION_CLAIM_TYPES = (
     'fraudulent_proof',
     'invalid_settlement_notice',
     'misrouted_execution',
+    'breach_of_commitment',
 )
 
 

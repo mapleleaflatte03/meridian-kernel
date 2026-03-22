@@ -82,6 +82,8 @@ class CaseCapsuleTests(unittest.TestCase):
         self.assertFalse(created_second)
         self.assertEqual(first['case_id'], second['case_id'])
         self.assertEqual(first['linked_warrant_id'], 'war_demo')
+        self.assertTrue(cases.case_targets_peer(first))
+        self.assertEqual(cases.blocked_peer_host_ids(self.org_id), ['host_beta'])
 
     def test_breach_helper_targets_counterparty_for_mirrored_commitment(self):
         mirrored_commitment = {
@@ -102,6 +104,8 @@ class CaseCapsuleTests(unittest.TestCase):
         self.assertTrue(created)
         self.assertEqual(record['target_host_id'], 'host_alpha')
         self.assertEqual(record['target_institution_id'], 'org_alpha')
+        self.assertTrue(cases.case_targets_peer(record))
+        self.assertEqual(cases.blocked_peer_host_ids(self.org_id), ['host_alpha'])
 
     def test_blocking_helpers_surface_commitments_and_peers(self):
         blocking = cases.open_case(

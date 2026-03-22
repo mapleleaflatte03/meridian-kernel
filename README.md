@@ -204,9 +204,9 @@ signed peer breach notice rather than a same-host shortcut.
 `/api/cases` now exposes first inter-institution case records and summary
 counts, and the reference workspace can mutate those records through
 `POST /api/cases/open`, `/api/cases/stay`, and `/api/cases/resolve`.
-Commitment breach can now open a linked local case record, but this is still
-the start of the cross-institution court program rather than the full network
-dispute system.
+Commitment breach can now open a linked local case record and freeze the
+breaching peer on the receiver side, but this is still the start of the
+cross-institution court program rather than the full network dispute system.
 Those case endpoints can also federate a `case_notice` protocol object: the
 sender can mirror open/stay/resolve to the target host, and the receiver
 applies that notice idempotently against the source host/institution/source

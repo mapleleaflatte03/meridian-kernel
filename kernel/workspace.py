@@ -221,12 +221,15 @@ from commitments import (
     commitment_summary,
     get_commitment,
     list_commitments,
+    sync_federated_commitment_proposal,
     record_delivery_ref,
     record_settlement_ref,
     reject_commitment,
     propose_commitment,
     settle_commitment,
+    validate_commitment_for_acceptance_dispatch,
     validate_commitment_for_delivery,
+    validate_commitment_for_proposal_dispatch,
     validate_commitment_for_settlement,
 )
 from cases import (
@@ -1593,6 +1596,145 @@ def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session
     }
 
 
+def _process_received_commitment_proposal(bound_org_id, claims, receipt, *, payload=None):
+    payload = payload if isinstance(payload, dict) else {}
+    actor_id = claims.actor_id or f'peer:{claims.source_host_id}'
+    summary = (payload.get('summary') or payload.get('commitment_type') or '').strip()
+    if not summary:
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'received',
+            'reason': 'invalid_commitment_payload',
+            'error': 'summary is required',
+        }
+    metadata = dict(payload.get('metadata') or {})
+    metadata.setdefault('federation_source_host_id', claims.source_host_id)
+    metadata.setdefault('federation_envelope_id', claims.envelope_id)
+    commitment, created = sync_federated_commitment_proposal(
+        bound_org_id,
+        claims.commitment_id,
+        source_host_id=claims.source_host_id,
+        source_institution_id=claims.source_institution_id,
+        target_host_id=claims.target_host_id,
+        target_institution_id=claims.target_institution_id,
+        summary=summary,
+        actor_id=actor_id,
+        terms_payload=payload.get('terms_payload'),
+        warrant_id=claims.warrant_id,
+        note=payload.get('note', ''),
+        metadata=metadata,
+    )
+    inbox_entry = _federation_inbox_entry(
+        bound_org_id,
+        claims,
+        receipt,
+        payload=payload,
+        state='processed',
+    )
+    log_event(
+        bound_org_id,
+        actor_id,
+        'federation_commitment_proposal_recorded',
+        resource=claims.commitment_id,
+        outcome='success',
+        actor_type=claims.actor_type or 'service',
+        details=_federation_audit_details(
+            claims,
+            receipt_id=(receipt or {}).get('receipt_id', ''),
+            summary=summary,
+            created=created,
+        ),
+        session_id=claims.session_id or None,
+    )
+    return {
+        'applied': True,
+        'message_type': claims.message_type,
+        'state': 'processed',
+        'reason': 'commitment_proposal_recorded',
+        'commitment': commitment,
+        'created': created,
+        'inbox_entry': inbox_entry,
+    }
+
+
+def _process_received_commitment_acceptance(bound_org_id, claims, receipt, *, payload=None):
+    payload = payload if isinstance(payload, dict) else {}
+    actor_id = claims.actor_id or f'peer:{claims.source_host_id}'
+    commitment = get_commitment(claims.commitment_id, org_id=bound_org_id)
+    if not commitment:
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'received',
+            'reason': 'commitment_not_found',
+            'error': f"Commitment not found: {claims.commitment_id}",
+        }
+    if (commitment.get('target_host_id') or '').strip() != (claims.source_host_id or '').strip():
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'received',
+            'reason': 'commitment_target_mismatch',
+            'error': (
+                f"Commitment '{claims.commitment_id}' target_host_id "
+                f"{commitment.get('target_host_id', '')!r} does not match "
+                f"{(claims.source_host_id or '').strip()!r}"
+            ),
+        }
+    if (commitment.get('target_institution_id') or '').strip() != (claims.source_institution_id or '').strip():
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'received',
+            'reason': 'commitment_target_mismatch',
+            'error': (
+                f"Commitment '{claims.commitment_id}' target_institution_id "
+                f"{commitment.get('target_institution_id', '')!r} does not match "
+                f"{(claims.source_institution_id or '').strip()!r}"
+            ),
+        }
+    created = False
+    if (commitment.get('status') or '').strip() != 'accepted':
+        commitment = accept_commitment(
+            claims.commitment_id,
+            actor_id,
+            org_id=bound_org_id,
+            note=payload.get('note', '') or 'Accepted via received commitment_acceptance envelope',
+        )
+        created = True
+    inbox_entry = _federation_inbox_entry(
+        bound_org_id,
+        claims,
+        receipt,
+        payload=payload,
+        state='processed',
+    )
+    log_event(
+        bound_org_id,
+        actor_id,
+        'federation_commitment_acceptance_recorded',
+        resource=claims.commitment_id,
+        outcome='success',
+        actor_type=claims.actor_type or 'service',
+        details=_federation_audit_details(
+            claims,
+            receipt_id=(receipt or {}).get('receipt_id', ''),
+            accepted=created,
+        ),
+        session_id=claims.session_id or None,
+    )
+    return {
+        'applied': True,
+        'message_type': claims.message_type,
+        'state': 'processed',
+        'reason': 'commitment_acceptance_recorded',
+        'commitment': commitment,
+        'accepted': created,
+        'inbox_entry': inbox_entry,
+    }
+
+
 def _process_received_federation_message(bound_org_id, claims, receipt, *, payload=None):
     result = {
         'applied': False,
@@ -1600,6 +1742,22 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
         'state': 'received',
         'reason': 'no_receiver_handler',
     }
+    if claims.message_type == 'commitment_proposal' and claims.commitment_id:
+        return _process_received_commitment_proposal(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+        )
+
+    if claims.message_type == 'commitment_acceptance' and claims.commitment_id:
+        return _process_received_commitment_acceptance(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+        )
+
     if claims.message_type == 'execution_request':
         actor_id = claims.actor_id or f'peer:{claims.source_host_id}'
         execution_job, receiver_warrant, blocking_case = _queue_received_execution_request(
@@ -1950,13 +2108,30 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
             raise
     if commitment_id:
         try:
-            linked_commitment = validate_commitment_for_delivery(
-                commitment_id,
-                target_institution_id=target_org_id,
-                org_id=bound_org_id,
-                target_host_id=target_host_id,
-                warrant_id=warrant_id,
-            )
+            if message_type == 'commitment_proposal':
+                linked_commitment = validate_commitment_for_proposal_dispatch(
+                    commitment_id,
+                    target_institution_id=target_org_id,
+                    org_id=bound_org_id,
+                    target_host_id=target_host_id,
+                    warrant_id=warrant_id,
+                )
+            elif message_type == 'commitment_acceptance':
+                linked_commitment = validate_commitment_for_acceptance_dispatch(
+                    commitment_id,
+                    target_institution_id=target_org_id,
+                    org_id=bound_org_id,
+                    target_host_id=target_host_id,
+                    warrant_id=warrant_id,
+                )
+            else:
+                linked_commitment = validate_commitment_for_delivery(
+                    commitment_id,
+                    target_institution_id=target_org_id,
+                    org_id=bound_org_id,
+                    target_host_id=target_host_id,
+                    warrant_id=warrant_id,
+                )
         except (PermissionError, ValueError) as exc:
             log_event(
                 bound_org_id,
@@ -4452,11 +4627,58 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     },
                     session_id=_sid,
                 )
-                return self._json({
+                response = {
                     'message': f"Commitment proposed: {commitment['commitment_id']}",
                     'commitment': commitment,
                     'summary': _commitment_summary(org_id),
-                })
+                }
+                if body.get('federate'):
+                    federated_payload = {'summary': summary}
+                    if 'terms_payload' in body:
+                        federated_payload['terms_payload'] = body.get('terms_payload')
+                    if body.get('note'):
+                        federated_payload['note'] = body.get('note', '')
+                    if 'metadata' in body:
+                        federated_payload['metadata'] = body.get('metadata')
+                    try:
+                        delivery, federation_state = _deliver_federation_envelope(
+                            org_id,
+                            target_host_id,
+                            target_org_id,
+                            'commitment_proposal',
+                            payload=federated_payload,
+                            actor_type='user',
+                            actor_id=by,
+                            session_id=_sid or '',
+                            warrant_id=commitment.get('warrant_id', ''),
+                            commitment_id=commitment['commitment_id'],
+                        )
+                    except FederationUnavailable as e:
+                        response['error'] = str(e)
+                        return self._json(response, 503)
+                    except PermissionError as e:
+                        response['error'] = str(e)
+                        response['case'] = getattr(e, 'case_record', None)
+                        response['federation_peer'] = getattr(e, 'federation_peer', None)
+                        response['warrant'] = getattr(e, 'warrant', None)
+                        if response['case']:
+                            return self._json(response, 409)
+                        return self._json(response, 403)
+                    except FederationDeliveryError as e:
+                        response.update({
+                            'error': str(e),
+                            'peer_host_id': e.peer_host_id,
+                            'claims': _federation_claims_dict(e.claims),
+                            'case': getattr(e, 'case_record', None),
+                            'federation_peer': getattr(e, 'federation_peer', None),
+                            'warrant': getattr(e, 'warrant', None),
+                        })
+                        return self._json(response, 502)
+                    response['delivery'] = delivery
+                    response['runtime_core'] = {
+                        'federation': federation_state,
+                    }
+                return self._json(response)
 
             elif path in (
                 '/api/commitments/accept',
@@ -4589,14 +4811,80 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         session_id=_sid,
                         note=body.get('case_note') or body.get('note', ''),
                     )
-                return self._json({
+                response = {
                     'message': f"Commitment {decision_past[decision]}: {commitment_id}",
                     'commitment': commitment,
                     'proposal': settlement_proposal,
                     'summary': _commitment_summary(org_id),
                     'case': case_record,
                     'warrant': warrant,
-                })
+                }
+                if decision == 'accept' and body.get('federate'):
+                    target_host_id = (
+                        body.get('target_host_id')
+                        or commitment.get('source_host_id')
+                        or ''
+                    ).strip()
+                    target_org_id = (
+                        body.get('target_institution_id')
+                        or body.get('target_org_id')
+                        or commitment.get('source_institution_id')
+                        or ''
+                    ).strip()
+                    if not target_host_id:
+                        response['error'] = (
+                            f"Commitment '{commitment_id}' does not declare source_host_id for "
+                            'federated acceptance dispatch'
+                        )
+                        return self._json(response, 400)
+                    if not target_org_id:
+                        response['error'] = (
+                            f"Commitment '{commitment_id}' does not declare source_institution_id for "
+                            'federated acceptance dispatch'
+                        )
+                        return self._json(response, 400)
+                    federated_payload = {}
+                    if body.get('note'):
+                        federated_payload['note'] = body.get('note', '')
+                    try:
+                        delivery, federation_state = _deliver_federation_envelope(
+                            org_id,
+                            target_host_id,
+                            target_org_id,
+                            'commitment_acceptance',
+                            payload=federated_payload,
+                            actor_type='user',
+                            actor_id=by,
+                            session_id=_sid or '',
+                            warrant_id=(body.get('warrant_id') or '').strip(),
+                            commitment_id=commitment_id,
+                        )
+                    except FederationUnavailable as e:
+                        response['error'] = str(e)
+                        return self._json(response, 503)
+                    except PermissionError as e:
+                        response['error'] = str(e)
+                        response['case'] = getattr(e, 'case_record', None)
+                        response['federation_peer'] = getattr(e, 'federation_peer', None)
+                        response['warrant'] = getattr(e, 'warrant', None)
+                        if response['case']:
+                            return self._json(response, 409)
+                        return self._json(response, 403)
+                    except FederationDeliveryError as e:
+                        response.update({
+                            'error': str(e),
+                            'peer_host_id': e.peer_host_id,
+                            'claims': _federation_claims_dict(e.claims),
+                            'case': getattr(e, 'case_record', None),
+                            'federation_peer': getattr(e, 'federation_peer', None),
+                            'warrant': getattr(e, 'warrant', None),
+                        })
+                        return self._json(response, 502)
+                    response['delivery'] = delivery
+                    response['runtime_core'] = {
+                        'federation': federation_state,
+                    }
+                return self._json(response)
 
             elif path == '/api/cases/open':
                 claim_type = (body.get('claim_type') or '').strip()

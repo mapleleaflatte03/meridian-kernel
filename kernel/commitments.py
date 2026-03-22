@@ -129,7 +129,8 @@ def _settlement_ref_matches(existing_ref, candidate_ref):
 
 def _propose_commitment_record(org_id, target_host_id, target_institution_id, summary,
                                actor_id, *, commitment_id=None, terms_payload=None,
-                               warrant_id='', note='', metadata=None):
+                               warrant_id='', note='', metadata=None,
+                               source_host_id='', source_institution_id=''):
     target_host_id = (target_host_id or '').strip()
     target_institution_id = _normalize_target_institution_id(
         target_institution_id=target_institution_id,
@@ -150,7 +151,8 @@ def _propose_commitment_record(org_id, target_host_id, target_institution_id, su
     record = {
         'commitment_id': commitment_id,
         'institution_id': org_id,
-        'source_institution_id': org_id,
+        'source_institution_id': (source_institution_id or org_id or '').strip(),
+        'source_host_id': (source_host_id or '').strip(),
         'target_host_id': target_host_id,
         'target_institution_id': target_institution_id,
         'commitment_type': summary,
@@ -204,6 +206,8 @@ def propose_commitment(*args, **kwargs):
             warrant_id=kwargs.get('warrant_id', ''),
             note=kwargs.get('note', ''),
             metadata=kwargs.get('metadata'),
+            source_host_id=kwargs.get('source_host_id', ''),
+            source_institution_id=kwargs.get('source_institution_id', ''),
         )
     if len(args) >= 3:
         target_host_id, target_org_id, summary = args[:3]
@@ -224,6 +228,8 @@ def propose_commitment(*args, **kwargs):
             warrant_id=kwargs.get('warrant_id', ''),
             note=kwargs.get('note', ''),
             metadata=kwargs.get('metadata'),
+            source_host_id=kwargs.get('source_host_id', ''),
+            source_institution_id=kwargs.get('source_institution_id', ''),
         )
     raise TypeError('Unsupported propose_commitment call signature')
 
@@ -340,6 +346,106 @@ def validate_commitment_for_delivery(commitment_id, *, target_host_id='',
         )
     except PermissionError as exc:
         raise ValueError(str(exc))
+
+
+def validate_commitment_for_proposal_dispatch(commitment_id, *, org_id=None,
+                                              target_host_id='', target_institution_id='',
+                                              warrant_id=''):
+    record = get_commitment(commitment_id, org_id=org_id)
+    if not record:
+        raise PermissionError(f"Commitment '{commitment_id}' does not exist")
+    if _canonical_state(record) != 'proposed':
+        raise PermissionError(
+            f"Commitment '{commitment_id}' is not ready for proposal dispatch "
+            f"(state={_canonical_state(record)})"
+        )
+    if target_host_id and record.get('target_host_id') != target_host_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' target_host_id "
+            f"{record.get('target_host_id', '')!r} does not match {target_host_id!r}"
+        )
+    if target_institution_id and record.get('target_institution_id') != target_institution_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' target_institution_id "
+            f"{record.get('target_institution_id', '')!r} does not match {target_institution_id!r}"
+        )
+    if warrant_id and record.get('warrant_id') and record.get('warrant_id') != warrant_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' warrant_id "
+            f"{record.get('warrant_id', '')!r} does not match {warrant_id!r}"
+        )
+    return record
+
+
+def validate_commitment_for_acceptance_dispatch(commitment_id, *, org_id=None,
+                                                target_host_id='', target_institution_id='',
+                                                warrant_id=''):
+    record = get_commitment(commitment_id, org_id=org_id)
+    if not record:
+        raise PermissionError(f"Commitment '{commitment_id}' does not exist")
+    if _canonical_state(record) != 'accepted':
+        raise PermissionError(
+            f"Commitment '{commitment_id}' is not ready for acceptance dispatch "
+            f"(state={_canonical_state(record)})"
+        )
+    if target_host_id and (record.get('source_host_id') or '') != target_host_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' source_host_id "
+            f"{record.get('source_host_id', '')!r} does not match {target_host_id!r}"
+        )
+    if target_institution_id and (record.get('source_institution_id') or '') != target_institution_id:
+        raise PermissionError(
+            f"Commitment '{commitment_id}' source_institution_id "
+            f"{record.get('source_institution_id', '')!r} does not match {target_institution_id!r}"
+        )
+    return record
+
+
+def sync_federated_commitment_proposal(org_id, commitment_id, *, source_host_id='',
+                                       source_institution_id='', target_host_id='',
+                                       target_institution_id='', summary='',
+                                       actor_id='', terms_payload=None,
+                                       warrant_id='', note='', metadata=None):
+    commitment_id = (commitment_id or '').strip()
+    if not commitment_id:
+        raise ValueError('commitment_id is required')
+    existing = get_commitment(commitment_id, org_id=org_id)
+    if existing:
+        if (existing.get('source_host_id') or '').strip() != (source_host_id or '').strip():
+            raise ValueError(
+                f"Commitment '{commitment_id}' source_host_id "
+                f"{existing.get('source_host_id', '')!r} does not match {(source_host_id or '').strip()!r}"
+            )
+        if (existing.get('source_institution_id') or '').strip() != (source_institution_id or '').strip():
+            raise ValueError(
+                f"Commitment '{commitment_id}' source_institution_id "
+                f"{existing.get('source_institution_id', '')!r} does not match {(source_institution_id or '').strip()!r}"
+            )
+        if (existing.get('target_host_id') or '').strip() != (target_host_id or '').strip():
+            raise ValueError(
+                f"Commitment '{commitment_id}' target_host_id "
+                f"{existing.get('target_host_id', '')!r} does not match {(target_host_id or '').strip()!r}"
+            )
+        if (existing.get('target_institution_id') or '').strip() != (target_institution_id or '').strip():
+            raise ValueError(
+                f"Commitment '{commitment_id}' target_institution_id "
+                f"{existing.get('target_institution_id', '')!r} does not match {(target_institution_id or '').strip()!r}"
+            )
+        return existing, False
+    return propose_commitment(
+        org_id,
+        target_host_id,
+        target_institution_id,
+        summary,
+        actor_id,
+        commitment_id=commitment_id,
+        terms_payload=terms_payload,
+        warrant_id=warrant_id,
+        note=note,
+        metadata=metadata,
+        source_host_id=source_host_id,
+        source_institution_id=source_institution_id,
+    ), True
 
 
 def validate_commitment_for_settlement(commitment_id, *, org_id=None, warrant_id=''):

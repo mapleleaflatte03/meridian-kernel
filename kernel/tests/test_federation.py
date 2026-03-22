@@ -390,12 +390,12 @@ def _issue_workspace_session(instance):
 
 
 def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=False,
-                            review_decision='approve'):
+                            review_decision='approve', action_class='federated_execution'):
     status, body = _http_json(
         'POST',
         instance['base_url'] + '/api/warrants/issue',
         payload={
-            'action_class': 'federated_execution',
+            'action_class': action_class,
             'boundary_name': 'federation_gateway',
             'request_payload': request_payload,
             'risk_class': 'moderate',
@@ -3358,6 +3358,521 @@ class FederationTests(unittest.TestCase):
                 ]
                 self.assertTrue(blocked)
                 self.assertEqual(blocked[-1]['resource'], commitment_id)
+
+    def test_workspace_federated_commitment_proposal_round_trips_between_two_hosts(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                proposal_payload = {
+                    'summary': 'Deliver shared brief',
+                    'terms_payload': {'scope': 'shared-brief'},
+                }
+                warrant = _issue_workspace_warrant(
+                    alpha,
+                    session['token'],
+                    proposal_payload,
+                    action_class='cross_institution_commitment',
+                )
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/commitments/propose',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_beta',
+                        'summary': proposal_payload['summary'],
+                        'terms_payload': proposal_payload['terms_payload'],
+                        'warrant_id': warrant['warrant_id'],
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                commitment_id = body['commitment']['commitment_id']
+                delivery = body['delivery']
+                self.assertEqual(delivery['claims']['message_type'], 'commitment_proposal')
+                self.assertEqual(delivery['claims']['warrant_id'], warrant['warrant_id'])
+                self.assertEqual(delivery['claims']['commitment_id'], commitment_id)
+                self.assertEqual(
+                    delivery['response']['processing']['reason'],
+                    'commitment_proposal_recorded',
+                )
+
+                beta_status, beta_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/commitments',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(beta_status, 200, beta_body)
+                self.assertEqual(beta_body['total'], 1)
+                self.assertEqual(beta_body['proposed'], 1)
+                mirrored = next(
+                    item for item in beta_body['commitments']
+                    if item['commitment_id'] == commitment_id
+                )
+                self.assertEqual(mirrored['source_host_id'], 'host_alpha')
+                self.assertEqual(mirrored['source_institution_id'], 'org_alpha')
+                self.assertEqual(mirrored['target_host_id'], 'host_beta')
+                self.assertEqual(mirrored['target_institution_id'], 'org_beta')
+                self.assertEqual(mirrored['warrant_id'], warrant['warrant_id'])
+                self.assertEqual(mirrored['proposed_by'], 'user_owner_alpha')
+                self.assertEqual(
+                    mirrored['metadata']['federation_source_host_id'],
+                    'host_alpha',
+                )
+                self.assertEqual(
+                    mirrored['metadata']['federation_envelope_id'],
+                    delivery['claims']['envelope_id'],
+                )
+
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['total'], 1)
+                self.assertEqual(
+                    inbox_body['summary']['message_type_counts'],
+                    {'commitment_proposal': 1},
+                )
+                self.assertEqual(inbox_body['entries'][0]['state'], 'processed')
+                self.assertEqual(
+                    inbox_body['entries'][0]['message_type'],
+                    'commitment_proposal',
+                )
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            sent = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_envelope_sent'
+            ]
+            recorded = [
+                event for event in beta_events
+                if event.get('action') == 'federation_commitment_proposal_recorded'
+            ]
+            self.assertTrue(sent)
+            self.assertTrue(recorded)
+            self.assertEqual(sent[-1]['details']['warrant_id'], warrant['warrant_id'])
+            self.assertEqual(recorded[-1]['resource'], commitment_id)
+
+    def test_workspace_federated_commitment_acceptance_round_trips_back_to_source(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                alpha_session = _issue_workspace_session(alpha)
+                proposal_payload = {
+                    'summary': 'Deliver shared brief',
+                    'terms_payload': {'scope': 'shared-brief'},
+                }
+                proposal_warrant = _issue_workspace_warrant(
+                    alpha,
+                    alpha_session['token'],
+                    proposal_payload,
+                    action_class='cross_institution_commitment',
+                )
+                proposal_status, proposal_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/commitments/propose',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_beta',
+                        'summary': proposal_payload['summary'],
+                        'terms_payload': proposal_payload['terms_payload'],
+                        'warrant_id': proposal_warrant['warrant_id'],
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {alpha_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(proposal_status, 200, proposal_body)
+                commitment_id = proposal_body['commitment']['commitment_id']
+
+                beta_session = _issue_workspace_session(beta)
+                acceptance_payload = {'note': 'Beta accepts the commitment'}
+                acceptance_warrant = _issue_workspace_warrant(
+                    beta,
+                    beta_session['token'],
+                    acceptance_payload,
+                    action_class='cross_institution_commitment',
+                )
+                status, body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/commitments/accept',
+                    payload={
+                        'commitment_id': commitment_id,
+                        'note': acceptance_payload['note'],
+                        'warrant_id': acceptance_warrant['warrant_id'],
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {beta_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                delivery = body['delivery']
+                self.assertEqual(delivery['claims']['message_type'], 'commitment_acceptance')
+                self.assertEqual(
+                    delivery['response']['processing']['reason'],
+                    'commitment_acceptance_recorded',
+                )
+                self.assertEqual(delivery['claims']['warrant_id'], acceptance_warrant['warrant_id'])
+
+                alpha_status, alpha_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/commitments',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(alpha_status, 200, alpha_body)
+                original = next(
+                    item for item in alpha_body['commitments']
+                    if item['commitment_id'] == commitment_id
+                )
+                self.assertEqual(original['status'], 'accepted')
+                self.assertEqual(original['accepted_by'], 'user_owner_beta')
+                self.assertEqual(original['review_note'], acceptance_payload['note'])
+
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['total'], 1)
+                self.assertEqual(
+                    inbox_body['summary']['message_type_counts'],
+                    {'commitment_acceptance': 1},
+                )
+                self.assertEqual(inbox_body['entries'][0]['state'], 'processed')
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            accepted = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_commitment_acceptance_recorded'
+            ]
+            sent = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_sent'
+            ]
+            self.assertTrue(accepted)
+            self.assertTrue(sent)
+            self.assertEqual(accepted[-1]['resource'], commitment_id)
+            self.assertEqual(sent[-1]['details']['warrant_id'], acceptance_warrant['warrant_id'])
+
+    def test_workspace_federated_commitment_proposal_rejects_missing_warrant(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/commitments/propose',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_beta',
+                        'summary': 'Deliver shared brief',
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 403, body)
+                self.assertIn('requires warrant_id', body['error'])
+                self.assertIn('commitment', body)
+
+                beta_status, beta_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/commitments',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(beta_status, 200, beta_body)
+                self.assertEqual(beta_body['total'], 0)
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            blocked = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_warrant_blocked'
+            ]
+            received = [
+                event for event in beta_events
+                if event.get('action') == 'federation_envelope_received'
+            ]
+            self.assertTrue(blocked)
+            self.assertEqual(
+                blocked[-1]['details']['required_action_class'],
+                'cross_institution_commitment',
+            )
+            self.assertEqual(received, [])
+
+    def test_workspace_federated_commitment_acceptance_rejects_wrong_target(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                alpha_session = _issue_workspace_session(alpha)
+                proposal_payload = {'summary': 'Deliver shared brief'}
+                proposal_warrant = _issue_workspace_warrant(
+                    alpha,
+                    alpha_session['token'],
+                    proposal_payload,
+                    action_class='cross_institution_commitment',
+                )
+                proposal_status, proposal_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/commitments/propose',
+                    payload={
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_beta',
+                        'summary': proposal_payload['summary'],
+                        'warrant_id': proposal_warrant['warrant_id'],
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {alpha_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(proposal_status, 200, proposal_body)
+                commitment_id = proposal_body['commitment']['commitment_id']
+
+                beta_session = _issue_workspace_session(beta)
+                acceptance_payload = {'note': 'Beta accepts the commitment'}
+                acceptance_warrant = _issue_workspace_warrant(
+                    beta,
+                    beta_session['token'],
+                    acceptance_payload,
+                    action_class='cross_institution_commitment',
+                )
+                status, body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/commitments/accept',
+                    payload={
+                        'commitment_id': commitment_id,
+                        'note': acceptance_payload['note'],
+                        'warrant_id': acceptance_warrant['warrant_id'],
+                        'federate': True,
+                        'target_host_id': 'host_gamma',
+                        'target_institution_id': 'org_gamma',
+                    },
+                    headers={
+                        'Authorization': f"Bearer {beta_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 403, body)
+                self.assertIn('source_host_id', body['error'])
+
+                beta_status, beta_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/commitments',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(beta_status, 200, beta_body)
+                mirrored = next(
+                    item for item in beta_body['commitments']
+                    if item['commitment_id'] == commitment_id
+                )
+                self.assertEqual(mirrored['status'], 'accepted')
+
+                alpha_status, alpha_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/commitments',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(alpha_status, 200, alpha_body)
+                original = next(
+                    item for item in alpha_body['commitments']
+                    if item['commitment_id'] == commitment_id
+                )
+                self.assertEqual(original['status'], 'proposed')
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            blocked = [
+                event for event in beta_events
+                if event.get('action') == 'federation_commitment_blocked'
+            ]
+            received = [
+                event for event in alpha_events
+                if event.get('action') == 'federation_envelope_received'
+                and event.get('resource') == 'commitment_acceptance'
+            ]
+            self.assertTrue(blocked)
+            self.assertEqual(received, [])
 
     def test_workspace_federation_send_bad_receipt_auto_stays_warrant(self):
         try:

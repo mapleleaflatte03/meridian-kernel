@@ -235,6 +235,154 @@ class CommitmentCapsuleTests(unittest.TestCase):
         self.assertEqual(updated['settlement_refs'][0]['proposal_id'], 'ppo_demo_other')
         self.assertEqual(updated['settlement_refs'][1]['receipt_id'], 'fed_rcpt_demo_2')
 
+    def test_sync_federated_commitment_proposal_creates_mirrored_record(self):
+        record, created = commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_fed_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            terms_payload={'scope': 'shared-brief'},
+            warrant_id='war_commit_demo',
+        )
+        self.assertTrue(created)
+        self.assertEqual(record['commitment_id'], 'cmt_fed_demo')
+        self.assertEqual(record['source_host_id'], 'host_alpha')
+        self.assertEqual(record['source_institution_id'], 'org_alpha')
+        self.assertEqual(record['target_host_id'], 'host_beta')
+        self.assertEqual(record['target_institution_id'], self.org_id)
+
+        same_record, created = commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_fed_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            terms_payload={'scope': 'shared-brief'},
+            warrant_id='war_commit_demo',
+        )
+        self.assertFalse(created)
+        self.assertEqual(same_record['commitment_id'], 'cmt_fed_demo')
+
+    def test_validate_commitment_for_acceptance_dispatch_uses_source_host(self):
+        record, _created = commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_accept_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            warrant_id='war_commit_demo',
+        )
+        accepted = commitments.accept_commitment(
+            record['commitment_id'],
+            'user_owner',
+            org_id=self.org_id,
+        )
+        validated = commitments.validate_commitment_for_acceptance_dispatch(
+            accepted['commitment_id'],
+            org_id=self.org_id,
+            target_host_id='host_alpha',
+            target_institution_id='org_alpha',
+            warrant_id='war_commit_demo',
+        )
+        self.assertEqual(validated['commitment_id'], accepted['commitment_id'])
+
+    def test_validate_commitment_for_proposal_dispatch_uses_target_binding_and_warrant(self):
+        record = commitments.propose_commitment(
+            self.org_id,
+            'host_beta',
+            self.org_id,
+            'Deliver shared brief',
+            'user_owner',
+            warrant_id='war_commit_demo',
+        )
+        validated = commitments.validate_commitment_for_proposal_dispatch(
+            record['commitment_id'],
+            org_id=self.org_id,
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            warrant_id='war_commit_demo',
+        )
+        self.assertEqual(validated['commitment_id'], record['commitment_id'])
+        with self.assertRaises(PermissionError):
+            commitments.validate_commitment_for_proposal_dispatch(
+                record['commitment_id'],
+                org_id=self.org_id,
+                target_host_id='host_gamma',
+            )
+
+    def test_validate_commitment_for_acceptance_dispatch_allows_distinct_acceptance_warrant(self):
+        record, _created = commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_accept_warrant_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            warrant_id='war_proposal_demo',
+        )
+        accepted = commitments.accept_commitment(
+            record['commitment_id'],
+            'user_owner',
+            org_id=self.org_id,
+        )
+        validated = commitments.validate_commitment_for_acceptance_dispatch(
+            accepted['commitment_id'],
+            org_id=self.org_id,
+            target_host_id='host_alpha',
+            target_institution_id='org_alpha',
+            warrant_id='war_acceptance_demo',
+        )
+        self.assertEqual(validated['commitment_id'], accepted['commitment_id'])
+
+    def test_sync_federated_commitment_proposal_rejects_source_or_target_mismatch(self):
+        commitments.sync_federated_commitment_proposal(
+            self.org_id,
+            'cmt_fed_mismatch_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id=self.org_id,
+            summary='Deliver shared brief',
+            actor_id='peer:host_alpha',
+            warrant_id='war_commit_demo',
+        )
+        with self.assertRaises(ValueError):
+            commitments.sync_federated_commitment_proposal(
+                self.org_id,
+                'cmt_fed_mismatch_demo',
+                source_host_id='host_gamma',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id=self.org_id,
+                summary='Deliver shared brief',
+                actor_id='peer:host_alpha',
+                warrant_id='war_commit_demo',
+            )
+        with self.assertRaises(ValueError):
+            commitments.sync_federated_commitment_proposal(
+                self.org_id,
+                'cmt_fed_mismatch_demo',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_delta',
+                target_institution_id=self.org_id,
+                summary='Deliver shared brief',
+                actor_id='peer:host_alpha',
+                warrant_id='war_commit_demo',
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

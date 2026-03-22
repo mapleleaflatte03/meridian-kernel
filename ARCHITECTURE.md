@@ -106,7 +106,11 @@ handling. Today that proof is still intentionally narrow:
 - open or stayed cases surface blocking commitment IDs / peer host IDs
 - risky case classes can auto-suspend a trusted peer and block sender-side
   federation delivery
+- active case state also blocks commitment settlement until court review clears
+  the linked commitment
 - contradictory delivery receipts can now auto-open sender-side case records
+- if that contradiction is linked to an execution warrant, the sender can
+  automatically stay that warrant before any retried execution
 
 This is the first public court-network object beyond warrants and commitment
 records. It is not yet the full peer suspension, witness-host, or settlement

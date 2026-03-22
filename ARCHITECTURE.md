@@ -73,6 +73,9 @@ deliberately narrow:
 - one integrated 3-host federation proof now exists in tests:
   commitment proposal/acceptance, execution review, court notice, breach
   notice, and witness archival compose into one end-to-end kernel story
+- the executable public proof map now lives in
+  [`docs/PROOF_MATRIX.md`](docs/PROOF_MATRIX.md), with a focused rerun script at
+  [`examples/run_public_proof_suite.sh`](examples/run_public_proof_suite.sh)
 
 What is not yet broadly proven in public code:
 - live end-to-end OpenClaw-compatible deployment wiring

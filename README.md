@@ -63,6 +63,10 @@ What is not yet broadly proven:
 - live multi-host federation between independent Meridian deployments
 - live multi-institution routing inside one deployed service boundary
 
+The executable proof map now lives in [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md).
+For the smallest high-signal rerun, use
+[`examples/run_public_proof_suite.sh`](examples/run_public_proof_suite.sh).
+
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
 
 ---

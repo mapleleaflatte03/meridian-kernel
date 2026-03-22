@@ -383,6 +383,10 @@ class WorkspaceContextTests(unittest.TestCase):
             status['runtime_core']['service_registry']['federation_gateway']['required_warrant_actions']['commitment_breach_notice'],
             'cross_institution_commitment',
         )
+        self.assertNotIn(
+            'case_notice',
+            status['runtime_core']['service_registry']['federation_gateway']['required_warrant_actions'],
+        )
         self.assertTrue(status['runtime_core']['admission']['additional_institutions_allowed'])
         self.assertEqual(status['runtime_core']['admission']['management_mode'], 'workspace_api_file_backed')
         self.assertTrue(status['runtime_core']['admission']['mutation_enabled'])
@@ -1305,6 +1309,283 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['state'], 'received')
         self.assertEqual(processing['case']['case_id'], 'case_demo')
 
+    def test_process_received_case_notice_open_is_idempotent_and_resolve_thaws_peer(self):
+        from federation import FederationEnvelopeClaims
+
+        store = {}
+        audit_actions = []
+        calls = {
+            'open_case': 0,
+            'suspend_peer': 0,
+            'stay_warrant': 0,
+            'restore_peer': 0,
+        }
+
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        original_lookup = self.workspace._case_notice_store_case_lookup
+        original_store = self.workspace._case_notice_store_case
+        original_open_case = self.workspace.open_case
+        original_suspend_peer = self.workspace._maybe_suspend_peer_for_case
+        original_stay_warrant = self.workspace._maybe_stay_warrant_for_case
+        original_restore_peer = self.workspace._maybe_restore_peer_for_case
+        original_log_event = self.workspace.log_event
+
+        def _lookup(bound_org_id, source_host_id, source_institution_id, source_case_id):
+            return store.get((source_host_id, source_institution_id, source_case_id))
+
+        def _persist(bound_org_id, case_record):
+            key = (
+                (case_record.get('metadata') or {}).get('federation_source_host_id'),
+                (case_record.get('metadata') or {}).get('federation_source_institution_id'),
+                (case_record.get('metadata') or {}).get('federation_source_case_id'),
+            )
+            store[key] = dict(case_record)
+            return case_record
+
+        def _open_case(
+            org_id,
+            claim_type,
+            actor_id,
+            *,
+            target_host_id='',
+            target_institution_id='',
+            linked_commitment_id='',
+            linked_warrant_id='',
+            evidence_refs=None,
+            note='',
+            metadata=None,
+        ):
+            calls['open_case'] += 1
+            record = {
+                'case_id': f'case_mirror_{calls["open_case"]}',
+                'institution_id': org_id,
+                'source_institution_id': org_id,
+                'target_host_id': target_host_id,
+                'target_institution_id': target_institution_id,
+                'claim_type': claim_type,
+                'linked_commitment_id': linked_commitment_id,
+                'linked_warrant_id': linked_warrant_id,
+                'evidence_refs': list(evidence_refs or []),
+                'status': 'open',
+                'opened_by': actor_id,
+                'opened_at': '2026-03-22T00:00:00Z',
+                'updated_at': '2026-03-22T00:00:00Z',
+                'reviewed_by': '',
+                'reviewed_at': '',
+                'review_note': '',
+                'resolution': '',
+                'note': note or '',
+                'metadata': dict(metadata or {}),
+            }
+            _persist(org_id, record)
+            return record
+
+        def _suspend_peer(case_record, actor_id, **kwargs):
+            calls['suspend_peer'] += 1
+            return {
+                'applied': True,
+                'peer_host_id': case_record.get('target_host_id', ''),
+                'trust_state': 'suspended',
+            }
+
+        def _stay_warrant(case_record, actor_id, **kwargs):
+            calls['stay_warrant'] += 1
+            return {
+                'applied': True,
+                'warrant_id': case_record.get('linked_warrant_id', ''),
+                'court_review_state': 'stayed',
+            }
+
+        def _restore_peer(case_record, actor_id, **kwargs):
+            calls['restore_peer'] += 1
+            return {
+                'applied': True,
+                'peer_host_id': case_record.get('target_host_id', ''),
+                'trust_state': 'trusted',
+            }
+
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_case_notice_demo',
+            'state': kwargs.get('state', 'received'),
+        }
+        self.workspace._case_notice_store_case_lookup = _lookup
+        self.workspace._case_notice_store_case = _persist
+        self.workspace.open_case = _open_case
+        self.workspace._maybe_suspend_peer_for_case = _suspend_peer
+        self.workspace._maybe_stay_warrant_for_case = _stay_warrant
+        self.workspace._maybe_restore_peer_for_case = _restore_peer
+        self.workspace.log_event = lambda *args, **kwargs: audit_actions.append((args, kwargs))
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_case_notice_demo',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            actor_type='service',
+            actor_id='peer:host_alpha',
+            session_id='ses_case_notice',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='case_notice',
+            payload_hash='hash_case_notice',
+            warrant_id='war_case_notice',
+            commitment_id='cmt_case_notice',
+        )
+        payload_open = {
+            'case_decision': 'open',
+            'source_case_id': 'case_source_1',
+            'claim_type': 'misrouted_execution',
+            'linked_commitment_id': 'cmt_case_notice',
+            'linked_warrant_id': 'war_case_notice',
+            'target_host_id': 'host_beta',
+            'target_institution_id': 'org_beta',
+            'note': 'Mirror open',
+            'metadata': {'trace': 'case_notice_demo'},
+        }
+        payload_resolve = dict(payload_open, case_decision='resolve', note='Mirror resolve')
+
+        try:
+            first = self.workspace._process_received_federation_message(
+                'org_beta',
+                claims,
+                {'receipt_id': 'fedrcpt_case_notice', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload=payload_open,
+            )
+            second = self.workspace._process_received_federation_message(
+                'org_beta',
+                claims,
+                {'receipt_id': 'fedrcpt_case_notice_repeat', 'accepted_at': '2026-03-22T00:01:00Z'},
+                payload=payload_open,
+            )
+            resolved = self.workspace._process_received_federation_message(
+                'org_beta',
+                claims,
+                {'receipt_id': 'fedrcpt_case_notice_resolve', 'accepted_at': '2026-03-22T00:02:00Z'},
+                payload=payload_resolve,
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+            self.workspace._case_notice_store_case_lookup = original_lookup
+            self.workspace._case_notice_store_case = original_store
+            self.workspace.open_case = original_open_case
+            self.workspace._maybe_suspend_peer_for_case = original_suspend_peer
+            self.workspace._maybe_stay_warrant_for_case = original_stay_warrant
+            self.workspace._maybe_restore_peer_for_case = original_restore_peer
+            self.workspace.log_event = original_log_event
+
+        self.assertTrue(first['applied'])
+        self.assertTrue(first['case_created'])
+        self.assertEqual(first['case']['status'], 'open')
+        self.assertEqual(first['case']['target_host_id'], 'host_alpha')
+        self.assertEqual(first['case']['target_institution_id'], 'org_alpha')
+        self.assertEqual(first['case']['metadata']['federation_source_case_id'], 'case_source_1')
+        self.assertEqual(first['federation_peer']['trust_state'], 'suspended')
+        self.assertEqual(first['warrant']['court_review_state'], 'stayed')
+
+        self.assertTrue(second['applied'])
+        self.assertFalse(second['case_created'])
+        self.assertEqual(second['case']['case_id'], first['case']['case_id'])
+        self.assertEqual(len(store), 1)
+        self.assertEqual(calls['open_case'], 1)
+        self.assertEqual(calls['suspend_peer'], 2)
+        self.assertEqual(calls['stay_warrant'], 2)
+
+        self.assertTrue(resolved['applied'])
+        self.assertEqual(resolved['case']['status'], 'resolved')
+        self.assertEqual(resolved['case']['case_id'], first['case']['case_id'])
+        self.assertEqual(resolved['federation_peer']['trust_state'], 'trusted')
+        self.assertEqual(calls['restore_peer'], 1)
+        self.assertEqual(
+            [event[0][2] for event in audit_actions if event[0][2].startswith('federation_case_notice_')],
+            ['federation_case_notice_applied', 'federation_case_notice_applied', 'federation_case_notice_applied'],
+        )
+
+    def test_process_received_case_notice_blocks_invalid_payload_and_missing_mirror(self):
+        from federation import FederationEnvelopeClaims
+
+        audit_actions = []
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        original_lookup = self.workspace._case_notice_store_case_lookup
+        original_store = self.workspace._case_notice_store_case
+        original_open_case = self.workspace.open_case
+        original_log_event = self.workspace.log_event
+
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_case_notice_bad',
+            'state': kwargs.get('state', 'received'),
+        }
+        self.workspace._case_notice_store_case_lookup = lambda *args, **kwargs: None
+        self.workspace._case_notice_store_case = lambda *args, **kwargs: self.fail('should not persist invalid or missing-mirror case_notice')
+        self.workspace.open_case = lambda *args, **kwargs: self.fail('should not open a mirrored case for invalid or missing-mirror case_notice')
+        self.workspace.log_event = lambda *args, **kwargs: audit_actions.append((args, kwargs))
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_case_notice_bad',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            actor_type='service',
+            actor_id='peer:host_alpha',
+            session_id='ses_case_notice',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='case_notice',
+            payload_hash='hash_case_notice_bad',
+            warrant_id='war_case_notice',
+            commitment_id='cmt_case_notice',
+        )
+
+        try:
+            invalid = self.workspace._process_received_federation_message(
+                'org_beta',
+                claims,
+                {'receipt_id': 'fedrcpt_case_notice_bad', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={
+                    'case_decision': 'open',
+                    'source_case_id': 'case_source_1',
+                    'claim_type': 'misrouted_execution',
+                    'linked_commitment_id': 'cmt_case_notice',
+                    'linked_warrant_id': 'war_case_notice',
+                    'target_institution_id': 'org_beta',
+                    'note': 'Missing target host should block',
+                    'metadata': {},
+                },
+            )
+            missing = self.workspace._process_received_federation_message(
+                'org_beta',
+                claims,
+                {'receipt_id': 'fedrcpt_case_notice_missing', 'accepted_at': '2026-03-22T00:01:00Z'},
+                payload={
+                    'case_decision': 'resolve',
+                    'source_case_id': 'case_source_missing',
+                    'claim_type': 'misrouted_execution',
+                    'linked_commitment_id': 'cmt_case_notice',
+                    'linked_warrant_id': 'war_case_notice',
+                    'target_host_id': 'host_beta',
+                    'target_institution_id': 'org_beta',
+                    'note': 'No mirrored case should block',
+                    'metadata': {},
+                },
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+            self.workspace._case_notice_store_case_lookup = original_lookup
+            self.workspace._case_notice_store_case = original_store
+            self.workspace.open_case = original_open_case
+            self.workspace.log_event = original_log_event
+
+        self.assertFalse(invalid['applied'])
+        self.assertEqual(invalid['reason'], 'invalid_case_notice')
+        self.assertIn('target_host_id is required', invalid['error'])
+        self.assertEqual(audit_actions[-1][0][2], 'federation_case_notice_blocked')
+
+        self.assertFalse(missing['applied'])
+        self.assertEqual(missing['reason'], 'case_not_found')
+        self.assertIn('Mirrored case not found', missing['error'])
+        self.assertEqual(audit_actions[-1][0][2], 'federation_case_notice_blocked')
+
     def test_process_received_commitment_proposal_records_mirrored_commitment(self):
         from federation import FederationEnvelopeClaims
 
@@ -1492,6 +1773,235 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['warrant']['court_review_state'], 'stayed')
         self.assertEqual(processing['inbox_entry']['state'], 'processed')
         self.assertEqual(audit_events[-1][0][2], 'federation_commitment_breach_notice_recorded')
+
+    def test_process_received_case_notice_opens_idempotently_and_resolves_same_mirror(self):
+        from federation import FederationEnvelopeClaims
+
+        store = {'cases': {}}
+        original_load_store = self.workspace.cases_module._load_store
+        original_save_store = self.workspace.cases_module._save_store
+        suspend_calls = []
+        restore_calls = []
+        try:
+            self.workspace.cases_module._load_store = lambda org_id=None: {
+                'cases': {key: dict(value) for key, value in store['cases'].items()},
+            }
+            self.workspace.cases_module._save_store = lambda data, org_id=None: store.__setitem__(
+                'cases',
+                {key: dict(value) for key, value in (data.get('cases') or {}).items()},
+            )
+            self.workspace.list_cases = lambda org_id=None: list(store['cases'].values())
+
+            def fake_open_case(org_id, claim_type, actor_id, **kwargs):
+                record = {
+                    'case_id': 'case_mirror_demo',
+                    'institution_id': org_id,
+                    'source_institution_id': org_id,
+                    'claim_type': claim_type,
+                    'target_host_id': kwargs.get('target_host_id', ''),
+                    'target_institution_id': kwargs.get('target_institution_id', ''),
+                    'linked_commitment_id': kwargs.get('linked_commitment_id', ''),
+                    'linked_warrant_id': kwargs.get('linked_warrant_id', ''),
+                    'status': 'open',
+                    'opened_by': actor_id,
+                    'reviewed_by': '',
+                    'reviewed_at': '',
+                    'review_note': '',
+                    'resolution': '',
+                    'note': kwargs.get('note', ''),
+                    'metadata': dict(kwargs.get('metadata') or {}),
+                    'updated_at': '2026-03-22T00:00:00Z',
+                }
+                store['cases'][record['case_id']] = record
+                return dict(record)
+
+            self.workspace.open_case = fake_open_case
+            self.workspace._maybe_suspend_peer_for_case = lambda case_record, actor_id, **kwargs: (
+                suspend_calls.append(case_record['case_id'])
+                or {
+                    'applied': True,
+                    'peer_host_id': case_record.get('target_host_id', ''),
+                    'trust_state': 'suspended',
+                }
+            )
+            self.workspace._maybe_stay_warrant_for_case = lambda *args, **kwargs: {
+                'applied': True,
+                'court_review_state': 'stayed',
+            }
+            self.workspace._maybe_restore_peer_for_case = lambda case_record, actor_id, **kwargs: (
+                restore_calls.append(case_record['case_id'])
+                or {
+                    'applied': True,
+                    'peer_host_id': case_record.get('target_host_id', ''),
+                    'trust_state': 'trusted',
+                }
+            )
+            self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+                'envelope_id': 'fed_case_open',
+                'state': kwargs.get('state', 'received'),
+            }
+            self.workspace.log_event = lambda *args, **kwargs: None
+
+            open_claims = FederationEnvelopeClaims(
+                envelope_id='fed_case_open',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id='org_beta',
+                actor_type='user',
+                actor_id='user_alpha',
+                session_id='ses_alpha',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='case_notice',
+                payload_hash='hash_case_open',
+            )
+            open_payload = {
+                'case_decision': 'open',
+                'source_case_id': 'case_alpha_demo',
+                'claim_type': 'misrouted_execution',
+                'linked_commitment_id': 'cmt_demo',
+                'linked_warrant_id': 'war_demo',
+                'target_host_id': 'host_beta',
+                'target_institution_id': 'org_beta',
+                'note': 'Open mirrored case',
+            }
+            first = self.workspace._process_received_federation_message(
+                'org_beta',
+                open_claims,
+                {'receipt_id': 'fedrcpt_case_open', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload=open_payload,
+            )
+            second = self.workspace._process_received_federation_message(
+                'org_beta',
+                open_claims,
+                {'receipt_id': 'fedrcpt_case_open_2', 'accepted_at': '2026-03-22T00:01:00Z'},
+                payload=dict(open_payload, note='Open mirrored case again'),
+            )
+            resolve_claims = FederationEnvelopeClaims(
+                envelope_id='fed_case_resolve',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id='org_beta',
+                actor_type='user',
+                actor_id='user_alpha',
+                session_id='ses_alpha',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='case_notice',
+                payload_hash='hash_case_resolve',
+            )
+            resolved = self.workspace._process_received_federation_message(
+                'org_beta',
+                resolve_claims,
+                {'receipt_id': 'fedrcpt_case_resolve', 'accepted_at': '2026-03-22T00:02:00Z'},
+                payload=dict(open_payload, case_decision='resolve', note='Resolved on source'),
+            )
+        finally:
+            self.workspace.cases_module._load_store = original_load_store
+            self.workspace.cases_module._save_store = original_save_store
+
+        self.assertTrue(first['applied'])
+        self.assertEqual(first['reason'], 'case_notice_applied')
+        self.assertTrue(first['case_created'])
+        self.assertEqual(first['case']['case_id'], 'case_mirror_demo')
+        self.assertEqual(first['case']['target_host_id'], 'host_alpha')
+        self.assertEqual(first['case']['target_institution_id'], 'org_alpha')
+        self.assertEqual(first['case']['metadata']['federation_source_case_id'], 'case_alpha_demo')
+        self.assertEqual(first['federation_peer']['trust_state'], 'suspended')
+
+        self.assertTrue(second['applied'])
+        self.assertFalse(second['case_created'])
+        self.assertEqual(second['case']['case_id'], 'case_mirror_demo')
+        self.assertEqual(len(store['cases']), 1)
+
+        self.assertTrue(resolved['applied'])
+        self.assertEqual(resolved['reason'], 'case_notice_applied')
+        self.assertEqual(resolved['case']['case_id'], 'case_mirror_demo')
+        self.assertEqual(resolved['case']['status'], 'resolved')
+        self.assertEqual(resolved['federation_peer']['trust_state'], 'trusted')
+        self.assertEqual(suspend_calls, ['case_mirror_demo', 'case_mirror_demo'])
+        self.assertEqual(restore_calls, ['case_mirror_demo'])
+
+    def test_process_received_case_notice_rejects_invalid_target_payload(self):
+        from federation import FederationEnvelopeClaims
+
+        audit_events = []
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_case_invalid',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            actor_type='user',
+            actor_id='user_alpha',
+            session_id='ses_alpha',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='case_notice',
+            payload_hash='hash_case_invalid',
+        )
+        processing = self.workspace._process_received_federation_message(
+            'org_beta',
+            claims,
+            {'receipt_id': 'fedrcpt_case_invalid', 'accepted_at': '2026-03-22T00:00:00Z'},
+            payload={
+                'case_decision': 'open',
+                'source_case_id': 'case_alpha_demo',
+                'claim_type': 'misrouted_execution',
+                'linked_commitment_id': '',
+                'linked_warrant_id': '',
+                'target_host_id': 'host_gamma',
+                'target_institution_id': 'org_beta',
+            },
+        )
+
+        self.assertFalse(processing['applied'])
+        self.assertEqual(processing['reason'], 'invalid_case_notice')
+        self.assertIn('target_host_id', processing['error'])
+        self.assertEqual(audit_events[-1][0][2], 'federation_case_notice_blocked')
+
+    def test_process_received_case_notice_resolve_requires_existing_mirror(self):
+        from federation import FederationEnvelopeClaims
+
+        self.workspace.log_event = lambda *args, **kwargs: None
+        self.workspace.list_cases = lambda org_id=None: []
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_case_missing',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            actor_type='user',
+            actor_id='user_alpha',
+            session_id='ses_alpha',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='case_notice',
+            payload_hash='hash_case_missing',
+        )
+        processing = self.workspace._process_received_federation_message(
+            'org_beta',
+            claims,
+            {'receipt_id': 'fedrcpt_case_missing', 'accepted_at': '2026-03-22T00:00:00Z'},
+            payload={
+                'case_decision': 'resolve',
+                'source_case_id': 'case_alpha_demo',
+                'claim_type': 'misrouted_execution',
+                'linked_commitment_id': '',
+                'linked_warrant_id': '',
+                'target_host_id': 'host_beta',
+                'target_institution_id': 'org_beta',
+            },
+        )
+
+        self.assertFalse(processing['applied'])
+        self.assertEqual(processing['reason'], 'case_not_found')
+        self.assertIn('Mirrored case not found', processing['error'])
 
     def test_process_received_execution_request_creates_local_warranted_job(self):
         from federation import FederationEnvelopeClaims

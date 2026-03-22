@@ -112,6 +112,7 @@ Institution context:
   model exists.
 """
 import argparse
+import copy
 import base64
 import datetime
 import hashlib
@@ -120,6 +121,8 @@ import json
 import os
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import urlparse, parse_qs
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -243,6 +246,7 @@ from cases import (
     case_requires_peer_block,
     case_targets_peer,
     case_summary,
+    get_case,
     ensure_case_for_delivery_failure,
     ensure_case_for_commitment_breach,
     list_cases,
@@ -250,6 +254,7 @@ from cases import (
     resolve_case,
     stay_case,
 )
+import cases as cases_module
 from federation import (
     FederationAuthority,
     ReplayStore,
@@ -661,9 +666,11 @@ def _mutate_admission(bound_org_id, action, target_org_id):
     )
 
 
-def _accept_federation_request(bound_org_id, envelope, payload=None):
+def _accept_federation_request(bound_org_id, envelope, payload=None, *, peer_registry=None):
     host_identity, admission_registry = _runtime_host_state(bound_org_id)
     authority = _federation_authority(host_identity)
+    if peer_registry is not None:
+        authority = _federation_authority(host_identity, peer_registry=peer_registry)
     claims = authority.accept(
         envelope,
         payload=payload,
@@ -675,6 +682,45 @@ def _accept_federation_request(bound_org_id, envelope, payload=None):
         bound_org_id=bound_org_id,
         admission_registry=admission_registry,
     )
+
+
+def _case_notice_validation_peer_registry(bound_org_id, envelope):
+    envelope = (envelope or '').strip()
+    if not envelope or '.' not in envelope:
+        return None
+    try:
+        body_b64 = envelope.split('.', 1)[0]
+        padding = '=' * ((4 - (len(body_b64) % 4)) % 4)
+        body = json.loads(base64.urlsafe_b64decode(body_b64 + padding).decode('utf-8'))
+    except Exception:
+        return None
+    if body.get('message_type') != 'case_notice':
+        return None
+    source_host_id = (body.get('source_host_id') or '').strip()
+    if not source_host_id:
+        return None
+    host_identity = load_host_identity(
+        RUNTIME_HOST_IDENTITY_FILE,
+        supported_boundaries=[
+            'workspace',
+            'cli',
+            'federation_gateway',
+            'mcp_service',
+            'payment_monitor',
+            'subscriptions',
+            'accounting',
+        ],
+    )
+    registry = load_peer_registry(
+        FEDERATION_PEERS_FILE,
+        host_identity=host_identity,
+    )
+    source_peer = registry.get('peers', {}).get(source_host_id)
+    if not source_peer or getattr(source_peer, 'trust_state', '') != 'suspended':
+        return None
+    registry = copy.deepcopy(registry)
+    registry['peers'][source_host_id].trust_state = 'trusted'
+    return registry
 
 
 def _mutate_federation_peer(bound_org_id, action, payload):
@@ -1890,6 +1936,314 @@ def _process_received_commitment_breach_notice(bound_org_id, claims, receipt, *,
     }
 
 
+def _case_notice_required_payload_fields():
+    return (
+        'case_decision',
+        'source_case_id',
+        'claim_type',
+        'linked_commitment_id',
+        'linked_warrant_id',
+        'target_host_id',
+        'target_institution_id',
+        'note',
+        'metadata',
+    )
+
+
+def _case_notice_payload_dict(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    notice = {
+        'case_decision': (payload.get('case_decision') or '').strip(),
+        'source_case_id': (payload.get('source_case_id') or '').strip(),
+        'claim_type': (payload.get('claim_type') or '').strip(),
+        'linked_commitment_id': (payload.get('linked_commitment_id') or '').strip(),
+        'linked_warrant_id': (payload.get('linked_warrant_id') or '').strip(),
+        'target_host_id': (payload.get('target_host_id') or '').strip(),
+        'target_institution_id': (
+            payload.get('target_institution_id')
+            or payload.get('target_org_id')
+            or ''
+        ).strip(),
+        'note': payload.get('note', ''),
+        'metadata': dict(payload.get('metadata') or {}),
+    }
+    return notice
+
+
+def _case_notice_store_case_lookup(bound_org_id, source_host_id, source_institution_id, source_case_id):
+    source_host_id = (source_host_id or '').strip()
+    source_institution_id = (source_institution_id or '').strip()
+    source_case_id = (source_case_id or '').strip()
+    if not source_host_id or not source_institution_id or not source_case_id:
+        return None
+    for case in list_cases(bound_org_id):
+        metadata = dict(case.get('metadata') or {})
+        if (
+            metadata.get('federation_source_host_id') == source_host_id
+            and metadata.get('federation_source_institution_id') == source_institution_id
+            and metadata.get('federation_source_case_id') == source_case_id
+        ):
+            return case
+    return None
+
+
+def _case_notice_store_case(bound_org_id, case_record):
+    store = cases_module._load_store(bound_org_id)
+    store.setdefault('cases', {})[case_record['case_id']] = case_record
+    cases_module._save_store(store, bound_org_id)
+    return case_record
+
+
+def _case_notice_case_metadata(claims, receipt, payload, *, target_host_id, target_institution_id):
+    payload = payload if isinstance(payload, dict) else {}
+    metadata = dict(payload.get('metadata') or {})
+    metadata.update({
+        'source': 'federation_case_notice',
+        'federation_message_type': 'case_notice',
+        'federation_case_decision': payload.get('case_decision', ''),
+        'federation_source_host_id': claims.source_host_id,
+        'federation_source_institution_id': claims.source_institution_id,
+        'federation_source_case_id': payload.get('source_case_id', ''),
+        'federation_notice_target_host_id': target_host_id,
+        'federation_notice_target_institution_id': target_institution_id,
+        'federation_envelope_id': claims.envelope_id,
+        'federation_receipt_id': (receipt or {}).get('receipt_id', ''),
+    })
+    return metadata
+
+
+def _process_received_case_notice(bound_org_id, claims, receipt, *, payload=None):
+    payload = _case_notice_payload_dict(payload)
+    actor_id = claims.actor_id or f'peer:{claims.source_host_id}'
+    decision = payload.get('case_decision', '')
+    source_case_id = payload.get('source_case_id', '')
+    claim_type = payload.get('claim_type', '')
+    linked_commitment_id = payload.get('linked_commitment_id', '')
+    linked_warrant_id = payload.get('linked_warrant_id', '')
+    target_host_id = payload.get('target_host_id', '')
+    target_institution_id = payload.get('target_institution_id', '')
+    note = payload.get('note', '')
+    metadata = dict(payload.get('metadata') or {})
+
+    errors = []
+    if decision not in ('open', 'stay', 'resolve'):
+        errors.append('case_decision must be one of open|stay|resolve')
+    if not source_case_id:
+        errors.append('source_case_id is required')
+    if not claim_type:
+        errors.append('claim_type is required')
+    if not target_host_id:
+        errors.append('target_host_id is required')
+    if not target_institution_id:
+        errors.append('target_institution_id is required')
+    if target_host_id != claims.target_host_id:
+        errors.append(
+            f"case_notice target_host_id {target_host_id!r} does not match envelope target_host_id {claims.target_host_id!r}"
+        )
+    if target_institution_id != claims.target_institution_id:
+        errors.append(
+            f"case_notice target_institution_id {target_institution_id!r} does not match envelope target_institution_id {claims.target_institution_id!r}"
+        )
+    if errors:
+        error = '; '.join(errors)
+        log_event(
+            bound_org_id,
+            actor_id,
+            'federation_case_notice_blocked',
+            resource=source_case_id or claims.envelope_id,
+            outcome='blocked',
+            actor_type=claims.actor_type or 'service',
+            details=_federation_audit_details(
+                claims,
+                receipt_id=(receipt or {}).get('receipt_id', ''),
+                case_decision=decision,
+                source_case_id=source_case_id,
+                claim_type=claim_type,
+                linked_commitment_id=linked_commitment_id,
+                linked_warrant_id=linked_warrant_id,
+                error=error,
+            ),
+            session_id=claims.session_id or None,
+        )
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'received',
+            'reason': 'invalid_case_notice',
+            'error': error,
+        }
+
+    mirrored_case = _case_notice_store_case_lookup(
+        bound_org_id,
+        claims.source_host_id,
+        claims.source_institution_id,
+        source_case_id,
+    )
+    created = False
+    mirrored_target_host_id = claims.source_host_id
+    mirrored_target_institution_id = claims.source_institution_id
+    mirror_metadata = _case_notice_case_metadata(
+        claims,
+        receipt,
+        payload,
+        target_host_id=target_host_id,
+        target_institution_id=target_institution_id,
+    )
+    if decision == 'open':
+        if mirrored_case:
+            mirrored_case = dict(mirrored_case)
+            mirrored_case.update({
+                'claim_type': claim_type,
+                'target_host_id': mirrored_target_host_id,
+                'target_institution_id': mirrored_target_institution_id,
+                'linked_commitment_id': linked_commitment_id,
+                'linked_warrant_id': linked_warrant_id,
+                'status': 'open',
+                'opened_by': actor_id,
+                'reviewed_by': '',
+                'reviewed_at': '',
+                'review_note': '',
+                'resolution': '',
+                'note': note or mirrored_case.get('note', ''),
+                'metadata': mirror_metadata,
+                'updated_at': _now(),
+            })
+            _case_notice_store_case(bound_org_id, mirrored_case)
+        else:
+            mirrored_case = open_case(
+                bound_org_id,
+                claim_type,
+                actor_id,
+                target_host_id=mirrored_target_host_id,
+                target_institution_id=mirrored_target_institution_id,
+                linked_commitment_id=linked_commitment_id,
+                linked_warrant_id=linked_warrant_id,
+                note=note,
+                metadata=mirror_metadata,
+            )
+            created = True
+        federation_peer = _maybe_suspend_peer_for_case(
+            mirrored_case,
+            actor_id,
+            org_id=bound_org_id,
+            session_id=claims.session_id or None,
+        )
+        warrant = _maybe_stay_warrant_for_case(
+            mirrored_case,
+            actor_id,
+            org_id=bound_org_id,
+            session_id=claims.session_id or None,
+            note=note or 'Stayed after received case_notice envelope',
+        )
+    else:
+        if not mirrored_case:
+            error = (
+                f"Mirrored case not found for source_case_id '{source_case_id}' "
+                f"(source_host_id={claims.source_host_id!r}, "
+                f"source_institution_id={claims.source_institution_id!r})"
+            )
+            log_event(
+                bound_org_id,
+                actor_id,
+                'federation_case_notice_blocked',
+                resource=source_case_id,
+                outcome='blocked',
+                actor_type=claims.actor_type or 'service',
+                details=_federation_audit_details(
+                    claims,
+                    receipt_id=(receipt or {}).get('receipt_id', ''),
+                    case_decision=decision,
+                    source_case_id=source_case_id,
+                    claim_type=claim_type,
+                    linked_commitment_id=linked_commitment_id,
+                    linked_warrant_id=linked_warrant_id,
+                    error=error,
+                ),
+                session_id=claims.session_id or None,
+            )
+            return {
+                'applied': False,
+                'message_type': claims.message_type,
+                'state': 'received',
+                'reason': 'case_not_found',
+                'error': error,
+            }
+        mirrored_case = dict(mirrored_case)
+        mirrored_case.update({
+            'claim_type': claim_type,
+            'target_host_id': mirrored_target_host_id,
+            'target_institution_id': mirrored_target_institution_id,
+            'linked_commitment_id': linked_commitment_id,
+            'linked_warrant_id': linked_warrant_id,
+            'status': 'stayed' if decision == 'stay' else 'resolved',
+            'reviewed_by': actor_id,
+            'reviewed_at': _now(),
+            'review_note': note or '',
+            'resolution': note or ('resolved' if decision == 'resolve' else ''),
+            'note': note or mirrored_case.get('note', ''),
+            'metadata': mirror_metadata,
+            'updated_at': _now(),
+        })
+        _case_notice_store_case(bound_org_id, mirrored_case)
+        if decision == 'stay':
+            federation_peer = None
+            warrant = _maybe_stay_warrant_for_case(
+                mirrored_case,
+                actor_id,
+                org_id=bound_org_id,
+                session_id=claims.session_id or None,
+                note=note or 'Stayed after received case_notice envelope',
+            )
+        else:
+            federation_peer = _maybe_restore_peer_for_case(
+                mirrored_case,
+                actor_id,
+                org_id=bound_org_id,
+                session_id=claims.session_id or None,
+            )
+            warrant = None
+
+    inbox_entry = _federation_inbox_entry(
+        bound_org_id,
+        claims,
+        receipt,
+        payload=payload,
+        state='processed',
+    )
+    log_event(
+        bound_org_id,
+        actor_id,
+        'federation_case_notice_applied',
+        resource=source_case_id,
+        outcome='success',
+        actor_type=claims.actor_type or 'service',
+        details=_federation_audit_details(
+            claims,
+            receipt_id=(receipt or {}).get('receipt_id', ''),
+            case_decision=decision,
+            source_case_id=source_case_id,
+            claim_type=claim_type,
+            linked_commitment_id=linked_commitment_id,
+            linked_warrant_id=linked_warrant_id,
+            case_id=mirrored_case.get('case_id', ''),
+            case_created=created,
+            case_status=mirrored_case.get('status', ''),
+        ),
+        session_id=claims.session_id or None,
+    )
+    return {
+        'applied': True,
+        'message_type': claims.message_type,
+        'state': 'processed',
+        'reason': 'case_notice_applied',
+        'case': mirrored_case,
+        'case_created': created,
+        'federation_peer': federation_peer,
+        'warrant': warrant,
+        'inbox_entry': inbox_entry,
+    }
+
+
 def _process_received_federation_message(bound_org_id, claims, receipt, *, payload=None):
     result = {
         'applied': False,
@@ -1915,6 +2269,14 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
 
     if claims.message_type == 'commitment_breach_notice' and claims.commitment_id:
         return _process_received_commitment_breach_notice(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+        )
+
+    if claims.message_type == 'case_notice':
+        return _process_received_case_notice(
             bound_org_id,
             claims,
             receipt,
@@ -2733,6 +3095,177 @@ def _case_snapshot(org_id):
     }
 
 
+def _case_notice_delivery_context(case_record, body):
+    body = body if isinstance(body, dict) else {}
+    case_record = dict(case_record or {})
+    target_host_id = (
+        body.get('target_host_id')
+        or case_record.get('target_host_id')
+        or ''
+    ).strip()
+    target_institution_id = (
+        body.get('target_institution_id')
+        or body.get('target_org_id')
+        or case_record.get('target_institution_id')
+        or case_record.get('target_org_id')
+        or ''
+    ).strip()
+    return target_host_id, target_institution_id
+
+
+def _deliver_case_notice(bound_org_id, case_record, decision, *, actor_id, session_id=None,
+                         body=None):
+    body = body if isinstance(body, dict) else {}
+    target_host_id, target_institution_id = _case_notice_delivery_context(case_record, body)
+    if not target_host_id:
+        raise ValueError(
+            f"Case '{(case_record or {}).get('case_id', '')}' does not declare target_host_id for federated case_notice dispatch"
+        )
+    if not target_institution_id:
+        raise ValueError(
+            f"Case '{(case_record or {}).get('case_id', '')}' does not declare target_institution_id for federated case_notice dispatch"
+        )
+    federated_payload = {
+        'case_decision': decision,
+        'source_case_id': case_record.get('case_id', ''),
+        'claim_type': case_record.get('claim_type', ''),
+        'linked_commitment_id': case_record.get('linked_commitment_id', ''),
+        'linked_warrant_id': case_record.get('linked_warrant_id', ''),
+        'target_host_id': target_host_id,
+        'target_institution_id': target_institution_id,
+        'note': body.get('note', ''),
+        'metadata': dict(case_record.get('metadata') or body.get('metadata') or {}),
+    }
+    host_identity, admission_registry = _runtime_host_state(bound_org_id)
+    authority = _federation_authority(host_identity)
+    authority.ensure_enabled()
+    peer = authority.peer_registry.get('peers', {}).get(target_host_id)
+    if not peer:
+        raise FederationDeliveryError(f"Peer host '{target_host_id}' is not in peer registry")
+    if peer.trust_state == 'revoked':
+        raise FederationDeliveryError(
+            f"Peer host '{target_host_id}' is not trusted (state={peer.trust_state})"
+        )
+    if not peer.receive_url:
+        raise FederationDeliveryError(
+            f"Peer host '{target_host_id}' does not declare endpoint_url"
+        )
+    try:
+        request = urllib_request.Request(peer.manifest_url, method='GET')
+        with urllib_request.urlopen(request, timeout=10) as response:
+            manifest = json.loads(response.read().decode('utf-8') or '{}')
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        raise FederationDeliveryError(
+            f"Failed fetching federation manifest from '{peer.host_id}': HTTP {exc.code}: {body}",
+            peer_host_id=peer.host_id,
+        ) from exc
+    except Exception as exc:
+        raise FederationDeliveryError(
+            f"Failed fetching federation manifest from '{peer.host_id}': {exc}",
+            peer_host_id=peer.host_id,
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise FederationDeliveryError(
+            f"Peer host '{peer.host_id}' returned a non-object federation manifest",
+            peer_host_id=peer.host_id,
+            response=manifest,
+        )
+    authority._validate_peer_manifest(
+        peer,
+        manifest,
+        target_institution_id=target_institution_id,
+    )
+    envelope = authority.issue(
+        bound_org_id,
+        peer.host_id,
+        target_institution_id,
+        'case_notice',
+        payload=federated_payload,
+        actor_type='user',
+        actor_id=actor_id,
+        session_id=session_id or '',
+    )
+    claims = authority.validate(
+        envelope,
+        payload=federated_payload,
+        expected_target_host_id=peer.host_id,
+        expected_target_org_id=target_institution_id,
+        expected_boundary_name='federation_gateway',
+    )
+    try:
+        request = urllib_request.Request(
+            peer.receive_url,
+            data=json.dumps({
+                'envelope': envelope,
+                'payload': federated_payload,
+            }).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib_request.urlopen(request, timeout=10) as response:
+            delivery_response = json.loads(response.read().decode('utf-8') or '{}')
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        raise FederationDeliveryError(
+            f"Peer returned HTTP {exc.code}: {body}",
+            peer_host_id=peer.host_id,
+            envelope=envelope,
+            claims=claims,
+        ) from exc
+    except Exception as exc:
+        raise FederationDeliveryError(
+            f"Failed delivering federation envelope to '{peer.host_id}': {exc}",
+            peer_host_id=peer.host_id,
+            envelope=envelope,
+            claims=claims,
+        ) from exc
+    receipt = authority._validate_delivery_receipt(
+        delivery_response,
+        peer_host_id=peer.host_id,
+        target_institution_id=target_institution_id,
+        claims=claims,
+    )
+    delivery = {
+        'peer': peer.to_dict(),
+        'peer_manifest': manifest,
+        'envelope': envelope,
+        'claims': claims.to_dict(),
+        'receipt': receipt,
+        'response': delivery_response,
+    }
+    federation_state = authority.snapshot(
+        bound_org_id=bound_org_id,
+        admission_registry=admission_registry,
+    )
+    log_event(
+        bound_org_id,
+        actor_id,
+        'federation_envelope_sent',
+        resource='case_notice',
+        outcome='accepted',
+        actor_type='user',
+        details=_federation_audit_details(
+            claims,
+            peer_transport=peer.transport,
+            receipt_id=receipt.get('receipt_id', ''),
+            receiver_host_id=receipt.get('receiver_host_id', ''),
+            receiver_institution_id=receipt.get('receiver_institution_id', ''),
+            commitment_delivery_recorded=False,
+        ),
+        session_id=session_id or None,
+    )
+    return {
+        'delivery': delivery,
+        'runtime_core': {
+            'federation': federation_state,
+        },
+        'target_host_id': target_host_id,
+        'target_institution_id': target_institution_id,
+        'payload': federated_payload,
+    }
+
+
 def _subscription_snapshot(org_id):
     payload = load_subscriptions(org_id)
     return {
@@ -2887,6 +3420,8 @@ def _maybe_block_commitment_settlement(commitment_id, actor_id, *, org_id, sessi
 
 def _blocking_case_for_delivery(*, org_id, commitment_id='', target_host_id='', message_type=''):
     try:
+        if message_type in ('commitment_breach_notice', 'case_notice'):
+            return None
         if message_type != 'commitment_breach_notice':
             commitment_case = blocking_commitment_case(commitment_id, org_id=org_id)
             if commitment_case:
@@ -3930,10 +4465,15 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 envelope = (body.get('envelope') or '').strip()
                 if not envelope:
                     return self._json({'error': 'Federation envelope is required'}, 400)
+                peer_registry_override = _case_notice_validation_peer_registry(
+                    inst_ctx.org_id,
+                    envelope,
+                )
                 claims, federation_state = _accept_federation_request(
                     inst_ctx.org_id,
                     envelope,
                     payload=body.get('payload'),
+                    peer_registry=peer_registry_override,
                 )
                 receipt = _federation_receipt(
                     inst_ctx.org_id,
@@ -5136,6 +5676,26 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 claim_type = (body.get('claim_type') or '').strip()
                 if not claim_type:
                     return self._json({'error': 'claim_type is required'}, 400)
+                if body.get('federate'):
+                    target_host_id, target_institution_id = _case_notice_delivery_context(
+                        {
+                            'target_host_id': (body.get('target_host_id') or '').strip(),
+                            'target_institution_id': (
+                                body.get('target_institution_id')
+                                or body.get('target_org_id')
+                                or ''
+                            ).strip(),
+                        },
+                        body,
+                    )
+                    if not target_host_id:
+                        return self._json({
+                            'error': 'target_host_id is required for federated case_notice dispatch',
+                        }, 400)
+                    if not target_institution_id:
+                        return self._json({
+                            'error': 'target_institution_id is required for federated case_notice dispatch',
+                        }, 400)
                 case_record = open_case(
                     org_id,
                     claim_type,
@@ -5178,12 +5738,45 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     session_id=_sid,
                     note=body.get('note', ''),
                 )
+                delivery = None
+                if body.get('federate'):
+                    try:
+                        case_notice_delivery = _deliver_case_notice(
+                            org_id,
+                            case_record,
+                            'open',
+                            actor_id=by,
+                            session_id=_sid or '',
+                            body=body,
+                        )
+                    except ValueError as e:
+                        return self._json({'error': str(e), 'case': case_record}, 400)
+                    except FederationUnavailable as e:
+                        return self._json({'error': str(e), 'case': case_record}, 503)
+                    except PermissionError as e:
+                        response = {'error': str(e), 'case': case_record}
+                        response['federation_peer'] = getattr(e, 'federation_peer', None)
+                        response['warrant'] = getattr(e, 'warrant', None)
+                        return self._json(response, 403)
+                    except FederationDeliveryError as e:
+                        response = {
+                            'error': str(e),
+                            'case': case_record,
+                            'peer_host_id': e.peer_host_id,
+                            'claims': _federation_claims_dict(e.claims),
+                            'federation_peer': getattr(e, 'federation_peer', None),
+                            'warrant': getattr(e, 'warrant', None),
+                        }
+                        return self._json(response, 502)
+                    delivery = case_notice_delivery['delivery']
                 return self._json({
                     'message': f"Case opened: {case_record['case_id']}",
                     'case': case_record,
                     'summary': _case_snapshot(org_id),
                     'federation_peer': federation_peer,
                     'warrant': warrant,
+                    'delivery': delivery,
+                    **({'runtime_core': case_notice_delivery['runtime_core']} if body.get('federate') else {}),
                 })
 
             elif path in ('/api/cases/stay', '/api/cases/resolve'):
@@ -5195,6 +5788,22 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     'stay': 'case_stayed',
                     'resolve': 'case_resolved',
                 }[decision]
+                prior_case = get_case(case_id, org_id=org_id)
+                if body.get('federate'):
+                    target_host_id, target_institution_id = _case_notice_delivery_context(
+                        prior_case or {},
+                        body,
+                    )
+                    if not target_host_id:
+                        return self._json({
+                            'error': 'target_host_id is required for federated case_notice dispatch',
+                            'case': prior_case,
+                        }, 400)
+                    if not target_institution_id:
+                        return self._json({
+                            'error': 'target_institution_id is required for federated case_notice dispatch',
+                            'case': prior_case,
+                        }, 400)
                 case_record = {
                     'stay': stay_case,
                     'resolve': resolve_case,
@@ -5236,12 +5845,45 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         org_id=org_id,
                         session_id=_sid,
                     )
+                delivery = None
+                if body.get('federate'):
+                    try:
+                        case_notice_delivery = _deliver_case_notice(
+                            org_id,
+                            case_record,
+                            decision,
+                            actor_id=by,
+                            session_id=_sid or '',
+                            body=body,
+                        )
+                    except ValueError as e:
+                        return self._json({'error': str(e), 'case': case_record}, 400)
+                    except FederationUnavailable as e:
+                        return self._json({'error': str(e), 'case': case_record}, 503)
+                    except PermissionError as e:
+                        response = {'error': str(e), 'case': case_record}
+                        response['federation_peer'] = getattr(e, 'federation_peer', None)
+                        response['warrant'] = getattr(e, 'warrant', None)
+                        return self._json(response, 403)
+                    except FederationDeliveryError as e:
+                        response = {
+                            'error': str(e),
+                            'case': case_record,
+                            'peer_host_id': e.peer_host_id,
+                            'claims': _federation_claims_dict(e.claims),
+                            'federation_peer': getattr(e, 'federation_peer', None),
+                            'warrant': getattr(e, 'warrant', None),
+                        }
+                        return self._json(response, 502)
+                    delivery = case_notice_delivery['delivery']
                 return self._json({
                     'message': f"Case {case_record['status']}: {case_id}",
                     'case': case_record,
                     'summary': _case_snapshot(org_id),
                     'federation_peer': federation_peer,
                     'warrant': warrant,
+                    'delivery': delivery,
+                    **({'runtime_core': case_notice_delivery['runtime_core']} if body.get('federate') else {}),
                 })
 
             elif path == '/api/federation/send':

@@ -494,7 +494,64 @@ def load_settlement_adapters(org_id=None):
 
 def load_funding_sources(org_id=None):
     """Load funding sources from the institution capsule."""
-    return _load_registry_file('funding_sources.json', org_id)
+    return _sync_funding_sources(org_id)
+
+
+def _save_funding_source_store(store, org_id=None):
+    payload = dict(store or {})
+    payload['updatedAt'] = _now()
+    payload.setdefault('sources', {})
+    payload.setdefault('source_types', _PROTOCOL_DEFAULTS['funding_sources.json']['source_types'])
+    _save_registry_file('funding_sources.json', payload, org_id)
+
+
+def _sync_funding_sources(org_id=None):
+    store = dict(_load_registry_file('funding_sources.json', org_id))
+    original_sources = dict(store.get('sources', {}))
+    sources = dict(original_sources)
+    source_types = dict(
+        store.get('source_types') or _PROTOCOL_DEFAULTS['funding_sources.json']['source_types']
+    )
+    store['source_types'] = source_types
+
+    treasury = load_ledger(org_id).get('treasury', {})
+    owner_capital_total = round(
+        float(treasury.get('owner_capital_contributed_usd', 0.0) or 0.0),
+        4,
+    )
+    explicit_owner_capital = round(sum(
+        float(item.get('amount_usd') or 0.0)
+        for item in sources.values()
+        if item.get('type') == 'owner_capital'
+        and not dict(item.get('metadata') or {}).get('derived_from_ledger')
+    ), 4)
+    derived_owner_capital = round(max(0.0, owner_capital_total - explicit_owner_capital), 4)
+    derived_id = 'src_derived_owner_capital'
+    if derived_owner_capital > 0:
+        existing = dict(sources.get(derived_id, {}))
+        metadata = dict(existing.get('metadata') or {})
+        metadata.update({
+            'derived_from_ledger': True,
+            'source_metric': 'owner_capital_contributed_usd',
+        })
+        sources[derived_id] = {
+            'source_id': derived_id,
+            'type': 'owner_capital',
+            'amount_usd': derived_owner_capital,
+            'currency': 'USD',
+            'actor_id': 'system',
+            'note': 'Backfilled from canonical ledger owner capital total.',
+            'source_ref': 'ledger_total:owner_capital',
+            'metadata': metadata,
+            'recorded_at': existing.get('recorded_at') or _now(),
+        }
+    else:
+        sources.pop(derived_id, None)
+
+    store['sources'] = sources
+    if store.get('source_types') != source_types or original_sources != sources:
+        _save_funding_source_store(store, org_id)
+    return store
 
 
 def _proposal_store(org_id=None):

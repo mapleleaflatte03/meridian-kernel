@@ -75,6 +75,21 @@ class TreasuryCapsuleTests(unittest.TestCase):
         default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
         self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
 
+    def test_load_funding_sources_backfills_owner_capital_from_ledger(self):
+        ledger_path = self.capsule_dir / 'ledger.json'
+        ledger = json.loads(ledger_path.read_text())
+        ledger['treasury']['owner_capital_contributed_usd'] = 4.25
+        ledger_path.write_text(json.dumps(ledger, indent=2))
+
+        funding = treasury.load_funding_sources(self.org_id)
+
+        self.assertIn('src_derived_owner_capital', funding['sources'])
+        derived = funding['sources']['src_derived_owner_capital']
+        self.assertEqual(derived['type'], 'owner_capital')
+        self.assertEqual(derived['currency'], 'USD')
+        self.assertTrue(derived['metadata']['derived_from_ledger'])
+        self.assertAlmostEqual(derived['amount_usd'], 4.25, places=2)
+
     def test_treasury_snapshot_reads_capsule_protocol_state(self):
         revenue_path = self.capsule_dir / 'revenue.json'
         revenue = json.loads(revenue_path.read_text())

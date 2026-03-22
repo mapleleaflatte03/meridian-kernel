@@ -45,6 +45,11 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_record_delivery_ref = self.workspace.record_delivery_ref
         self.orig_case_summary = self.workspace.case_summary
         self.orig_list_cases = self.workspace.list_cases
+        self.orig_blocking_commitment_ids = self.workspace.blocking_commitment_ids
+        self.orig_blocked_peer_host_ids = self.workspace.blocked_peer_host_ids
+        self.orig_blocking_commitment_case = self.workspace.blocking_commitment_case
+        self.orig_blocking_peer_case = self.workspace.blocking_peer_case
+        self.orig_set_peer_trust_state = self.workspace.set_peer_trust_state
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -68,6 +73,11 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.record_delivery_ref = self.orig_record_delivery_ref
         self.workspace.case_summary = self.orig_case_summary
         self.workspace.list_cases = self.orig_list_cases
+        self.workspace.blocking_commitment_ids = self.orig_blocking_commitment_ids
+        self.workspace.blocked_peer_host_ids = self.orig_blocked_peer_host_ids
+        self.workspace.blocking_commitment_case = self.orig_blocking_commitment_case
+        self.workspace.blocking_peer_case = self.orig_blocking_peer_case
+        self.workspace.set_peer_trust_state = self.orig_set_peer_trust_state
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -248,6 +258,8 @@ class WorkspaceContextTests(unittest.TestCase):
             'stayed': 0,
             'resolved': 0,
         }
+        self.workspace.blocking_commitment_ids = lambda org_id=None: ['cmt_demo']
+        self.workspace.blocked_peer_host_ids = lambda org_id=None: ['host_beta']
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
         self.workspace.get_pending_approvals = lambda org_id=None: []
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
@@ -290,6 +302,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(status['cases']['total'], 1)
         self.assertEqual(status['cases']['open'], 1)
         self.assertEqual(status['cases']['management_mode'], 'workspace_api_file_backed')
+        self.assertEqual(status['cases']['blocking_commitment_ids'], ['cmt_demo'])
+        self.assertEqual(status['cases']['blocked_peer_host_ids'], ['host_beta'])
         self.assertIn('federation', status['runtime_core'])
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
@@ -878,6 +892,95 @@ class WorkspaceContextTests(unittest.TestCase):
         event = audit_events[0]
         self.assertEqual(event['args'][2], 'federation_commitment_blocked')
         self.assertEqual(event['kwargs']['details']['commitment_id'], 'cmt_demo')
+
+    def test_deliver_federation_envelope_blocks_open_case(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+
+        class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace._federation_authority = lambda _host: FakeAuthority()
+        self.workspace.validate_commitment_for_delivery = lambda commitment_id, **_kwargs: {
+            'commitment_id': commitment_id,
+            'status': 'accepted',
+        }
+        self.workspace.blocking_commitment_case = lambda commitment_id, **_kwargs: {
+            'case_id': 'case_demo',
+            'claim_type': 'breach_of_commitment',
+            'status': 'open',
+            'linked_commitment_id': commitment_id,
+        }
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        with self.assertRaises(PermissionError):
+            self.workspace._deliver_federation_envelope(
+                'org_a',
+                'host_beta',
+                'org_b',
+                'settlement_notice',
+                payload={'task': 'demo'},
+                actor_type='user',
+                actor_id='user_owner',
+                session_id='ses_demo',
+                commitment_id='cmt_demo',
+            )
+
+        self.assertEqual(len(audit_events), 1)
+        event = audit_events[0]
+        self.assertEqual(event['args'][2], 'federation_case_blocked')
+        self.assertEqual(event['kwargs']['details']['case_id'], 'case_demo')
+        self.assertEqual(event['kwargs']['details']['commitment_id'], 'cmt_demo')
+
+    def test_maybe_suspend_peer_for_case_updates_trust(self):
+        from runtime_host import default_host_identity
+
+        audit_events = []
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True, peer_transport='https'),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace.set_peer_trust_state = lambda *_args, **_kwargs: {
+            'source': 'file',
+            'host_id': 'host_alpha',
+            'trusted_peer_ids': [],
+            'peers': {
+                'host_beta': {
+                    'host_id': 'host_beta',
+                    'trust_state': 'suspended',
+                },
+            },
+        }
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+
+        result = self.workspace._maybe_suspend_peer_for_case(
+            {
+                'case_id': 'case_demo',
+                'claim_type': 'misrouted_execution',
+                'status': 'open',
+                'target_host_id': 'host_beta',
+            },
+            'user_owner',
+            org_id='org_a',
+            session_id='ses_demo',
+        )
+
+        self.assertTrue(result['applied'])
+        self.assertEqual(result['peer_host_id'], 'host_beta')
+        self.assertEqual(result['trust_state'], 'suspended')
+        self.assertEqual(audit_events[0]['args'][2], 'federation_peer_auto_suspended')
 
 
 if __name__ == '__main__':

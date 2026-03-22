@@ -103,6 +103,9 @@ handling. Today that proof is still intentionally narrow:
 - cases bind a target host and target institution explicitly
 - workspace APIs can open, stay, resolve, and inspect cases
 - commitment breach can auto-open a linked local case record
+- open or stayed cases surface blocking commitment IDs / peer host IDs
+- risky case classes can auto-suspend a trusted peer and block sender-side
+  federation delivery
 
 This is the first public court-network object beyond warrants and commitment
 records. It is not yet the full peer suspension, witness-host, or settlement

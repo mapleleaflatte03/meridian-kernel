@@ -162,6 +162,11 @@ counts, and the reference workspace can mutate those records through
 Commitment breach can now open a linked local case record, but this is still
 the start of the cross-institution court program rather than the full network
 dispute system.
+Open or stayed cases now also have real enforcement effect: a linked
+`commitment_id` blocks sender-side federation delivery, and risky case types
+such as `fraudulent_proof`, `invalid_settlement_notice`, or
+`misrouted_execution` automatically suspend the trusted peer on the OSS
+reference path.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

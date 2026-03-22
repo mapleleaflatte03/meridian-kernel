@@ -81,6 +81,35 @@ class CaseCapsuleTests(unittest.TestCase):
         self.assertFalse(created_second)
         self.assertEqual(first['case_id'], second['case_id'])
 
+    def test_blocking_helpers_surface_commitments_and_peers(self):
+        blocking = cases.open_case(
+            self.org_id,
+            'misrouted_execution',
+            'user_owner',
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            linked_commitment_id='cmt_demo',
+        )
+        cases.open_case(
+            self.org_id,
+            'non_delivery',
+            'user_owner',
+            target_host_id='host_gamma',
+            target_institution_id='org_gamma',
+            linked_commitment_id='cmt_other',
+        )
+
+        self.assertEqual(
+            cases.blocking_commitment_case('cmt_demo', org_id=self.org_id)['case_id'],
+            blocking['case_id'],
+        )
+        self.assertEqual(
+            cases.blocking_peer_case('host_beta', org_id=self.org_id)['case_id'],
+            blocking['case_id'],
+        )
+        self.assertCountEqual(cases.blocking_commitment_ids(self.org_id), ['cmt_demo', 'cmt_other'])
+        self.assertEqual(cases.blocked_peer_host_ids(self.org_id), ['host_beta'])
+
 
 if __name__ == '__main__':
     unittest.main()

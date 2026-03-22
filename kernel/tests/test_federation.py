@@ -4284,6 +4284,119 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(mirrored_case['status'], 'resolved')
                 self.assertEqual(mirrored_case['resolution'], 'Resolve federated control-plane case')
 
+    def test_workspace_case_notice_round_trip_stay_keeps_peer_blocked(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+
+            with _run_workspace(beta), _run_workspace(alpha):
+                alpha_session = _issue_workspace_session(alpha)
+                open_status, open_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/cases/open',
+                    payload={
+                        'claim_type': 'misrouted_execution',
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_beta',
+                        'note': 'Open federated control-plane case for stay path',
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {alpha_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(open_status, 200, open_body)
+                case_id = open_body['case']['case_id']
+
+                stay_status, stay_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/cases/stay',
+                    payload={
+                        'case_id': case_id,
+                        'note': 'Stay federated control-plane case',
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {alpha_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(stay_status, 200, stay_body)
+                self.assertEqual(stay_body['delivery']['response']['processing']['reason'], 'case_notice_applied')
+                self.assertEqual(stay_body['delivery']['response']['processing']['case']['status'], 'stayed')
+                self.assertIsNone(stay_body['delivery']['response']['processing']['federation_peer'])
+                self.assertIsNone(stay_body['delivery']['response']['processing']['warrant'])
+
+                status, cases_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/cases',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(status, 200, cases_body)
+                self.assertEqual(cases_body['total'], 1)
+                self.assertEqual(cases_body['blocked_peer_host_ids'], ['host_beta'])
+                alpha_case = next(item for item in cases_body['cases'] if item['case_id'] == case_id)
+                self.assertEqual(alpha_case['status'], 'stayed')
+
+                status, cases_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/cases',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(status, 200, cases_body)
+                self.assertEqual(cases_body['blocked_peer_host_ids'], ['host_alpha'])
+                mirrored_case = next(
+                    item for item in cases_body['cases']
+                    if item['metadata']['federation_source_case_id'] == case_id
+                )
+                self.assertEqual(mirrored_case['status'], 'stayed')
+                self.assertEqual(mirrored_case['review_note'], 'Stay federated control-plane case')
+
+            beta_events = _read_jsonl(beta['audit_log'])
+            self.assertTrue(
+                any(event.get('action') == 'federation_case_notice_applied' for event in beta_events)
+            )
+
     def test_workspace_case_notice_round_trip_auto_archives_to_witness_peer(self):
         try:
             port_alpha = _find_free_port()

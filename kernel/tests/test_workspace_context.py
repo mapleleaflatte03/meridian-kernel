@@ -53,6 +53,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_blocking_peer_case = self.workspace.blocking_peer_case
         self.orig_set_peer_trust_state = self.workspace.set_peer_trust_state
         self.orig_ensure_case_for_delivery_failure = self.workspace.ensure_case_for_delivery_failure
+        self.orig_summarize_inbox_entries = self.workspace.summarize_inbox_entries
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -83,6 +84,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.blocking_peer_case = self.orig_blocking_peer_case
         self.workspace.set_peer_trust_state = self.orig_set_peer_trust_state
         self.workspace.ensure_case_for_delivery_failure = self.orig_ensure_case_for_delivery_failure
+        self.workspace.summarize_inbox_entries = self.orig_summarize_inbox_entries
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -499,6 +501,44 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(receipt['receiver_institution_id'], 'org_a')
         self.assertEqual(receipt['identity_model'], 'signed_host_service')
         self.assertTrue(receipt['receipt_id'].startswith('fedrcpt_'))
+
+    def test_federation_snapshot_surfaces_inbox_summary(self):
+        from runtime_host import default_host_identity
+        self.workspace.summarize_inbox_entries = lambda org_id: {
+            'org_id': org_id,
+            'total': 1,
+            'received': 1,
+            'processed': 0,
+            'message_type_counts': {'execution_request': 1},
+            'state_counts': {'received': 1},
+            'updatedAt': '2026-03-22T00:00:00Z',
+        }
+        snapshot = self.workspace._federation_snapshot(
+            'org_a',
+            host_identity=default_host_identity(
+                host_id='host_alpha',
+                role='control_host',
+                federation_enabled=True,
+                peer_transport='https',
+                supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+            ),
+            admission_registry={
+                'source': 'file',
+                'host_id': 'host_alpha',
+                'institutions': {'org_a': {'status': 'admitted'}},
+                'admitted_org_ids': ['org_a'],
+            },
+            peer_registry={
+                'host_id': 'host_alpha',
+                'peers': {},
+                'trusted_peer_ids': [],
+            },
+        )
+        self.assertEqual(snapshot['inbox_summary']['total'], 1)
+        self.assertEqual(
+            snapshot['inbox_summary']['message_type_counts']['execution_request'],
+            1,
+        )
 
     def test_mutate_federation_peer_upserts_registry(self):
         from runtime_host import default_host_identity

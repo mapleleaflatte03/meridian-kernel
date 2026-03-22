@@ -1022,6 +1022,21 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(delivery['claims']['session_id'], session_id)
                 self.assertEqual(delivery['claims']['actor_id'], 'user_owner_alpha')
                 self.assertEqual(delivery['claims']['warrant_id'], warrant['warrant_id'])
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['total'], 1)
+                self.assertEqual(inbox_body['summary']['message_type_counts'], {
+                    'execution_request': 1,
+                })
+                self.assertEqual(inbox_body['entries'][0]['envelope_id'], delivery['claims']['envelope_id'])
+                self.assertEqual(inbox_body['entries'][0]['receipt_id'], delivery['receipt']['receipt_id'])
+                self.assertEqual(inbox_body['entries'][0]['warrant_id'], warrant['warrant_id'])
+                self.assertEqual(inbox_body['entries'][0]['payload'], request_payload)
+                self.assertEqual(inbox_body['entries'][0]['state'], 'received')
 
             alpha_events = _read_jsonl(alpha['audit_log'])
             beta_events = _read_jsonl(beta['audit_log'])

@@ -47,6 +47,7 @@ What is real today:
 - one real built-in reference runtime path: `local_kernel`
 - one tested kernel-side reference adapter library: `openclaw_compatible`
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
+- one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, and sender-side federation validation when `commitment_id` is supplied
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
@@ -141,6 +142,9 @@ reference workspace can mutate the file-backed admission registry via
 The same `runtime_core` surface now also exposes the `federation_gateway`
 boundary state: whether the host has federation enabled, which peer hosts are
 trusted, and whether replay protection is file-backed or memory-only.
+`GET /api/federation/inbox` now exposes the receiver-side capsule-backed inbox
+for accepted federation messages, including per-message-type counts and the
+latest accepted entries for the bound institution.
 That same boundary registry now declares whether a boundary requires warrants
 and which message types map to which warrant action classes.
 `/api/warrants` now exposes first-class warrant records and summary counts, and

@@ -36,6 +36,8 @@ CAPSULE_FILES = (
     'commitments.json',
     'cases.json',
     'warrants.json',
+    'federation_inbox.json',
+    '.federation_inbox.lock',
     'subscriptions.json',
     'subscriptions.json.bak',
     '.subscriptions.lock',
@@ -223,6 +225,16 @@ _EMPTY_WARRANTS = {
     'court_review_states': ['auto_issued', 'pending_review', 'approved', 'stayed', 'revoked'],
     'execution_states': ['ready', 'executed'],
 }
+_EMPTY_FEDERATION_INBOX = {
+    'version': 1,
+    'updatedAt': '',
+    'entries': {},
+    'states': ['received', 'processed'],
+    '_meta': {
+        'service_scope': 'institution_owned_service',
+        'bound_org_id': '',
+    },
+}
 _EMPTY_SUBSCRIPTIONS = {
     'subscribers': {},
     'delivery_log': [],
@@ -354,6 +366,8 @@ _CAPSULE_DEFAULTS = {
     'commitments.json': _EMPTY_COMMITMENTS,
     'cases.json': _EMPTY_CASES,
     'warrants.json': _EMPTY_WARRANTS,
+    'federation_inbox.json': _EMPTY_FEDERATION_INBOX,
+    '.federation_inbox.lock': '',
     'subscriptions.json': _EMPTY_SUBSCRIPTIONS,
     'subscriptions.json.bak': _EMPTY_SUBSCRIPTIONS,
     '.subscriptions.lock': '',
@@ -428,6 +442,10 @@ def owner_ledger_path(org_id=None):
     return capsule_path(org_id, 'owner_ledger.json')
 
 
+def federation_inbox_path(org_id=None):
+    return capsule_path(org_id, 'federation_inbox.json')
+
+
 def ensure_subscription_aliases(org_id=None):
     target = ensure_capsule(org_id)
     payload = dict(_EMPTY_SUBSCRIPTIONS)
@@ -462,6 +480,24 @@ def ensure_accounting_aliases(org_id=None):
             json.dump(payload, f, indent=2)
     return {
         'owner_ledger': owner,
+    }
+
+
+def ensure_federation_inbox_aliases(org_id=None):
+    target = ensure_capsule(org_id)
+    payload = dict(_EMPTY_FEDERATION_INBOX)
+    payload['_meta'] = dict(payload.get('_meta', {}))
+    payload['_meta']['bound_org_id'] = org_id or ''
+    inbox = os.path.join(target, 'federation_inbox.json')
+    lock = os.path.join(target, '.federation_inbox.lock')
+    if not os.path.exists(inbox):
+        with open(inbox, 'w') as f:
+            json.dump(payload, f, indent=2)
+    if not os.path.exists(lock):
+        open(lock, 'a').close()
+    return {
+        'federation_inbox': inbox,
+        'federation_inbox_lock': lock,
     }
 
 

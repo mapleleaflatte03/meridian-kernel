@@ -47,6 +47,9 @@ deliberately narrow:
   kernel-side reference adapter library
 - one host-service federation primitive now exists as a kernel reference:
   HMAC-signed envelopes, peer registry, and replay protection
+- one receiver-side federation inbox primitive now exists as a kernel reference:
+  accepted envelopes persist into an institution-scoped capsule inbox instead
+  of existing only as audit lines
 - one first-class warrant primitive now exists as a kernel reference:
   file-backed warrant records, warrant review state, and sender-side
   federation execution gating for `execution_request`
@@ -118,6 +121,22 @@ handling. Today that proof is still intentionally narrow:
 This is the first public court-network object beyond warrants and commitment
 records. It is not yet the full peer suspension, witness-host, or settlement
 freeze program.
+
+## Federation Inbox Surface
+
+Meridian now also has a first-class receiver-side inbox for cross-host
+messages:
+
+- accepted federation envelopes persist into an institution-scoped capsule file
+- the inbox preserves source/target host and institution bindings, message
+  type, warrant / commitment references, payload hash, payload, receipt ID,
+  and received / processed state
+- `GET /api/federation/inbox` exposes the current inbox state for the bound
+  institution
+
+This is receiver-side persistence, not yet automatic execution. It ensures
+cross-host delivery can be inspected and linked before the deeper warrant-first
+execution program advances.
 
 ## Payout Proposal Primitive
 

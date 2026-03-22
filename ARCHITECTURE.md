@@ -457,6 +457,10 @@ the current host.
 The federation gateway is now a real boundary in the service registry, but it
 remains a host-service primitive. It proves signed cross-host identity and
 replay protection, not broad multi-host execution parity.
+Successful federated deliveries can also fan out envelope/payload/receipt
+snapshots to configured witness-host peers and return the archival outcomes to
+the sender, but only when the peer registry explicitly opts that peer into
+witness archival and the witness host advertises an enabled witness archive.
 Production deployments would build their own control plane
 or adapter bridge on top of the Python primitives.  The demo JSON API is a
 reference surface, not a full remote governance adapter API.

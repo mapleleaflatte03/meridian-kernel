@@ -102,6 +102,8 @@ class FederationPeer:
         'endpoint_url',
         'trust_state',
         'shared_secret',
+        'witness_archive_user',
+        'witness_archive_pass',
         'admitted_org_ids',
         'capability_snapshot',
         'last_refreshed_at',
@@ -109,6 +111,7 @@ class FederationPeer:
 
     def __init__(self, host_id, label='', transport='https', endpoint_url='',
                  trust_state='trusted', shared_secret='', admitted_org_ids=None,
+                 witness_archive_user='', witness_archive_pass='',
                  capability_snapshot=None, last_refreshed_at=''):
         if trust_state not in TRUST_STATES:
             raise ValueError(
@@ -120,6 +123,8 @@ class FederationPeer:
         self.endpoint_url = endpoint_url.rstrip('/')
         self.trust_state = trust_state
         self.shared_secret = shared_secret or ''
+        self.witness_archive_user = witness_archive_user or ''
+        self.witness_archive_pass = witness_archive_pass or ''
         self.admitted_org_ids = list(admitted_org_ids or [])
         self.capability_snapshot = dict(capability_snapshot or {})
         self.last_refreshed_at = (last_refreshed_at or '').strip()
@@ -134,9 +139,14 @@ class FederationPeer:
             'admitted_org_ids': list(self.admitted_org_ids),
             'capability_snapshot': dict(self.capability_snapshot),
             'last_refreshed_at': self.last_refreshed_at,
+            'witness_archive_configured': bool(
+                self.witness_archive_user and self.witness_archive_pass
+            ),
         }
         if not redact_secret:
             data['shared_secret'] = self.shared_secret
+            data['witness_archive_user'] = self.witness_archive_user
+            data['witness_archive_pass'] = self.witness_archive_pass
         return data
 
     @property
@@ -293,6 +303,8 @@ def load_peer_registry(file_path, *, host_identity=None):
             endpoint_url=(data.get('endpoint_url') or data.get('base_url') or '').strip(),
             trust_state=(data.get('trust_state') or 'trusted').strip(),
             shared_secret=(data.get('shared_secret') or '').strip(),
+            witness_archive_user=(data.get('witness_archive_user') or '').strip(),
+            witness_archive_pass=(data.get('witness_archive_pass') or '').strip(),
             admitted_org_ids=data.get('admitted_org_ids', []),
             capability_snapshot=data.get('capability_snapshot', {}),
             last_refreshed_at=data.get('last_refreshed_at', ''),
@@ -336,6 +348,8 @@ def save_peer_registry(file_path, registry, *, host_identity=None):
                 endpoint_url=(data.get('endpoint_url') or data.get('base_url') or '').strip(),
                 trust_state=(data.get('trust_state') or 'trusted').strip(),
                 shared_secret=(data.get('shared_secret') or '').strip(),
+                witness_archive_user=(data.get('witness_archive_user') or '').strip(),
+                witness_archive_pass=(data.get('witness_archive_pass') or '').strip(),
                 admitted_org_ids=_normalize_peer_org_ids(data.get('admitted_org_ids', [])),
                 capability_snapshot=data.get('capability_snapshot', {}),
                 last_refreshed_at=data.get('last_refreshed_at', ''),
@@ -365,6 +379,8 @@ def save_peer_registry(file_path, registry, *, host_identity=None):
 def upsert_peer_registry_entry(file_path, peer_host_id, *, host_identity=None,
                                label=None, transport=None, endpoint_url=None,
                                trust_state=None, shared_secret=None,
+                               witness_archive_user=None,
+                               witness_archive_pass=None,
                                admitted_org_ids=None):
     peer_host_id = _normalize_host_id(peer_host_id, field_name='peer_host_id')
     if host_identity and peer_host_id == host_identity.host_id:
@@ -391,6 +407,14 @@ def upsert_peer_registry_entry(file_path, peer_host_id, *, host_identity=None,
         shared_secret=(
             shared_secret.strip() if isinstance(shared_secret, str)
             else (existing.shared_secret if existing else '')
+        ),
+        witness_archive_user=(
+            witness_archive_user.strip() if isinstance(witness_archive_user, str)
+            else (existing.witness_archive_user if existing else '')
+        ),
+        witness_archive_pass=(
+            witness_archive_pass.strip() if isinstance(witness_archive_pass, str)
+            else (existing.witness_archive_pass if existing else '')
         ),
         admitted_org_ids=(
             _normalize_peer_org_ids(admitted_org_ids)
@@ -426,6 +450,8 @@ def set_peer_trust_state(file_path, peer_host_id, trust_state, *, host_identity=
         endpoint_url=existing.endpoint_url,
         trust_state=trust_state,
         shared_secret=existing.shared_secret,
+        witness_archive_user=existing.witness_archive_user,
+        witness_archive_pass=existing.witness_archive_pass,
         admitted_org_ids=existing.admitted_org_ids,
         capability_snapshot=existing.capability_snapshot,
         last_refreshed_at=existing.last_refreshed_at,
@@ -459,6 +485,8 @@ def refresh_peer_registry_entry(file_path, peer_host_id, *, host_identity=None,
         endpoint_url=existing.endpoint_url,
         trust_state=existing.trust_state,
         shared_secret=existing.shared_secret,
+        witness_archive_user=existing.witness_archive_user,
+        witness_archive_pass=existing.witness_archive_pass,
         admitted_org_ids=existing.admitted_org_ids,
         capability_snapshot=dict(manifest),
         last_refreshed_at=_now().strftime('%Y-%m-%dT%H:%M:%SZ'),

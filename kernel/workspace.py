@@ -257,6 +257,7 @@ from cases import (
 import cases as cases_module
 from federation import (
     FederationAuthority,
+    FederationPeer,
     ReplayStore,
     load_peer_registry,
     upsert_peer_registry_entry,
@@ -553,6 +554,10 @@ def _federation_manifest(context, host_identity=None, admission_registry=None):
             for key, value in federation.items()
             if key not in ('peers', 'trusted_peers', 'trusted_peer_ids')
         },
+        'witness_archive': _witness_archive_snapshot(
+            context.org_id,
+            host_identity=host_identity,
+        ),
     }
 
 
@@ -749,6 +754,8 @@ def _mutate_federation_peer(bound_org_id, action, payload):
             endpoint_url=payload.get('endpoint_url'),
             trust_state=payload.get('trust_state'),
             shared_secret=payload.get('shared_secret'),
+            witness_archive_user=payload.get('witness_archive_user'),
+            witness_archive_pass=payload.get('witness_archive_pass'),
             admitted_org_ids=payload.get('admitted_org_ids'),
         )
     elif action == 'refresh':
@@ -2458,6 +2465,16 @@ def _deliver_execution_job_court_notice(bound_org_id, job, warrant, decision, *,
         'receipt': receipt,
         'response': delivery_response,
     }
+    witness_archive = _archive_delivery_with_witness_peers(
+        bound_org_id,
+        authority,
+        delivery,
+        federated_payload,
+        actor_id=actor_id,
+        session_id=session_id,
+        host_identity=host_identity,
+    )
+    delivery['witness_archive'] = witness_archive
     court_notice = {
         'message_type': 'court_notice',
         'decision': (decision or '').strip(),
@@ -2499,6 +2516,9 @@ def _deliver_execution_job_court_notice(bound_org_id, job, warrant, decision, *,
             local_warrant_id=(record.get('local_warrant_id') or '').strip(),
             sender_warrant_id=sender_warrant_id,
             decision=(decision or '').strip(),
+            witness_archive_attempted=witness_archive.get('attempted', 0),
+            witness_archive_created=witness_archive.get('created', 0),
+            witness_archive_failed=witness_archive.get('failed', 0),
         ),
         session_id=session_id or None,
     )
@@ -3068,6 +3088,232 @@ def _federation_peer_state(peer_host_id, *, host_identity=None):
     }
 
 
+def _validate_witness_peer_manifest(peer, manifest):
+    if not isinstance(manifest, dict):
+        raise FederationDeliveryError(
+            f"Peer host '{peer.host_id}' returned a non-object witness manifest",
+            peer_host_id=peer.host_id,
+            response=manifest,
+        )
+    host_identity = manifest.get('host_identity', {}) or {}
+    if host_identity.get('host_id') != peer.host_id:
+        raise FederationDeliveryError(
+            f"Peer manifest host_id '{host_identity.get('host_id', '')}' does not match "
+            f"witness peer '{peer.host_id}'",
+            peer_host_id=peer.host_id,
+            response=manifest,
+        )
+    archive = manifest.get('witness_archive', {}) or {}
+    if archive.get('host_id') and archive.get('host_id') != peer.host_id:
+        raise FederationDeliveryError(
+            f"Peer host '{peer.host_id}' witness archive host_id "
+            f"{archive.get('host_id', '')!r} does not match peer host",
+            peer_host_id=peer.host_id,
+            response=manifest,
+        )
+    return manifest
+
+
+def _local_federation_manifest(bound_org_id, *, host_identity=None, admission_registry=None):
+    org = load_orgs().get('organizations', {}).get(bound_org_id)
+    if not org:
+        raise RuntimeError(f"Local institution '{bound_org_id}' not found for federation manifest")
+    context = InstitutionContext.bind(
+        bound_org_id,
+        org,
+        'federation_local_manifest',
+        WORKSPACE_BOUNDARY,
+    )
+    return _federation_manifest(
+        context,
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+    )
+
+
+def _witness_peer_archive_headers(peer):
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    if getattr(peer, 'witness_archive_user', '') and getattr(peer, 'witness_archive_pass', ''):
+        token = base64.b64encode(
+            f'{peer.witness_archive_user}:{peer.witness_archive_pass}'.encode('utf-8')
+        ).decode('ascii')
+        headers['Authorization'] = f'Basic {token}'
+    return headers
+
+
+def _archive_delivery_with_witness_peers(bound_org_id, authority, delivery, payload, *,
+                                         actor_id='', session_id=None,
+                                         host_identity=None):
+    if not hasattr(authority, 'peer_registry'):
+        return {
+            'attempted': 0,
+            'created': 0,
+            'existing': 0,
+            'failed': 0,
+            'records': [],
+        }
+    host_identity = host_identity or authority.host_identity
+    claims = dict(delivery.get('claims') or {})
+    receipt = dict(delivery.get('receipt') or {})
+    if not claims or not receipt:
+        return {
+            'attempted': 0,
+            'created': 0,
+            'existing': 0,
+            'failed': 0,
+            'skipped': 0,
+            'records': [],
+        }
+    admission_registry = load_admission_registry(
+        RUNTIME_ADMISSION_FILE,
+        bound_org_id=bound_org_id,
+        host_identity=host_identity,
+    )
+    source_manifest = _local_federation_manifest(
+        bound_org_id,
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+    )
+    target_manifest = dict(delivery.get('peer_manifest') or {})
+
+    peer_registry = authority.peer_registry.get('peers', {}) or {}
+    target_host_id = (claims.get('target_host_id') or '').strip()
+    results = []
+    for peer_host_id in sorted(peer_registry):
+        peer = peer_registry.get(peer_host_id)
+        if not isinstance(peer, FederationPeer):
+            continue
+        if peer.trust_state != 'trusted':
+            continue
+        if peer.host_id in (host_identity.host_id, target_host_id):
+            continue
+        if not peer.endpoint_url:
+            continue
+        if not (
+            getattr(peer, 'witness_archive_user', '')
+            and getattr(peer, 'witness_archive_pass', '')
+        ):
+            results.append({
+                'peer_host_id': peer.host_id,
+                'peer_label': peer.label,
+                'attempted': False,
+                'archived': False,
+                'created': False,
+                'skipped': True,
+                'reason': 'witness_archive_not_configured',
+            })
+            continue
+
+        try:
+            witness_peer, witness_manifest = authority.fetch_peer_manifest(peer.host_id)
+            witness_manifest = _validate_witness_peer_manifest(witness_peer, witness_manifest)
+            witness_role = (witness_manifest.get('host_identity', {}) or {}).get('role', '')
+            archive = witness_manifest.get('witness_archive', {}) or {}
+            if witness_role != 'witness_host':
+                results.append({
+                    'peer_host_id': witness_peer.host_id,
+                    'peer_label': witness_peer.label,
+                    'attempted': False,
+                    'archived': False,
+                    'created': False,
+                    'skipped': True,
+                    'reason': 'peer_not_witness_host',
+                })
+                continue
+            if not archive.get('archive_enabled'):
+                raise FederationDeliveryError(
+                    f"Peer host '{witness_peer.host_id}' does not advertise enabled witness archive",
+                    peer_host_id=witness_peer.host_id,
+                    response=witness_manifest,
+                )
+            headers = _witness_peer_archive_headers(witness_peer)
+            request = urllib_request.Request(
+                witness_peer.endpoint_url + '/api/federation/witness/archive',
+                data=json.dumps({
+                    'envelope': delivery.get('envelope', ''),
+                    'payload': payload,
+                    'receipt': receipt,
+                    'source_manifest': source_manifest,
+                    'target_manifest': target_manifest,
+                }).encode('utf-8'),
+                headers=headers,
+                method='POST',
+            )
+            with urllib_request.urlopen(request, timeout=10) as response:
+                archive_response = json.loads(response.read().decode('utf-8') or '{}')
+            archive_record = archive_response.get('archive') or {}
+            if not isinstance(archive_record, dict) or not archive_record.get('archive_id'):
+                raise FederationDeliveryError(
+                    f"Peer host '{witness_peer.host_id}' returned an invalid witness archive response",
+                    peer_host_id=witness_peer.host_id,
+                    response=archive_response,
+                )
+            created = bool(archive_response.get('created'))
+            result = {
+                'peer_host_id': witness_peer.host_id,
+                'peer_label': witness_peer.label,
+                'attempted': True,
+                'archived': True,
+                'created': created,
+                'archive_id': archive_record.get('archive_id', ''),
+                'message_type': archive_record.get('message_type', ''),
+            }
+            log_event(
+                bound_org_id,
+                actor_id or f'host:{host_identity.host_id}',
+                'federation_witness_archive_sent',
+                resource=claims.get('message_type', ''),
+                outcome='success',
+                actor_type=claims.get('actor_type') or 'service',
+                details={
+                    'witness_host_id': witness_peer.host_id,
+                    'target_host_id': target_host_id,
+                    'target_institution_id': claims.get('target_institution_id', ''),
+                    'archive_id': archive_record.get('archive_id', ''),
+                    'created': created,
+                    'receipt_id': receipt.get('receipt_id', ''),
+                },
+                session_id=session_id or None,
+            )
+        except Exception as exc:
+            result = {
+                'peer_host_id': peer.host_id,
+                'peer_label': peer.label,
+                'attempted': True,
+                'archived': False,
+                'created': False,
+                'error': str(exc),
+            }
+            log_event(
+                bound_org_id,
+                actor_id or f'host:{host_identity.host_id}',
+                'federation_witness_archive_failed',
+                resource=claims.get('message_type', ''),
+                outcome='failed',
+                actor_type=claims.get('actor_type') or 'service',
+                details={
+                    'witness_host_id': peer.host_id,
+                    'target_host_id': target_host_id,
+                    'target_institution_id': claims.get('target_institution_id', ''),
+                    'error': str(exc),
+                    'receipt_id': receipt.get('receipt_id', ''),
+                },
+                session_id=session_id or None,
+            )
+        results.append(result)
+
+    return {
+        'attempted': sum(1 for row in results if row.get('attempted')),
+        'created': sum(1 for row in results if row.get('archived') and row.get('created')),
+        'existing': sum(1 for row in results if row.get('archived') and not row.get('created')),
+        'failed': sum(1 for row in results if row.get('attempted') and not row.get('archived')),
+        'skipped': sum(1 for row in results if row.get('skipped')),
+        'records': results,
+    }
+
+
 def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                                  message_type, payload=None, *,
                                  actor_type='host_service', actor_id='',
@@ -3351,6 +3597,16 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
             },
             session_id=session_id or None,
         )
+    witness_archive = _archive_delivery_with_witness_peers(
+        bound_org_id,
+        authority,
+        delivery,
+        payload,
+        actor_id=actor_id or f'host:{host_identity.host_id}',
+        session_id=session_id,
+        host_identity=host_identity,
+    )
+    delivery['witness_archive'] = witness_archive
     log_event(
         bound_org_id,
         actor_id or f'host:{host_identity.host_id}',
@@ -3365,6 +3621,9 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
             receiver_host_id=receipt.get('receiver_host_id', ''),
             receiver_institution_id=receipt.get('receiver_institution_id', ''),
             commitment_delivery_recorded=bool(commitment_delivery_ref),
+            witness_archive_attempted=witness_archive.get('attempted', 0),
+            witness_archive_created=witness_archive.get('created', 0),
+            witness_archive_failed=witness_archive.get('failed', 0),
         ),
         session_id=session_id or None,
     )
@@ -3745,6 +4004,16 @@ def _deliver_case_notice(bound_org_id, case_record, decision, *, actor_id, sessi
         'receipt': receipt,
         'response': delivery_response,
     }
+    witness_archive = _archive_delivery_with_witness_peers(
+        bound_org_id,
+        authority,
+        delivery,
+        federated_payload,
+        actor_id=actor_id,
+        session_id=session_id,
+        host_identity=host_identity,
+    )
+    delivery['witness_archive'] = witness_archive
     federation_state = authority.snapshot(
         bound_org_id=bound_org_id,
         admission_registry=admission_registry,
@@ -3763,6 +4032,9 @@ def _deliver_case_notice(bound_org_id, case_record, decision, *, actor_id, sessi
             receiver_host_id=receipt.get('receiver_host_id', ''),
             receiver_institution_id=receipt.get('receiver_institution_id', ''),
             commitment_delivery_recorded=False,
+            witness_archive_attempted=witness_archive.get('attempted', 0),
+            witness_archive_created=witness_archive.get('created', 0),
+            witness_archive_failed=witness_archive.get('failed', 0),
         ),
         session_id=session_id or None,
     )
@@ -5073,6 +5345,119 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 return self._json({'error': str(e)}, 409)
             except FederationValidationError as e:
                 return self._json({'error': str(e)}, 403)
+            except RuntimeError as e:
+                return self._json({'error': str(e)}, 503)
+            except ValueError as e:
+                return self._json({'error': str(e)}, 400)
+
+        if path == '/api/federation/witness/archive':
+            try:
+                inst_ctx = _resolve_workspace_context()
+                body = self._read_body()
+                host_identity, _admission_registry = _runtime_host_state(inst_ctx.org_id)
+                if getattr(host_identity, 'role', '') != 'witness_host':
+                    return self._json({
+                        'error': (
+                            f"Witness archive is disabled on host '{host_identity.host_id}' "
+                            f"(witness_host_only)"
+                        ),
+                        'witness_archive': _witness_archive_snapshot(
+                            inst_ctx.org_id,
+                            host_identity=host_identity,
+                        ),
+                    }, 503)
+                envelope = (body.get('envelope') or '').strip()
+                if not envelope:
+                    return self._json({'error': 'envelope is required'}, 400)
+                receipt = body.get('receipt')
+                if not isinstance(receipt, dict) or not receipt:
+                    return self._json({'error': 'receipt is required'}, 400)
+                payload = body.get('payload')
+                source_manifest = body.get('source_manifest')
+                target_manifest = body.get('target_manifest')
+                authority = _federation_authority(host_identity)
+                claims = authority.validate(
+                    envelope,
+                    payload=payload,
+                    expected_boundary_name='federation_gateway',
+                )
+                source_peer = authority.peer_registry.get('peers', {}).get(claims.source_host_id)
+                if not source_peer:
+                    raise FederationValidationError(
+                        f"Source host '{claims.source_host_id}' is not in peer registry"
+                    )
+                if not isinstance(source_manifest, dict):
+                    source_peer, source_manifest = authority.fetch_peer_manifest(claims.source_host_id)
+                authority._validate_peer_manifest(
+                    source_peer,
+                    source_manifest,
+                    target_institution_id=claims.source_institution_id,
+                )
+                target_peer = authority.peer_registry.get('peers', {}).get(claims.target_host_id)
+                if not target_peer:
+                    raise FederationValidationError(
+                        f"Target host '{claims.target_host_id}' is not in peer registry"
+                    )
+                if not isinstance(target_manifest, dict):
+                    target_peer, target_manifest = authority.fetch_peer_manifest(claims.target_host_id)
+                authority._validate_peer_manifest(
+                    target_peer,
+                    target_manifest,
+                    target_institution_id=claims.target_institution_id,
+                )
+                validated_receipt = authority._validate_delivery_receipt(
+                    {'receipt': receipt},
+                    peer_host_id=claims.target_host_id,
+                    target_institution_id=claims.target_institution_id,
+                    claims=claims,
+                )
+                actor_id = claims.actor_id or f'peer:{claims.source_host_id}'
+                record, created = archive_witness_observation(
+                    WITNESS_ARCHIVE_FILE,
+                    host_id=host_identity.host_id,
+                    bound_org_id=inst_ctx.org_id,
+                    actor_id=actor_id,
+                    claims=claims.to_dict(),
+                    receipt=validated_receipt,
+                    payload=payload,
+                    source_manifest=source_manifest,
+                    target_manifest=target_manifest,
+                )
+                log_event(
+                    inst_ctx.org_id,
+                    actor_id,
+                    'federation_witness_observation_archived',
+                    resource=record['archive_id'],
+                    outcome='success',
+                    actor_type=claims.actor_type or 'service',
+                    details={
+                        'created': created,
+                        'message_type': record.get('message_type', ''),
+                        'source_host_id': record.get('source_host_id', ''),
+                        'target_host_id': record.get('target_host_id', ''),
+                        'receipt_id': record.get('receipt_id', ''),
+                    },
+                    session_id=claims.session_id or None,
+                )
+                return self._json({
+                    'message': (
+                        'Witness observation archived'
+                        if created else
+                        f"Witness observation already archived: {record['archive_id']}"
+                    ),
+                    'created': created,
+                    'archive': record,
+                    'witness_archive': _witness_archive_snapshot(
+                        inst_ctx.org_id,
+                        host_identity=host_identity,
+                    ),
+                })
+            except FederationDeliveryError as e:
+                return self._json({'error': str(e)}, 502)
+            except FederationValidationError as e:
+                return self._json({'error': str(e)}, 403)
+            except FederationUnavailable as e:
+                return self._json({'error': str(e)}, 503)
             except RuntimeError as e:
                 return self._json({'error': str(e)}, 503)
             except ValueError as e:

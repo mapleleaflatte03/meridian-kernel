@@ -48,6 +48,7 @@ What is real today:
 - one tested kernel-side reference adapter library: `openclaw_compatible`
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 - one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
+- one witness archival fan-out path: successful federated deliveries can automatically archive envelope/payload/receipt snapshots on configured witness-host peers and surface the archival results in the sender response
 - one receiver-side settlement application path: accepted `settlement_notice` envelopes can record a settlement ref, settle the linked commitment, and move the inbox entry from `received` to `processed`
 - one receiver-side execution review path: accepted `execution_request` envelopes can materialize a local federated execution job plus a pending local warrant instead of implying remote work is already authorized
 - one sender-side review feedback path: receiver-side warrant review for a federated `execution_request` can emit a signed `court_notice` back to the source host, so sender-side warrant state and commitment provenance reflect remote review before settlement

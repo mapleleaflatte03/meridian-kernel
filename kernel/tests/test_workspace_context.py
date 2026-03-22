@@ -2512,11 +2512,15 @@ class WorkspaceContextTests(unittest.TestCase):
                 'label': 'Beta Host',
                 'endpoint_url': 'http://127.0.0.1:19016',
                 'shared_secret': 'beta-secret',
+                'witness_archive_user': 'gamma-user',
+                'witness_archive_pass': 'gamma-pass',
                 'admitted_org_ids': ['org_b'],
             })
             self.assertEqual(snapshot['management_mode'], 'workspace_api_file_backed')
             self.assertEqual(snapshot['peer_count'], 1)
             self.assertEqual(snapshot['trusted_peer_ids'], ['host_beta'])
+            peer = next(peer for peer in snapshot['peers'] if peer['host_id'] == 'host_beta')
+            self.assertTrue(peer['witness_archive_configured'])
             self.assertTrue(any(peer['host_id'] == 'host_beta' for peer in snapshot['peers']))
 
     def test_mutate_federation_peer_refreshes_capability_snapshot(self):

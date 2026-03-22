@@ -4111,6 +4111,175 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(mirrored_case['status'], 'resolved')
                 self.assertEqual(mirrored_case['resolution'], 'Resolve federated control-plane case')
 
+    def test_workspace_case_notice_round_trip_auto_archives_to_witness_peer(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+            port_gamma = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                    'host_gamma': {
+                        'label': 'Gamma Witness',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_gamma}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'gamma-secret',
+                        'witness_archive_user': 'gamma-user',
+                        'witness_archive_pass': 'gamma-pass',
+                        'admitted_org_ids': ['org_gamma'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            gamma = _seed_workspace_root(
+                os.path.join(tmp, 'gamma'),
+                org_id='org_gamma',
+                user_id='user_witness_gamma',
+                host_id='host_gamma',
+                port=port_gamma,
+                signing_secret='gamma-secret',
+                host_role='witness_host',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+
+            with _run_workspace(gamma), _run_workspace(beta), _run_workspace(alpha):
+                alpha_session = _issue_workspace_session(alpha)
+                open_status, open_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/cases/open',
+                    payload={
+                        'claim_type': 'misrouted_execution',
+                        'target_host_id': 'host_beta',
+                        'target_institution_id': 'org_beta',
+                        'note': 'Open federated control-plane case with witness archive',
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {alpha_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(open_status, 200, open_body)
+                self.assertEqual(open_body['delivery']['witness_archive']['attempted'], 1)
+                self.assertEqual(open_body['delivery']['witness_archive']['created'], 1)
+                open_archive_id = open_body['delivery']['witness_archive']['records'][0]['archive_id']
+                case_id = open_body['case']['case_id']
+
+                resolve_status, resolve_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/cases/resolve',
+                    payload={
+                        'case_id': case_id,
+                        'note': 'Resolve federated control-plane case with witness archive',
+                        'federate': True,
+                    },
+                    headers={
+                        'Authorization': f"Bearer {alpha_session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(resolve_status, 200, resolve_body)
+                self.assertEqual(resolve_body['delivery']['witness_archive']['attempted'], 1)
+                self.assertEqual(resolve_body['delivery']['witness_archive']['created'], 1)
+                self.assertEqual(
+                    resolve_body['delivery']['response']['processing']['federation_peer']['trust_state'],
+                    'trusted',
+                )
+
+                gamma_archive_status, gamma_archive_body = _http_json(
+                    'GET',
+                    gamma['base_url'] + '/api/federation/witness/archive',
+                    headers={'Authorization': gamma['auth_header']},
+                )
+                self.assertEqual(gamma_archive_status, 200, gamma_archive_body)
+                self.assertEqual(gamma_archive_body['summary']['total'], 2)
+                self.assertEqual(
+                    gamma_archive_body['summary']['message_type_counts'],
+                    {'case_notice': 2},
+                )
+
+                duplicate_status, duplicate_body = _http_json(
+                    'POST',
+                    gamma['base_url'] + '/api/federation/witness/archive',
+                    payload={
+                        'envelope': open_body['delivery']['envelope'],
+                        'payload': open_body['delivery']['payload'],
+                        'receipt': open_body['delivery']['receipt'],
+                    },
+                    headers={'Authorization': gamma['auth_header'], 'Content-Type': 'application/json'},
+                )
+                self.assertEqual(duplicate_status, 200, duplicate_body)
+                self.assertFalse(duplicate_body['created'])
+                self.assertEqual(duplicate_body['archive']['archive_id'], open_archive_id)
+                self.assertEqual(duplicate_body['witness_archive']['summary']['total'], 2)
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            gamma_events = _read_jsonl(gamma['audit_log'])
+            self.assertGreaterEqual(
+                len([event for event in alpha_events if event.get('action') == 'federation_witness_archive_sent']),
+                2,
+            )
+            self.assertGreaterEqual(
+                len([event for event in beta_events if event.get('action') == 'federation_case_notice_applied']),
+                2,
+            )
+            self.assertGreaterEqual(
+                len([event for event in gamma_events if event.get('action') == 'federation_witness_observation_archived']),
+                2,
+            )
+
     def test_workspace_commitment_settlement_is_blocked_by_active_case(self):
         try:
             port_alpha = _find_free_port()

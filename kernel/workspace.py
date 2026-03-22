@@ -25,6 +25,7 @@ Endpoints:
   GET  /api/runtimes              -> Runtime registry and contract status
   GET  /api/runtimes/<id>         -> Single runtime record
   GET  /api/court                 -> Court records
+  GET  /api/warrants              -> Warrant records and summary
   POST /api/authority/kill-switch -> Engage/disengage kill switch
   POST /api/authority/approve     -> Decide an approval
   POST /api/authority/request     -> Request approval
@@ -35,6 +36,10 @@ Endpoints:
   POST /api/court/appeal          -> File an appeal
   POST /api/court/decide-appeal   -> Decide an appeal
   POST /api/court/remediate       -> Lift lingering sanctions after review
+  POST /api/warrants/issue        -> Issue a warrant record
+  POST /api/warrants/approve      -> Approve a warrant for execution
+  POST /api/warrants/stay         -> Stay a warrant before execution
+  POST /api/warrants/revoke       -> Revoke a warrant before execution
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
   POST /api/session/issue         -> Issue session token (requires auth)
@@ -134,6 +139,14 @@ from court import (file_violation, get_violations, resolve_violation,
                    file_appeal, decide_appeal, get_agent_record, auto_review,
                    get_restrictions, remediate, _load_records, VIOLATION_TYPES)
 from session import SessionAuthority
+from warrants import (
+    list_warrants,
+    issue_warrant,
+    review_warrant,
+    validate_warrant_for_execution,
+    mark_warrant_executed,
+    warrant_action_for_message,
+)
 from federation import (
     FederationAuthority,
     ReplayStore,
@@ -208,6 +221,10 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/court/decide-appeal': 'admin',
     '/api/court/auto-review': 'admin',
     '/api/court/remediate': 'admin',
+    '/api/warrants/issue': 'admin',
+    '/api/warrants/approve': 'admin',
+    '/api/warrants/stay': 'admin',
+    '/api/warrants/revoke': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/admission/admit': 'owner',
@@ -545,6 +562,8 @@ def _federation_audit_details(claims, **extra):
         'target_institution_id': claim_data.get('target_institution_id', ''),
         'nonce': claim_data.get('nonce', ''),
         'boundary_name': claim_data.get('boundary_name', ''),
+        'warrant_id': claim_data.get('warrant_id', ''),
+        'commitment_id': claim_data.get('commitment_id', ''),
     }
     for key, value in extra.items():
         if value not in (None, ''):
@@ -580,6 +599,59 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                                  commitment_id='', ttl_seconds=None):
     host_identity, admission_registry = _runtime_host_state(bound_org_id)
     authority = _federation_authority(host_identity)
+    authority.ensure_enabled()
+    execution_warrant = None
+    required_action = warrant_action_for_message(message_type)
+    if required_action:
+        if not warrant_id:
+            message = (
+                f"Federation message_type '{message_type}' requires warrant_id "
+                f"for action_class '{required_action}'"
+            )
+            log_event(
+                bound_org_id,
+                actor_id or f'host:{host_identity.host_id}',
+                'federation_warrant_blocked',
+                resource=message_type,
+                outcome='blocked',
+                actor_type=actor_type or 'service',
+                details={
+                    'target_host_id': target_host_id,
+                    'target_institution_id': target_org_id,
+                    'required_action_class': required_action,
+                    'error': message,
+                },
+                session_id=session_id or None,
+            )
+            raise PermissionError(message)
+        try:
+            execution_warrant = validate_warrant_for_execution(
+                warrant_id,
+                org_id=bound_org_id,
+                action_class=required_action,
+                boundary_name='federation_gateway',
+                actor_id=actor_id,
+                session_id=session_id,
+                request_payload=payload,
+            )
+        except PermissionError as exc:
+            log_event(
+                bound_org_id,
+                actor_id or f'host:{host_identity.host_id}',
+                'federation_warrant_blocked',
+                resource=message_type,
+                outcome='blocked',
+                actor_type=actor_type or 'service',
+                details={
+                    'target_host_id': target_host_id,
+                    'target_institution_id': target_org_id,
+                    'warrant_id': warrant_id,
+                    'required_action_class': required_action,
+                    'error': str(exc),
+                },
+                session_id=session_id or None,
+            )
+            raise
     try:
         delivery = authority.deliver(
             target_host_id,
@@ -616,6 +688,20 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
     receipt = dict(delivery.get('receipt') or {})
     if not receipt and isinstance(delivery.get('response'), dict):
         receipt = dict(delivery['response'].get('receipt') or {})
+    if execution_warrant:
+        mark_warrant_executed(
+            warrant_id,
+            org_id=bound_org_id,
+            execution_refs={
+                'message_type': message_type,
+                'envelope_id': (claims or {}).get('envelope_id', ''),
+                'target_host_id': target_host_id,
+                'target_institution_id': target_org_id,
+                'receipt_id': receipt.get('receipt_id', ''),
+                'receiver_host_id': receipt.get('receiver_host_id', ''),
+                'receiver_institution_id': receipt.get('receiver_institution_id', ''),
+            },
+        )
     log_event(
         bound_org_id,
         actor_id or f'host:{host_identity.host_id}',
@@ -793,6 +879,26 @@ def _permission_snapshot(auth_context):
     }
 
 
+def _warrant_summary(org_id):
+    warrants = list_warrants(org_id)
+    pending_review = 0
+    executable = 0
+    executed = 0
+    for record in warrants:
+        if record.get('court_review_state') == 'pending_review':
+            pending_review += 1
+        if record.get('court_review_state') in ('auto_issued', 'approved') and record.get('execution_state') == 'ready':
+            executable += 1
+        if record.get('execution_state') == 'executed':
+            executed += 1
+    return {
+        'total': len(warrants),
+        'pending_review': pending_review,
+        'executable': executable,
+        'executed': executed,
+    }
+
+
 def _scoped_registry(org_id):
     """Filter agent registry to a single institution's agents.
 
@@ -912,6 +1018,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             'total_violations': len(records['violations']),
             'total_appeals': len(records['appeals']),
         },
+        'warrants': _warrant_summary(org_id),
         'remediations': remediations,
         'timestamp': _now(),
     }
@@ -1484,6 +1591,11 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 'violations': list(records['violations'].values()),
                 'appeals': list(records['appeals'].values()),
             })
+        elif path == '/api/warrants':
+            return self._json({
+                'warrants': list_warrants(org_id),
+                'summary': _warrant_summary(org_id),
+            })
         elif path == '/api/audit':
             events = tail_events(30, org_id=org_id)
             events.reverse()
@@ -1527,6 +1639,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         'target_institution_id': claims.target_institution_id,
                         'nonce': claims.nonce,
                         'boundary_name': claims.boundary_name,
+                        'warrant_id': claims.warrant_id,
+                        'commitment_id': claims.commitment_id,
                         'receipt_id': receipt['receipt_id'],
                     },
                     session_id=claims.session_id or None,
@@ -1717,6 +1831,66 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                           details={'session_id': session_id},
                           session_id=_sid)
                 return self._json({'message': f'Session revoked: {session_id}'})
+
+            elif path == '/api/warrants/issue':
+                action_class = (body.get('action_class') or '').strip()
+                boundary_name = (body.get('boundary_name') or '').strip()
+                if not action_class:
+                    return self._json({'error': 'action_class is required'}, 400)
+                if not boundary_name:
+                    return self._json({'error': 'boundary_name is required'}, 400)
+                warrant = issue_warrant(
+                    org_id,
+                    action_class,
+                    boundary_name,
+                    by,
+                    session_id=_sid or '',
+                    request_payload=body.get('request_payload'),
+                    risk_class=(body.get('risk_class') or 'moderate').strip(),
+                    evidence_refs=body.get('evidence_refs'),
+                    policy_refs=body.get('policy_refs'),
+                    ttl_seconds=body.get('ttl_seconds'),
+                    auto_issue=bool(body.get('auto_issue')),
+                    note=body.get('note', ''),
+                )
+                log_event(org_id, by, 'warrant_issued', outcome='success',
+                          resource=warrant['warrant_id'],
+                          details={
+                              'action_class': warrant['action_class'],
+                              'boundary_name': warrant['boundary_name'],
+                              'court_review_state': warrant['court_review_state'],
+                          },
+                          session_id=_sid)
+                return self._json({
+                    'message': f"Warrant issued: {warrant['warrant_id']}",
+                    'warrant': warrant,
+                })
+
+            elif path in ('/api/warrants/approve', '/api/warrants/stay', '/api/warrants/revoke'):
+                warrant_id = (body.get('warrant_id') or '').strip()
+                if not warrant_id:
+                    return self._json({'error': 'warrant_id is required'}, 400)
+                decision = path.rsplit('/', 1)[-1]
+                decision_past = {
+                    'approve': 'approved',
+                    'stay': 'stayed',
+                    'revoke': 'revoked',
+                }
+                warrant = review_warrant(
+                    warrant_id,
+                    decision,
+                    by,
+                    org_id=org_id,
+                    note=body.get('note', ''),
+                )
+                log_event(org_id, by, f'warrant_{decision}', outcome='success',
+                          resource=warrant_id,
+                          details={'court_review_state': warrant['court_review_state']},
+                          session_id=_sid)
+                return self._json({
+                    'message': f"Warrant {decision_past[decision]}: {warrant_id}",
+                    'warrant': warrant,
+                })
 
             elif path == '/api/federation/send':
                 target_host_id = (body.get('target_host_id') or '').strip()

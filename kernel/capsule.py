@@ -33,6 +33,7 @@ CAPSULE_FILES = (
     'revenue.json',
     'authority_queue.json',
     'court_records.json',
+    'warrants.json',
     'wallets.json',
     'treasury_accounts.json',
     'maintainers.json',
@@ -186,6 +187,20 @@ _EMPTY_AUTHORITY_QUEUE = {
 }
 
 _EMPTY_COURT_RECORDS = {'violations': {}, 'appeals': {}}
+_EMPTY_WARRANTS = {
+    'warrants': {},
+    'action_classes': [
+        'routine_internal',
+        'budget_spend',
+        'payout_execution',
+        'cross_institution_commitment',
+        'sanction_execution',
+        'federated_execution',
+    ],
+    'risk_classes': ['low', 'moderate', 'high', 'critical'],
+    'court_review_states': ['auto_issued', 'pending_review', 'approved', 'stayed', 'revoked'],
+    'execution_states': ['ready', 'executed'],
+}
 _EMPTY_WALLETS = {
     'wallets': {},
     'verification_levels': {
@@ -290,6 +305,7 @@ _CAPSULE_DEFAULTS = {
     'revenue.json': _EMPTY_REVENUE,
     'authority_queue.json': _EMPTY_AUTHORITY_QUEUE,
     'court_records.json': _EMPTY_COURT_RECORDS,
+    'warrants.json': _EMPTY_WARRANTS,
     'wallets.json': _EMPTY_WALLETS,
     'treasury_accounts.json': _EMPTY_TREASURY_ACCOUNTS,
     'maintainers.json': _EMPTY_MAINTAINERS,

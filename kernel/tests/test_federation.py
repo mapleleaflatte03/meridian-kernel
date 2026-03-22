@@ -254,6 +254,41 @@ def _issue_workspace_session(instance):
     return body
 
 
+def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=False):
+    status, body = _http_json(
+        'POST',
+        instance['base_url'] + '/api/warrants/issue',
+        payload={
+            'action_class': 'federated_execution',
+            'boundary_name': 'federation_gateway',
+            'request_payload': request_payload,
+            'risk_class': 'moderate',
+            'auto_issue': auto_issue,
+        },
+        headers={
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+        },
+    )
+    if status != 200:
+        raise AssertionError(f'failed issuing warrant for {instance["host_id"]}: {status} {body}')
+    warrant = body['warrant']
+    if not auto_issue:
+        status, body = _http_json(
+            'POST',
+            instance['base_url'] + '/api/warrants/approve',
+            payload={'warrant_id': warrant['warrant_id']},
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            },
+        )
+        if status != 200:
+            raise AssertionError(f'failed approving warrant for {instance["host_id"]}: {status} {body}')
+        warrant = body['warrant']
+    return warrant
+
+
 class FederationTests(unittest.TestCase):
     def test_issue_and_validate_self_signed_envelope(self):
         from federation import FederationAuthority
@@ -960,6 +995,8 @@ class FederationTests(unittest.TestCase):
             with _run_workspace(beta), _run_workspace(alpha):
                 session = _issue_workspace_session(alpha)
                 session_id = session['session_id']
+                request_payload = {'task': 'demo'}
+                warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
                 status, body = _http_json(
                     'POST',
                     alpha['base_url'] + '/api/federation/send',
@@ -967,7 +1004,8 @@ class FederationTests(unittest.TestCase):
                         'target_host_id': 'host_beta',
                         'target_org_id': 'org_beta',
                         'message_type': 'execution_request',
-                        'payload': {'task': 'demo'},
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
                     },
                     headers={
                         'Authorization': f"Bearer {session['token']}",
@@ -980,6 +1018,7 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(delivery['receipt']['receiver_institution_id'], 'org_beta')
                 self.assertEqual(delivery['claims']['session_id'], session_id)
                 self.assertEqual(delivery['claims']['actor_id'], 'user_owner_alpha')
+                self.assertEqual(delivery['claims']['warrant_id'], warrant['warrant_id'])
 
             alpha_events = _read_jsonl(alpha['audit_log'])
             beta_events = _read_jsonl(beta['audit_log'])
@@ -993,8 +1032,20 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(sent[-1].get('session_id'), session_id)
             self.assertEqual(received[-1].get('session_id'), session_id)
             self.assertEqual(sent[-1]['details']['receiver_host_id'], 'host_beta')
+            self.assertEqual(sent[-1]['details']['warrant_id'], warrant['warrant_id'])
             self.assertEqual(received[-1]['details']['source_host_id'], 'host_alpha')
+            self.assertEqual(received[-1]['details']['warrant_id'], warrant['warrant_id'])
             self.assertEqual(received[-1]['agent_id'], 'user_owner_alpha')
+
+            warrants_path = os.path.join(alpha['economy'], 'warrants.json')
+            with open(warrants_path) as f:
+                warrant_store = json.load(f)
+            warrant_record = warrant_store['warrants'][warrant['warrant_id']]
+            self.assertEqual(warrant_record['execution_state'], 'executed')
+            self.assertEqual(
+                warrant_record['execution_refs']['receipt_id'],
+                delivery['receipt']['receipt_id'],
+            )
 
     def test_workspace_federation_send_rejects_manifest_host_mismatch(self):
         try:
@@ -1042,6 +1093,8 @@ class FederationTests(unittest.TestCase):
             )
             with _run_workspace(beta), _run_workspace(alpha):
                 session = _issue_workspace_session(alpha)
+                request_payload = {'task': 'demo'}
+                warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
                 status, body = _http_json(
                     'POST',
                     alpha['base_url'] + '/api/federation/send',
@@ -1049,7 +1102,8 @@ class FederationTests(unittest.TestCase):
                         'target_host_id': 'host_gamma',
                         'target_org_id': 'org_beta',
                         'message_type': 'execution_request',
-                        'payload': {'task': 'demo'},
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
                     },
                     headers={
                         'Authorization': f"Bearer {session['token']}",
@@ -1112,6 +1166,8 @@ class FederationTests(unittest.TestCase):
             )
             with _run_workspace(beta), _run_workspace(alpha):
                 session = _issue_workspace_session(alpha)
+                request_payload = {'task': 'demo'}
+                warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
                 status, body = _http_json(
                     'POST',
                     alpha['base_url'] + '/api/federation/send',
@@ -1119,7 +1175,8 @@ class FederationTests(unittest.TestCase):
                         'target_host_id': 'host_beta',
                         'target_org_id': 'org_wrong',
                         'message_type': 'execution_request',
-                        'payload': {'task': 'demo'},
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
                     },
                     headers={
                         'Authorization': f"Bearer {session['token']}",
@@ -1189,6 +1246,8 @@ class FederationTests(unittest.TestCase):
             )
             with _run_workspace(beta), _run_workspace(alpha):
                 session = _issue_workspace_session(alpha)
+                request_payload = {'task': 'demo'}
+                warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
                 status, body = _http_json(
                     'POST',
                     alpha['base_url'] + '/api/federation/send',
@@ -1196,7 +1255,8 @@ class FederationTests(unittest.TestCase):
                         'target_host_id': 'host_beta',
                         'target_org_id': 'org_beta',
                         'message_type': 'execution_request',
-                        'payload': {'task': 'demo'},
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
                     },
                     headers={
                         'Authorization': f"Bearer {session['token']}",

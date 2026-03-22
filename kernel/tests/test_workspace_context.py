@@ -38,6 +38,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_federation_authority = self.workspace._federation_authority
         self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
         self.orig_log_event = self.workspace.log_event
+        self.orig_list_warrants = self.workspace.list_warrants
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -54,6 +55,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace._federation_authority = self.orig_federation_authority
         self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
         self.workspace.log_event = self.orig_log_event
+        self.workspace.list_warrants = self.orig_list_warrants
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -165,6 +167,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/authority/kill-switch']['allowed'])
         self.assertTrue(permissions['/api/institution/charter']['allowed'])
         self.assertFalse(permissions['/api/treasury/contribute']['allowed'])
+        self.assertTrue(permissions['/api/warrants/issue']['allowed'])
+        self.assertTrue(permissions['/api/warrants/approve']['allowed'])
         self.assertTrue(permissions['/api/federation/send']['allowed'])
         self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
         self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
@@ -193,6 +197,13 @@ class WorkspaceContextTests(unittest.TestCase):
         }
         self.workspace.treasury_snapshot = lambda org_id: {}
         self.workspace._load_records = lambda org_id: {'violations': {}, 'appeals': {}}
+        self.workspace.list_warrants = lambda org_id=None, **_kwargs: [
+            {
+                'warrant_id': 'war_demo',
+                'court_review_state': 'approved',
+                'execution_state': 'ready',
+            }
+        ]
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
         self.workspace.get_pending_approvals = lambda org_id=None: []
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
@@ -221,6 +232,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(status['runtime_core']['admission']['mutation_enabled'])
         self.assertEqual(status['runtime_core']['host_identity']['host_id'], 'host_alpha')
         self.assertEqual(status['runtime_core']['admission']['admitted_org_ids'], ['org_a', 'org_b'])
+        self.assertEqual(status['warrants']['total'], 1)
+        self.assertEqual(status['warrants']['executable'], 1)
         self.assertIn('federation', status['runtime_core'])
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
@@ -527,6 +540,9 @@ class WorkspaceContextTests(unittest.TestCase):
         audit_events = []
 
         class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
             def deliver(self, *args, **kwargs):
                 return {
                     'peer': {'host_id': 'host_beta', 'transport': 'https'},
@@ -539,7 +555,7 @@ class WorkspaceContextTests(unittest.TestCase):
                         'target_institution_id': 'org_b',
                         'nonce': 'nonce_demo',
                         'boundary_name': 'federation_gateway',
-                        'message_type': 'execution_request',
+                        'message_type': 'settlement_notice',
                     },
                     'receipt': {
                         'receipt_id': 'fedrcpt_demo',
@@ -577,7 +593,7 @@ class WorkspaceContextTests(unittest.TestCase):
             'org_a',
             'host_beta',
             'org_b',
-            'execution_request',
+            'settlement_notice',
             payload={'task': 'demo'},
             actor_type='user',
             actor_id='user_owner',
@@ -605,6 +621,9 @@ class WorkspaceContextTests(unittest.TestCase):
         audit_events = []
 
         class FakeAuthority:
+            def ensure_enabled(self):
+                return True
+
             def deliver(self, *args, **kwargs):
                 raise FederationDeliveryError(
                     'Peer returned HTTP 503',
@@ -617,7 +636,7 @@ class WorkspaceContextTests(unittest.TestCase):
                         target_host_id='host_beta',
                         target_institution_id='org_b',
                         boundary_name='federation_gateway',
-                        message_type='execution_request',
+                        message_type='settlement_notice',
                         nonce='nonce_demo',
                     ),
                 )
@@ -637,7 +656,7 @@ class WorkspaceContextTests(unittest.TestCase):
                 'org_a',
                 'host_beta',
                 'org_b',
-                'execution_request',
+                'settlement_notice',
                 payload={'task': 'demo'},
                 actor_type='user',
                 actor_id='user_owner',

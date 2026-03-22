@@ -138,6 +138,14 @@ reference workspace can mutate the file-backed admission registry via
 The same `runtime_core` surface now also exposes the `federation_gateway`
 boundary state: whether the host has federation enabled, which peer hosts are
 trusted, and whether replay protection is file-backed or memory-only.
+`/api/warrants` now exposes first-class warrant records and summary counts, and
+the reference workspace can mutate those records through
+`POST /api/warrants/issue`, `/api/warrants/approve`, `/api/warrants/stay`, and
+`/api/warrants/revoke` when the bound actor has admin authority.
+Federated `execution_request` delivery is now gated by an executable warrant on
+the sender side, and accepted receiver audit entries preserve `warrant_id`
+provenance. This is the first court-first execution gate, not the full
+cross-host constitutional autonomy program.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

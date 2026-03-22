@@ -67,6 +67,9 @@ deliberately narrow:
 - two institution-owned service surfaces now exist as kernel references:
   capsule-backed `subscriptions` and `accounting`, both surfaced through the
   reference workspace as institution-bound session services
+- one integrated 3-host federation proof now exists in tests:
+  commitment proposal/acceptance, execution review, court notice, breach
+  notice, and witness archival compose into one end-to-end kernel story
 
 What is not yet broadly proven in public code:
 - live end-to-end OpenClaw-compatible deployment wiring

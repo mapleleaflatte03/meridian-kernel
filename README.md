@@ -55,6 +55,7 @@ What is real today:
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, sender-side federation validation when `commitment_id` is supplied, and warrant-bound `commitment_proposal` / `commitment_acceptance` / `commitment_breach_notice` envelopes
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
+- one integrated 3-host federation proof in tests: proposal, acceptance, execution review, court notice, breach notice, and witness archival now compose into one end-to-end kernel story
 
 What is not yet broadly proven:
 - live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations

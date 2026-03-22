@@ -110,6 +110,29 @@ class CaseCapsuleTests(unittest.TestCase):
         self.assertCountEqual(cases.blocking_commitment_ids(self.org_id), ['cmt_demo', 'cmt_other'])
         self.assertEqual(cases.blocked_peer_host_ids(self.org_id), ['host_beta'])
 
+    def test_delivery_failure_helper_dedupes_active_case(self):
+        first, created_first = cases.ensure_case_for_delivery_failure(
+            'invalid_settlement_notice',
+            'user_owner',
+            org_id=self.org_id,
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            linked_commitment_id='cmt_demo',
+            note='Receipt mismatch',
+        )
+        second, created_second = cases.ensure_case_for_delivery_failure(
+            'invalid_settlement_notice',
+            'user_owner',
+            org_id=self.org_id,
+            target_host_id='host_beta',
+            target_institution_id='org_beta',
+            linked_commitment_id='cmt_demo',
+            note='Receipt mismatch again',
+        )
+        self.assertTrue(created_first)
+        self.assertFalse(created_second)
+        self.assertEqual(first['case_id'], second['case_id'])
+
 
 if __name__ == '__main__':
     unittest.main()

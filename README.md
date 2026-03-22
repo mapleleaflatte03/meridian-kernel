@@ -167,6 +167,9 @@ Open or stayed cases now also have real enforcement effect: a linked
 such as `fraudulent_proof`, `invalid_settlement_notice`, or
 `misrouted_execution` automatically suspend the trusted peer on the OSS
 reference path.
+Bad federation receipts or forged delivery proofs can now auto-open those case
+records on the sender path, so contradiction handling is no longer just an
+audit log.
 
 Need the exact handoff from demo to real deployment?
 See [Deployment Guide](docs/DEPLOYMENT_GUIDE.md).

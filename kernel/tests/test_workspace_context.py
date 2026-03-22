@@ -50,6 +50,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_blocking_commitment_case = self.workspace.blocking_commitment_case
         self.orig_blocking_peer_case = self.workspace.blocking_peer_case
         self.orig_set_peer_trust_state = self.workspace.set_peer_trust_state
+        self.orig_ensure_case_for_delivery_failure = self.workspace.ensure_case_for_delivery_failure
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -78,6 +79,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.blocking_commitment_case = self.orig_blocking_commitment_case
         self.workspace.blocking_peer_case = self.orig_blocking_peer_case
         self.workspace.set_peer_trust_state = self.orig_set_peer_trust_state
+        self.workspace.ensure_case_for_delivery_failure = self.orig_ensure_case_for_delivery_failure
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -949,6 +951,13 @@ class WorkspaceContextTests(unittest.TestCase):
             default_host_identity(host_id='host_alpha', federation_enabled=True, peer_transport='https'),
             {'admitted_org_ids': ['org_a', 'org_b']},
         )
+        self.workspace.ensure_case_for_delivery_failure = lambda claim_type, actor_id, **kwargs: ({
+            'case_id': 'case_demo',
+            'claim_type': claim_type,
+            'status': 'open',
+            'linked_commitment_id': kwargs.get('linked_commitment_id', ''),
+            'target_host_id': kwargs.get('target_host_id', ''),
+        }, True)
         self.workspace.set_peer_trust_state = lambda *_args, **_kwargs: {
             'source': 'file',
             'host_id': 'host_alpha',
@@ -981,6 +990,68 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(result['peer_host_id'], 'host_beta')
         self.assertEqual(result['trust_state'], 'suspended')
         self.assertEqual(audit_events[0]['args'][2], 'federation_peer_auto_suspended')
+
+    def test_maybe_open_case_for_delivery_failure_creates_case_and_suspends_peer(self):
+        from federation import FederationDeliveryError, FederationEnvelopeClaims
+        from runtime_host import default_host_identity
+
+        audit_events = []
+        self.workspace._runtime_host_state = lambda _org_id: (
+            default_host_identity(host_id='host_alpha', federation_enabled=True, peer_transport='https'),
+            {'admitted_org_ids': ['org_a', 'org_b']},
+        )
+        self.workspace.ensure_case_for_delivery_failure = lambda claim_type, actor_id, **kwargs: ({
+            'case_id': 'case_demo',
+            'claim_type': claim_type,
+            'status': 'open',
+            'linked_commitment_id': kwargs.get('linked_commitment_id', ''),
+            'target_host_id': kwargs.get('target_host_id', ''),
+        }, True)
+        self.workspace.set_peer_trust_state = lambda *_args, **_kwargs: {
+            'source': 'file',
+            'host_id': 'host_alpha',
+            'trusted_peer_ids': [],
+            'peers': {
+                'host_beta': {
+                    'host_id': 'host_beta',
+                    'trust_state': 'suspended',
+                },
+            },
+        }
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append({
+            'args': args,
+            'kwargs': kwargs,
+        })
+        error = FederationDeliveryError(
+            "Peer host 'host_beta' returned receipt receiver_host_id 'host_wrong'",
+            peer_host_id='host_beta',
+            claims=FederationEnvelopeClaims(
+                envelope_id='fed_demo',
+                source_host_id='host_alpha',
+                source_institution_id='org_a',
+                target_host_id='host_beta',
+                target_institution_id='org_b',
+                message_type='execution_request',
+            ),
+        )
+
+        case_record, federation_peer = self.workspace._maybe_open_case_for_delivery_failure(
+            error,
+            'user_owner',
+            org_id='org_a',
+            target_host_id='host_beta',
+            target_institution_id='org_b',
+            commitment_id='cmt_demo',
+            warrant_id='war_demo',
+            session_id='ses_demo',
+        )
+
+        self.assertEqual(case_record['claim_type'], 'misrouted_execution')
+        self.assertEqual(case_record['linked_commitment_id'], 'cmt_demo')
+        self.assertTrue(federation_peer['applied'])
+        self.assertEqual(federation_peer['trust_state'], 'suspended')
+        self.assertEqual(audit_events[0]['args'][2], 'case_opened')
+        self.assertEqual(audit_events[1]['args'][2], 'federation_peer_auto_suspended')
 
 
 if __name__ == '__main__':

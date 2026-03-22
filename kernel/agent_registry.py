@@ -46,17 +46,33 @@ def _now():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
+_REGISTRY_CACHE = None
+_REGISTRY_CACHE_MTIME = 0.0
+
 def load_registry():
+    global _REGISTRY_CACHE, _REGISTRY_CACHE_MTIME
     if os.path.exists(REGISTRY_FILE):
+        mtime = os.path.getmtime(REGISTRY_FILE)
+        if _REGISTRY_CACHE is not None and mtime <= _REGISTRY_CACHE_MTIME:
+            return _REGISTRY_CACHE
+
         with open(REGISTRY_FILE) as f:
-            return json.load(f)
+            _REGISTRY_CACHE = json.load(f)
+            _REGISTRY_CACHE_MTIME = mtime
+            return _REGISTRY_CACHE
     return {'agents': {}, 'updatedAt': _now()}
 
 
 def save_registry(data):
+    global _REGISTRY_CACHE, _REGISTRY_CACHE_MTIME
     data['updatedAt'] = _now()
     with open(REGISTRY_FILE, 'w') as f:
         json.dump(data, f, indent=2)
+    _REGISTRY_CACHE = data
+    try:
+        _REGISTRY_CACHE_MTIME = os.path.getmtime(REGISTRY_FILE)
+    except OSError:
+        _REGISTRY_CACHE_MTIME = 0.0
 
 
 def _org_matches(agent, org_id=None):

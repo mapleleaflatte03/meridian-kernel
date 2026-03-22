@@ -29,6 +29,7 @@ Endpoints:
   GET  /api/federation/inbox      -> Institution-scoped federation inbox state
   GET  /api/federation/execution-jobs -> Receiver-side federated execution jobs
   GET  /api/federation/manifest   -> Public host federation manifest
+  GET  /api/federation/witness/archive -> Witness-host archival evidence state
   GET  /api/runtimes              -> Runtime registry and contract status
   GET  /api/runtimes/<id>         -> Single runtime record
   GET  /api/court                 -> Court records
@@ -90,6 +91,7 @@ Endpoints:
   POST /api/federation/peers/revoke -> Revoke a federation peer
   POST /api/federation/send       -> Deliver a federation envelope to a trusted peer
   POST /api/federation/receive    -> Validate and consume a federation envelope
+  POST /api/federation/witness/archive -> Archive independently validated witness evidence
   POST /api/institution/charter   -> Set charter
   POST /api/institution/lifecycle -> Transition lifecycle
 
@@ -142,6 +144,10 @@ FEDERATION_PEERS_FILE = os.environ.get(
 FEDERATION_REPLAY_FILE = os.environ.get(
     'MERIDIAN_FEDERATION_REPLAY_FILE',
     os.path.join(PLATFORM_DIR, '.federation_replay'),
+)
+WITNESS_ARCHIVE_FILE = os.environ.get(
+    'MERIDIAN_WITNESS_ARCHIVE_FILE',
+    os.path.join(PLATFORM_DIR, 'witness_archive.json'),
 )
 FEDERATION_SIGNING_SECRET = (
     os.environ.get('MERIDIAN_FEDERATION_SIGNING_SECRET', '').strip() or None
@@ -260,6 +266,11 @@ from federated_execution_jobs import (
     execution_job_summary,
     upsert_execution_job,
 )
+from witness_archive import (
+    archive_witness_observation,
+    list_witness_observations,
+    witness_archive_summary,
+)
 from institution_context import (
     InstitutionContext,
     WORKSPACE_BOUNDARY,
@@ -359,6 +370,7 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/admission/suspend': 'owner',
     '/api/admission/revoke': 'owner',
     '/api/federation/send': 'admin',
+    '/api/federation/witness/archive': 'admin',
     '/api/federation/peers/upsert': 'owner',
     '/api/federation/peers/refresh': 'owner',
     '/api/federation/peers/suspend': 'owner',
@@ -489,6 +501,10 @@ def _federation_snapshot(bound_org_id, host_identity=None, admission_registry=No
     snapshot.update(_federation_management_state(host_identity))
     snapshot['inbox_summary'] = summarize_inbox_entries(bound_org_id)
     snapshot['execution_job_summary'] = execution_job_summary(bound_org_id)
+    snapshot['witness_archive'] = _witness_archive_snapshot(
+        bound_org_id,
+        host_identity=host_identity,
+    )
     return snapshot
 
 
@@ -539,6 +555,44 @@ def _admission_management_state(host_identity):
         'management_mode': 'workspace_api_file_backed',
         'mutation_enabled': True,
         'mutation_disabled_reason': '',
+    }
+
+
+def _witness_archive_snapshot(bound_org_id, host_identity=None):
+    if host_identity is None:
+        host_identity, _admission_registry = _runtime_host_state(bound_org_id)
+    archive_enabled = getattr(host_identity, 'role', '') == 'witness_host'
+    records = (
+        list_witness_observations(WITNESS_ARCHIVE_FILE, host_id=host_identity.host_id)
+        if archive_enabled else
+        []
+    )
+    summary = (
+        witness_archive_summary(WITNESS_ARCHIVE_FILE, host_id=host_identity.host_id)
+        if archive_enabled else
+        {
+            'total': 0,
+            'message_type_counts': {},
+            'peer_host_ids': [],
+            'latest_observed_at': '',
+        }
+    )
+    return {
+        'bound_org_id': bound_org_id,
+        'host_id': host_identity.host_id,
+        'host_role': host_identity.role,
+        'boundary_name': 'federation_gateway',
+        'archive_enabled': archive_enabled,
+        'archive_disabled_reason': '' if archive_enabled else 'witness_host_only',
+        'mutation_enabled': archive_enabled,
+        'mutation_disabled_reason': '' if archive_enabled else 'witness_host_only',
+        'management_mode': (
+            'witness_local_archive'
+            if archive_enabled else
+            'host_role_unavailable'
+        ),
+        'records': records,
+        'summary': summary,
     }
 
 
@@ -3271,6 +3325,9 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 host_identity=host_identity,
                 admission_registry=admission_registry,
             ))
+        elif path == '/api/federation/witness/archive':
+            host_identity, _admission_registry = _runtime_host_state(org_id)
+            return self._json(_witness_archive_snapshot(org_id, host_identity=host_identity))
         elif path == '/api/admission':
             host_identity, admission_registry = _runtime_host_state(org_id)
             return self._json(_admission_snapshot(
@@ -4530,6 +4587,94 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     'runtime_core': {
                         'federation': federation_state,
                     },
+                })
+
+            elif path == '/api/federation/witness/archive':
+                host_identity, _admission_registry = _runtime_host_state(org_id)
+                if getattr(host_identity, 'role', '') != 'witness_host':
+                    return self._json({
+                        'error': (
+                            f"Witness archive is disabled on host '{host_identity.host_id}' "
+                            f"(witness_host_only)"
+                        ),
+                        'witness_archive': _witness_archive_snapshot(
+                            org_id,
+                            host_identity=host_identity,
+                        ),
+                    }, 503)
+                envelope = (body.get('envelope') or '').strip()
+                if not envelope:
+                    return self._json({'error': 'envelope is required'}, 400)
+                receipt = body.get('receipt')
+                if not isinstance(receipt, dict) or not receipt:
+                    return self._json({'error': 'receipt is required'}, 400)
+                payload = body.get('payload')
+                authority = _federation_authority(host_identity)
+                claims = authority.validate(
+                    envelope,
+                    payload=payload,
+                    expected_boundary_name='federation_gateway',
+                )
+                source_peer, source_manifest = authority.fetch_peer_manifest(
+                    claims.source_host_id,
+                )
+                authority._validate_peer_manifest(
+                    source_peer,
+                    source_manifest,
+                    target_institution_id=claims.source_institution_id,
+                )
+                target_peer, target_manifest = authority.fetch_peer_manifest(
+                    claims.target_host_id,
+                )
+                authority._validate_peer_manifest(
+                    target_peer,
+                    target_manifest,
+                    target_institution_id=claims.target_institution_id,
+                )
+                validated_receipt = authority._validate_delivery_receipt(
+                    {'receipt': receipt},
+                    peer_host_id=claims.target_host_id,
+                    target_institution_id=claims.target_institution_id,
+                    claims=claims,
+                )
+                record, created = archive_witness_observation(
+                    WITNESS_ARCHIVE_FILE,
+                    host_id=host_identity.host_id,
+                    bound_org_id=org_id,
+                    actor_id=by,
+                    claims=claims.to_dict(),
+                    receipt=validated_receipt,
+                    payload=payload,
+                    source_manifest=source_manifest,
+                    target_manifest=target_manifest,
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'federation_witness_observation_archived',
+                    resource=record['archive_id'],
+                    outcome='success',
+                    details={
+                        'created': created,
+                        'message_type': record.get('message_type', ''),
+                        'source_host_id': record.get('source_host_id', ''),
+                        'target_host_id': record.get('target_host_id', ''),
+                        'receipt_id': record.get('receipt_id', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': (
+                        'Witness observation archived'
+                        if created else
+                        f"Witness observation already archived: {record['archive_id']}"
+                    ),
+                    'created': created,
+                    'archive': record,
+                    'witness_archive': _witness_archive_snapshot(
+                        org_id,
+                        host_identity=host_identity,
+                    ),
                 })
 
             elif path == '/api/federation/execution-jobs/execute':

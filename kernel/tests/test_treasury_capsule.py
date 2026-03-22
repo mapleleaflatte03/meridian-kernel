@@ -464,6 +464,128 @@ class TreasuryCapsuleTests(unittest.TestCase):
         proposal_after = treasury.get_payout_proposal(proposal['proposal_id'], org_id=self.org_id)
         self.assertEqual(proposal_after['status'], 'dispute_window')
 
+    def test_execute_payout_proposal_accepts_enabled_base_x402_when_host_supports_it(self):
+        ledger_path = self.capsule_dir / 'ledger.json'
+        ledger = json.loads(ledger_path.read_text())
+        ledger['treasury']['cash_usd'] = 120.0
+        ledger['treasury']['reserve_floor_usd'] = 50.0
+        ledger['treasury']['expenses_recorded_usd'] = 0.0
+        ledger_path.write_text(json.dumps(ledger, indent=2))
+
+        (self.capsule_dir / 'wallets.json').write_text(json.dumps({
+            'wallets': {
+                'wallet_exec': {
+                    'id': 'wallet_exec',
+                    'verification_level': 3,
+                    'verification_label': 'self_custody_verified',
+                    'payout_eligible': True,
+                    'status': 'active',
+                }
+            },
+            'verification_levels': {},
+        }, indent=2))
+        (self.capsule_dir / 'contributors.json').write_text(json.dumps({
+            'contributors': {
+                'contrib_exec': {
+                    'id': 'contrib_exec',
+                    'name': 'Contributor Exec',
+                    'payout_wallet_id': 'wallet_exec',
+                }
+            },
+            'contribution_types': ['code'],
+            'registration_requirements': {},
+        }, indent=2))
+        settlement_adapters_path = self.capsule_dir / 'settlement_adapters.json'
+        settlement_adapters_path.write_text(json.dumps({
+            'default_payout_adapter': 'base_usdc_x402',
+            'adapters': {
+                'base_usdc_x402': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                },
+            },
+        }, indent=2))
+
+        proposal = treasury.create_payout_proposal(
+            'contrib_exec',
+            2.0,
+            'code',
+            proposed_by='user:proposer',
+            org_id=self.org_id,
+            evidence={'description': 'enabled x402 adapter'},
+            settlement_adapter='base_usdc_x402',
+        )
+        proposal = treasury.submit_payout_proposal(
+            proposal['proposal_id'],
+            'user:proposer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.review_payout_proposal(
+            proposal['proposal_id'],
+            'user:reviewer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.approve_payout_proposal(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+        )
+        proposal = treasury.open_payout_dispute_window(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+            dispute_window_hours=0,
+        )
+        with mock.patch.object(
+            treasury,
+            '_current_phase',
+            lambda org_id=None: (5, {'name': 'Contributor Payouts'}),
+        ):
+            executed = treasury.execute_payout_proposal(
+                proposal['proposal_id'],
+                'user:owner',
+                org_id=self.org_id,
+                warrant_id='war_enabled_adapter',
+                settlement_adapter='base_usdc_x402',
+                tx_hash='0xbaseenabled',
+                settlement_proof={'reference': 'base://receipt/enabled'},
+                host_supported_adapters=['base_usdc_x402'],
+            )
+
+        self.assertEqual(executed['status'], 'executed')
+        self.assertEqual(executed['settlement_adapter'], 'base_usdc_x402')
+        self.assertEqual(executed['tx_hash'], '0xbaseenabled')
+        self.assertEqual(executed['execution_refs']['proof_type'], 'onchain_receipt')
+        self.assertEqual(
+            executed['execution_refs']['verification_state'],
+            'external_verification_required',
+        )
+        self.assertEqual(
+            executed['execution_refs']['finality_state'],
+            'external_chain_finality',
+        )
+        self.assertEqual(
+            executed['execution_refs']['settlement_adapter_contract']['settlement_path'],
+            'x402_onchain',
+        )
+        self.assertEqual(
+            executed['execution_refs']['proof']['reference'],
+            'base://receipt/enabled',
+        )
+
+        ledger = json.loads((self.capsule_dir / 'ledger.json').read_text())
+        self.assertAlmostEqual(ledger['treasury']['cash_usd'], 118.0, places=2)
+        self.assertAlmostEqual(ledger['treasury']['expenses_recorded_usd'], 2.0, places=2)
+
+        tx_lines = [json.loads(line) for line in (self.capsule_dir / 'transactions.jsonl').read_text().splitlines() if line.strip()]
+        self.assertEqual(tx_lines[-1]['type'], 'payout_execution')
+        self.assertEqual(tx_lines[-1]['settlement_adapter'], 'base_usdc_x402')
+        self.assertEqual(tx_lines[-1]['tx_hash'], '0xbaseenabled')
+        self.assertEqual(
+            tx_lines[-1]['settlement_adapter_contract']['settlement_path'],
+            'x402_onchain',
+        )
+
     def test_execute_payout_records_linked_commitment_settlement_ref(self):
         ledger_path = self.capsule_dir / 'ledger.json'
         ledger = json.loads(ledger_path.read_text())

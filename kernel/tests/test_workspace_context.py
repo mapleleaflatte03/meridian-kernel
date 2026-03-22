@@ -66,6 +66,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_execution_job_summary = self.workspace.execution_job_summary
         self.orig_sync_execution_job_for_local_warrant = self.workspace.sync_execution_job_for_local_warrant
         self.orig_upsert_execution_job = self.workspace.upsert_execution_job
+        self.orig_list_witness_observations = self.workspace.list_witness_observations
+        self.orig_witness_archive_summary = self.workspace.witness_archive_summary
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -109,6 +111,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.execution_job_summary = self.orig_execution_job_summary
         self.workspace.sync_execution_job_for_local_warrant = self.orig_sync_execution_job_for_local_warrant
         self.workspace.upsert_execution_job = self.orig_upsert_execution_job
+        self.workspace.list_witness_observations = self.orig_list_witness_observations
+        self.workspace.witness_archive_summary = self.orig_witness_archive_summary
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -861,11 +865,65 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertFalse(federation['mutation_enabled'])
         self.assertEqual(federation['mutation_disabled_reason'], 'witness_host_read_only')
         self.assertEqual(federation['inbox_summary']['total'], 2)
+        self.assertIn('witness_archive', federation)
+        self.assertTrue(federation['witness_archive']['archive_enabled'])
+        self.assertEqual(federation['witness_archive']['management_mode'], 'witness_local_archive')
         self.assertEqual(manifest['admission']['management_mode'], 'witness_read_only')
         self.assertFalse(manifest['admission']['mutation_enabled'])
         self.assertEqual(manifest['federation']['management_mode'], 'witness_read_only')
         self.assertFalse(manifest['federation']['mutation_enabled'])
         self.assertEqual(manifest['host_identity']['role'], 'witness_host')
+
+    def test_witness_archive_snapshot_reports_host_local_evidence_state(self):
+        from runtime_host import default_host_identity
+
+        host = default_host_identity(
+            host_id='host_gamma',
+            role='witness_host',
+            federation_enabled=True,
+            peer_transport='https',
+            supported_boundaries=['workspace', 'cli', 'federation_gateway'],
+        )
+        self.workspace.list_witness_observations = lambda file_path, host_id='': [
+            {
+                'archive_id': 'witobs_demo',
+                'message_type': 'settlement_notice',
+                'source_host_id': 'host_alpha',
+                'target_host_id': 'host_beta',
+            }
+        ]
+        self.workspace.witness_archive_summary = lambda file_path, host_id='': {
+            'total': 1,
+            'message_type_counts': {'settlement_notice': 1},
+            'peer_host_ids': ['host_alpha', 'host_beta'],
+            'latest_observed_at': '2026-03-22T00:00:00Z',
+        }
+
+        snapshot = self.workspace._witness_archive_snapshot(
+            'org_a',
+            host_identity=host,
+        )
+        self.assertEqual(snapshot['host_role'], 'witness_host')
+        self.assertEqual(snapshot['management_mode'], 'witness_local_archive')
+        self.assertTrue(snapshot['archive_enabled'])
+        self.assertEqual(snapshot['summary']['total'], 1)
+        self.assertEqual(snapshot['records'][0]['archive_id'], 'witobs_demo')
+
+    def test_witness_archive_snapshot_is_disabled_on_non_witness_host(self):
+        from runtime_host import default_host_identity
+
+        snapshot = self.workspace._witness_archive_snapshot(
+            'org_a',
+            host_identity=default_host_identity(
+                host_id='host_alpha',
+                role='institution_host',
+                federation_enabled=True,
+                peer_transport='https',
+            ),
+        )
+        self.assertFalse(snapshot['archive_enabled'])
+        self.assertEqual(snapshot['archive_disabled_reason'], 'witness_host_only')
+        self.assertEqual(snapshot['records'], [])
 
     def test_process_received_settlement_notice_marks_inbox_processed(self):
         from federation import FederationEnvelopeClaims

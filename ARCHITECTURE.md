@@ -45,6 +45,9 @@ deliberately narrow:
 - one built-in runtime path (`local_kernel`) is the real reference adapter
 - one external runtime family (`openclaw_compatible`) now has a tested
   kernel-side reference adapter library
+- one tested OpenClaw-compatible federation seam now exists in OSS tests:
+  those kernel-side adapter hooks can wrap a federated `execution_request`
+  story end-to-end without claiming a live OpenClaw deployment is already wired
 - one host-service federation primitive now exists as a kernel reference:
   HMAC-signed envelopes, peer registry, and replay protection
 - one receiver-side federation inbox primitive now exists as a kernel reference:

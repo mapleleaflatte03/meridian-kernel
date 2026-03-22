@@ -4211,6 +4211,33 @@ class FederationTests(unittest.TestCase):
                 self.assertTrue(blocked)
                 self.assertEqual(blocked[-1]['resource'], commitment_id)
 
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/cases/resolve',
+                    payload={
+                        'case_id': body['case']['case_id'],
+                        'note': 'Case resolved, settlement may proceed',
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                self.assertEqual(body['case']['status'], 'resolved')
+
+                status, body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/commitments/settle',
+                    payload={'commitment_id': commitment_id},
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(status, 200, body)
+                self.assertEqual(body['commitment']['status'], 'settled')
+
     def test_workspace_federated_commitment_proposal_round_trips_between_two_hosts(self):
         try:
             port_alpha = _find_free_port()

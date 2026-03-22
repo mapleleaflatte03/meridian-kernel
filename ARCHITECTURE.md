@@ -57,6 +57,10 @@ deliberately narrow:
   a valid `execution_request` can materialize a local federated execution job
   plus a pending local warrant, instead of overclaiming that the sender's
   warrant is enough to authorize receiver-side work
+- one sender-side review feedback path now exists as a kernel reference:
+  receiver-side warrant review for `execution_request` can emit a signed
+  `court_notice`, so the sender can sync warrant review state and linked
+  commitment provenance before settlement
 - one first-class warrant primitive now exists as a kernel reference:
   file-backed warrant records, warrant review state, and sender-side
   federation execution gating for `execution_request`
@@ -174,6 +178,9 @@ incoming cross-host work:
   sufficient local authority
 - approving that local warrant transitions the job to `ready`; staying or
   revoking it transitions the job to `blocked` or `rejected`
+- that same local review can emit a signed `court_notice` back to the source
+  host, so sender-side warrant state reflects receiver-side review without
+  pretending work settlement already completed
 - `GET /api/federation/execution-jobs` exposes that queue for the bound
   institution
 - `POST /api/federation/execution-jobs/execute` can complete a `ready` job on

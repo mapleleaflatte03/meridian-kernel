@@ -1774,6 +1774,194 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(processing['inbox_entry']['state'], 'processed')
         self.assertEqual(audit_events[-1][0][2], 'federation_commitment_breach_notice_recorded')
 
+    def test_process_received_court_notice_reviews_sender_warrant_and_records_delivery_ref(self):
+        from federation import FederationEnvelopeClaims
+
+        audit_events = []
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        original_get_warrant = self.workspace.get_warrant
+        original_review_warrant = self.workspace.review_warrant
+        original_get_commitment = self.workspace.get_commitment
+        original_record_delivery_ref = self.workspace.record_delivery_ref
+        original_query_events = self.workspace.query_events
+        original_log_event = self.workspace.log_event
+
+        commitment = {
+            'commitment_id': 'cmt_demo',
+            'status': 'accepted',
+            'delivery_refs': [
+                {
+                    'message_type': 'execution_request',
+                    'envelope_id': 'fed_exec_demo',
+                    'target_host_id': 'host_beta',
+                    'target_institution_id': 'org_beta',
+                    'warrant_id': 'war_sender',
+                }
+            ],
+        }
+        sender_warrant = {
+            'warrant_id': 'war_sender',
+            'action_class': 'federated_execution',
+            'boundary_name': 'federation_gateway',
+            'court_review_state': 'approved',
+            'execution_state': 'ready',
+            'reviewed_by': '',
+            'reviewed_at': '',
+            'review_note': '',
+        }
+
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_court_demo',
+            'state': kwargs.get('state', 'received'),
+        }
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: (
+            dict(sender_warrant) if warrant_id == 'war_sender' else None
+        )
+        self.workspace.review_warrant = lambda warrant_id, decision, by, **kwargs: {
+            **dict(sender_warrant),
+            'warrant_id': warrant_id,
+            'court_review_state': {'approve': 'approved', 'stay': 'stayed', 'revoke': 'revoked'}[decision],
+            'reviewed_by': by,
+            'reviewed_at': '2026-03-22T00:00:00Z',
+            'review_note': kwargs.get('note', ''),
+        }
+        self.workspace.get_commitment = lambda commitment_id, org_id=None: (
+            dict(commitment) if commitment_id == 'cmt_demo' else None
+        )
+        self.workspace.record_delivery_ref = lambda commitment_id, delivery_ref, **kwargs: {
+            **dict(commitment),
+            'delivery_refs': list(commitment['delivery_refs']) + [dict(delivery_ref)],
+        }
+        self.workspace.query_events = lambda **kwargs: []
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_court_demo',
+                source_host_id='host_beta',
+                source_institution_id='org_beta',
+                target_host_id='host_alpha',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_owner_beta',
+                session_id='ses_beta',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='court_notice',
+                payload_hash='hash_court_demo',
+                warrant_id='war_sender',
+                commitment_id='cmt_demo',
+            )
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                {'receipt_id': 'fedrcpt_court_demo', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={
+                    'court_decision': 'stay',
+                    'sender_warrant_id': 'war_sender',
+                    'local_warrant_id': 'war_local_beta',
+                    'source_execution_envelope_id': 'fed_exec_demo',
+                    'source_execution_job_id': 'fej_demo',
+                    'source_execution_receipt_id': 'fedrcpt_exec_demo',
+                    'local_court_review_state': 'stayed',
+                    'local_execution_state': 'ready',
+                    'target_host_id': 'host_alpha',
+                    'target_institution_id': 'org_a',
+                    'note': 'Receiver hold',
+                    'metadata': {'trace': 'court_notice_demo'},
+                },
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+            self.workspace.get_warrant = original_get_warrant
+            self.workspace.review_warrant = original_review_warrant
+            self.workspace.get_commitment = original_get_commitment
+            self.workspace.record_delivery_ref = original_record_delivery_ref
+            self.workspace.query_events = original_query_events
+            self.workspace.log_event = original_log_event
+
+        self.assertTrue(processing['applied'])
+        self.assertEqual(processing['reason'], 'court_notice_applied')
+        self.assertEqual(processing['warrant']['warrant_id'], 'war_sender')
+        self.assertEqual(processing['warrant']['court_review_state'], 'stayed')
+        self.assertEqual(processing['warrant']['reviewed_by'], 'user_owner_beta')
+        self.assertEqual(processing['delivery_ref']['message_type'], 'court_notice')
+        self.assertEqual(processing['delivery_ref']['local_warrant_id'], 'war_local_beta')
+        self.assertEqual(processing['outbound_execution_ref']['envelope_id'], 'fed_exec_demo')
+        self.assertEqual(processing['inbox_entry']['state'], 'processed')
+        self.assertEqual(audit_events[-1][0][2], 'federation_court_notice_applied')
+
+    def test_process_received_court_notice_blocks_missing_sender_reference(self):
+        from federation import FederationEnvelopeClaims
+
+        audit_events = []
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        original_get_warrant = self.workspace.get_warrant
+        original_get_commitment = self.workspace.get_commitment
+        original_query_events = self.workspace.query_events
+        original_log_event = self.workspace.log_event
+
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_court_bad',
+            'state': kwargs.get('state', 'received'),
+        }
+        self.workspace.get_warrant = lambda warrant_id, org_id=None: {
+            'warrant_id': 'war_sender',
+            'action_class': 'federated_execution',
+            'boundary_name': 'federation_gateway',
+            'court_review_state': 'approved',
+            'execution_state': 'ready',
+        }
+        self.workspace.get_commitment = lambda commitment_id, org_id=None: {
+            'commitment_id': commitment_id,
+            'status': 'accepted',
+            'delivery_refs': [],
+        }
+        self.workspace.query_events = lambda **kwargs: []
+        self.workspace.log_event = lambda *args, **kwargs: audit_events.append((args, kwargs))
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_court_bad',
+                source_host_id='host_beta',
+                source_institution_id='org_beta',
+                target_host_id='host_alpha',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_owner_beta',
+                session_id='ses_beta',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='court_notice',
+                payload_hash='hash_court_bad',
+                warrant_id='war_sender',
+                commitment_id='cmt_demo',
+            )
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                {'receipt_id': 'fedrcpt_court_bad', 'accepted_at': '2026-03-22T00:00:00Z'},
+                payload={
+                    'court_decision': 'stay',
+                    'sender_warrant_id': 'war_sender',
+                    'local_warrant_id': 'war_local_beta',
+                    'source_execution_envelope_id': 'fed_exec_missing',
+                    'target_host_id': 'host_alpha',
+                    'target_institution_id': 'org_a',
+                    'note': 'Receiver hold',
+                    'metadata': {},
+                },
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+            self.workspace.get_warrant = original_get_warrant
+            self.workspace.get_commitment = original_get_commitment
+            self.workspace.query_events = original_query_events
+            self.workspace.log_event = original_log_event
+
+        self.assertFalse(processing['applied'])
+        self.assertEqual(processing['reason'], 'invalid_court_notice')
+        self.assertIn("No outbound execution_request proof matches", processing['error'])
+        self.assertEqual(audit_events[-1][0][2], 'federation_court_notice_blocked')
+
     def test_process_received_case_notice_opens_idempotently_and_resolves_same_mirror(self):
         from federation import FederationEnvelopeClaims
 

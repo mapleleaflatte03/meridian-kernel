@@ -50,6 +50,7 @@ What is real today:
 - one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
 - one receiver-side settlement application path: accepted `settlement_notice` envelopes can record a settlement ref, settle the linked commitment, and move the inbox entry from `received` to `processed`
 - one receiver-side execution review path: accepted `execution_request` envelopes can materialize a local federated execution job plus a pending local warrant instead of implying remote work is already authorized
+- one sender-side review feedback path: receiver-side warrant review for a federated `execution_request` can emit a signed `court_notice` back to the source host, so sender-side warrant state and commitment provenance reflect remote review before settlement
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, sender-side federation validation when `commitment_id` is supplied, and warrant-bound `commitment_proposal` / `commitment_acceptance` / `commitment_breach_notice` envelopes
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
@@ -155,6 +156,11 @@ as sufficient local authorization.
 Receiver-side warrant review now also drives that queue honestly: approving the
 local warrant moves the execution job to `ready`, while staying or revoking it
 moves the job to `blocked` or `rejected`.
+That same receiver-side review loop now has one real control-plane feedback
+object: reviewing the receiver's local warrant for an incoming
+`execution_request` can send a signed `court_notice` back to the source host,
+so the sender can sync its own execution warrant state and append the review
+notice to the linked commitment without pretending settlement already happened.
 `POST /api/federation/execution-jobs/execute` now closes that receiver-side
 loop for the reference path: a `ready` job can be marked locally executed,
 its local warrant is marked `executed`, and the receiver reuses an already

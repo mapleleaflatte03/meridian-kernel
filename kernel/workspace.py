@@ -166,7 +166,7 @@ if os.path.isdir(EXAMPLES_INTELLIGENCE_DIR):
 from organizations import (load_orgs, set_charter, set_policy_defaults,
                            transition_lifecycle as org_transition_lifecycle)
 from agent_registry import load_registry, sync_from_economy
-from audit import log_event, tail_events
+from audit import log_event, query_events, tail_events
 
 import importlib.util
 
@@ -684,7 +684,7 @@ def _accept_federation_request(bound_org_id, envelope, payload=None, *, peer_reg
     )
 
 
-def _case_notice_validation_peer_registry(bound_org_id, envelope):
+def _control_plane_notice_validation_peer_registry(bound_org_id, envelope):
     envelope = (envelope or '').strip()
     if not envelope or '.' not in envelope:
         return None
@@ -694,7 +694,7 @@ def _case_notice_validation_peer_registry(bound_org_id, envelope):
         body = json.loads(base64.urlsafe_b64decode(body_b64 + padding).decode('utf-8'))
     except Exception:
         return None
-    if body.get('message_type') != 'case_notice':
+    if body.get('message_type') not in ('case_notice', 'court_notice'):
         return None
     source_host_id = (body.get('source_host_id') or '').strip()
     if not source_host_id:
@@ -2244,6 +2244,509 @@ def _process_received_case_notice(bound_org_id, claims, receipt, *, payload=None
     }
 
 
+def _court_notice_required_payload_fields():
+    return (
+        'court_decision',
+        'sender_warrant_id',
+        'local_warrant_id',
+        'source_execution_envelope_id',
+        'target_host_id',
+        'target_institution_id',
+        'note',
+        'metadata',
+    )
+
+
+def _court_notice_payload_dict(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    return {
+        'court_decision': (payload.get('court_decision') or '').strip(),
+        'sender_warrant_id': (payload.get('sender_warrant_id') or payload.get('warrant_id') or '').strip(),
+        'local_warrant_id': (payload.get('local_warrant_id') or '').strip(),
+        'source_execution_envelope_id': (payload.get('source_execution_envelope_id') or payload.get('execution_envelope_id') or '').strip(),
+        'source_execution_job_id': (payload.get('source_execution_job_id') or payload.get('job_id') or '').strip(),
+        'source_execution_receipt_id': (payload.get('source_execution_receipt_id') or payload.get('receipt_id') or '').strip(),
+        'local_court_review_state': (payload.get('local_court_review_state') or '').strip(),
+        'local_execution_state': (payload.get('local_execution_state') or '').strip(),
+        'reviewed_by': (payload.get('reviewed_by') or '').strip(),
+        'reviewed_at': (payload.get('reviewed_at') or '').strip(),
+        'target_host_id': (payload.get('target_host_id') or '').strip(),
+        'target_institution_id': (
+            payload.get('target_institution_id')
+            or payload.get('target_org_id')
+            or ''
+        ).strip(),
+        'note': payload.get('note', ''),
+        'metadata': dict(payload.get('metadata') or {}),
+    }
+
+
+def _execution_job_court_notice_payload(job, warrant, decision, *, note=''):
+    record = dict(job or {})
+    warrant = dict(warrant or {})
+    metadata = dict(record.get('metadata') or {})
+    metadata.update({
+        'source': 'receiver_local_warrant_review',
+        'message_type': 'court_notice',
+    })
+    return {
+        'court_decision': (decision or '').strip(),
+        'sender_warrant_id': (record.get('sender_warrant_id') or '').strip(),
+        'local_warrant_id': (record.get('local_warrant_id') or warrant.get('warrant_id') or '').strip(),
+        'source_execution_envelope_id': (record.get('envelope_id') or '').strip(),
+        'source_execution_job_id': (record.get('job_id') or '').strip(),
+        'source_execution_receipt_id': (record.get('receipt_id') or '').strip(),
+        'local_court_review_state': (warrant.get('court_review_state') or '').strip(),
+        'local_execution_state': (warrant.get('execution_state') or '').strip(),
+        'reviewed_by': (warrant.get('reviewed_by') or '').strip(),
+        'reviewed_at': (warrant.get('reviewed_at') or '').strip(),
+        'target_host_id': (record.get('source_host_id') or '').strip(),
+        'target_institution_id': (record.get('source_institution_id') or '').strip(),
+        'note': note or warrant.get('review_note', ''),
+        'metadata': metadata,
+    }
+
+
+def _existing_execution_job_court_notice(job, *, decision=''):
+    metadata = dict((job or {}).get('metadata') or {})
+    notice = dict(metadata.get('court_notice') or {})
+    if not notice:
+        return None
+    if decision and (notice.get('decision') or '').strip() != (decision or '').strip():
+        return None
+    if not (notice.get('envelope_id') or notice.get('receipt_id')):
+        return None
+    return {
+        'message_type': 'court_notice',
+        'decision': (notice.get('decision') or '').strip(),
+        'envelope_id': (notice.get('envelope_id') or '').strip(),
+        'receipt_id': (notice.get('receipt_id') or '').strip(),
+        'target_host_id': (notice.get('target_host_id') or '').strip(),
+        'target_institution_id': (notice.get('target_institution_id') or '').strip(),
+        'sender_warrant_id': (notice.get('sender_warrant_id') or '').strip(),
+        'local_warrant_id': (notice.get('local_warrant_id') or '').strip(),
+        'sent_at': (notice.get('sent_at') or '').strip(),
+        'court_review_state': (notice.get('court_review_state') or '').strip(),
+        'response': dict(notice.get('response') or {}),
+    }
+
+
+def _deliver_execution_job_court_notice(bound_org_id, job, warrant, decision, *, actor_id, session_id=None, note=''):
+    record = dict(job or {})
+    warrant = dict(warrant or {})
+    if (record.get('message_type') or '').strip() != 'execution_request':
+        return None
+    sender_warrant_id = (record.get('sender_warrant_id') or '').strip()
+    target_host_id = (record.get('source_host_id') or '').strip()
+    target_institution_id = (record.get('source_institution_id') or '').strip()
+    if not sender_warrant_id or not target_host_id or not target_institution_id:
+        return None
+
+    existing_notice = _existing_execution_job_court_notice(record, decision=decision)
+    if existing_notice:
+        return {
+            'applied': True,
+            'reused': True,
+            'reason': 'already_sent',
+            'court_notice': existing_notice,
+            'execution_job': _execution_job_view(bound_org_id, record),
+        }
+
+    federated_payload = _execution_job_court_notice_payload(
+        record,
+        warrant,
+        decision,
+        note=note,
+    )
+    host_identity, admission_registry = _runtime_host_state(bound_org_id)
+    authority = _federation_authority(host_identity)
+    authority.ensure_enabled()
+    peer = authority.peer_registry.get('peers', {}).get(target_host_id)
+    if not peer:
+        raise FederationDeliveryError(f"Peer host '{target_host_id}' is not in peer registry")
+    if peer.trust_state == 'revoked':
+        raise FederationDeliveryError(
+            f"Peer host '{target_host_id}' is not trusted (state={peer.trust_state})"
+        )
+    if not peer.receive_url:
+        raise FederationDeliveryError(
+            f"Peer host '{target_host_id}' does not declare endpoint_url"
+        )
+    try:
+        request = urllib_request.Request(peer.manifest_url, method='GET')
+        with urllib_request.urlopen(request, timeout=10) as response:
+            manifest = json.loads(response.read().decode('utf-8') or '{}')
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        raise FederationDeliveryError(
+            f"Failed fetching federation manifest from '{peer.host_id}': HTTP {exc.code}: {body}",
+            peer_host_id=peer.host_id,
+        ) from exc
+    except Exception as exc:
+        raise FederationDeliveryError(
+            f"Failed fetching federation manifest from '{peer.host_id}': {exc}",
+            peer_host_id=peer.host_id,
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise FederationDeliveryError(
+            f"Peer host '{peer.host_id}' returned a non-object federation manifest",
+            peer_host_id=peer.host_id,
+            response=manifest,
+        )
+    authority._validate_peer_manifest(
+        peer,
+        manifest,
+        target_institution_id=target_institution_id,
+    )
+    envelope = authority.issue(
+        bound_org_id,
+        peer.host_id,
+        target_institution_id,
+        'court_notice',
+        payload=federated_payload,
+        actor_type='user',
+        actor_id=actor_id,
+        session_id=session_id or '',
+        warrant_id=sender_warrant_id,
+        commitment_id=(record.get('commitment_id') or '').strip(),
+    )
+    claims = authority.validate(
+        envelope,
+        payload=federated_payload,
+        expected_target_host_id=peer.host_id,
+        expected_target_org_id=target_institution_id,
+        expected_boundary_name='federation_gateway',
+    )
+    try:
+        request = urllib_request.Request(
+            peer.receive_url,
+            data=json.dumps({
+                'envelope': envelope,
+                'payload': federated_payload,
+            }).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib_request.urlopen(request, timeout=10) as response:
+            delivery_response = json.loads(response.read().decode('utf-8') or '{}')
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        raise FederationDeliveryError(
+            f"Peer returned HTTP {exc.code}: {body}",
+            peer_host_id=peer.host_id,
+            envelope=envelope,
+            claims=claims,
+        ) from exc
+    except Exception as exc:
+        raise FederationDeliveryError(
+            f"Failed delivering federation envelope to '{peer.host_id}': {exc}",
+            peer_host_id=peer.host_id,
+            envelope=envelope,
+            claims=claims,
+        ) from exc
+    receipt = authority._validate_delivery_receipt(
+        delivery_response,
+        peer_host_id=peer.host_id,
+        target_institution_id=target_institution_id,
+        claims=claims,
+    )
+    delivery = {
+        'peer': peer.to_dict(),
+        'peer_manifest': manifest,
+        'envelope': envelope,
+        'claims': claims.to_dict(),
+        'receipt': receipt,
+        'response': delivery_response,
+    }
+    court_notice = {
+        'message_type': 'court_notice',
+        'decision': (decision or '').strip(),
+        'envelope_id': (delivery.get('claims') or {}).get('envelope_id', ''),
+        'receipt_id': (delivery.get('receipt') or {}).get('receipt_id', ''),
+        'target_host_id': (delivery.get('claims') or {}).get('target_host_id', ''),
+        'target_institution_id': (delivery.get('claims') or {}).get('target_institution_id', ''),
+        'sender_warrant_id': sender_warrant_id,
+        'local_warrant_id': (record.get('local_warrant_id') or '').strip(),
+        'court_review_state': (warrant.get('court_review_state') or '').strip(),
+        'sent_at': (delivery.get('receipt') or {}).get('accepted_at', '') or _now(),
+        'response': dict(delivery.get('response') or {}),
+    }
+    updated_job = upsert_execution_job(
+        bound_org_id,
+        job_id=record.get('job_id', ''),
+        metadata={
+            **dict(record.get('metadata') or {}),
+            'court_notice': court_notice,
+        },
+    )
+    federation_state = authority.snapshot(
+        bound_org_id=bound_org_id,
+        admission_registry=admission_registry,
+    )
+    log_event(
+        bound_org_id,
+        actor_id,
+        'federation_court_notice_sent',
+        resource=record.get('job_id', '') or sender_warrant_id,
+        outcome='success',
+        actor_type='user',
+        details=_federation_audit_details(
+            claims,
+            peer_transport=peer.transport,
+            receipt_id=receipt.get('receipt_id', ''),
+            receiver_host_id=receipt.get('receiver_host_id', ''),
+            receiver_institution_id=receipt.get('receiver_institution_id', ''),
+            local_warrant_id=(record.get('local_warrant_id') or '').strip(),
+            sender_warrant_id=sender_warrant_id,
+            decision=(decision or '').strip(),
+        ),
+        session_id=session_id or None,
+    )
+    return {
+        'applied': True,
+        'reused': False,
+        'delivery': delivery,
+        'court_notice': court_notice,
+        'execution_job': _execution_job_view(bound_org_id, updated_job),
+        'runtime_core': {
+            'federation': federation_state,
+        },
+    }
+
+
+def _sender_execution_delivery_ref_for_court_notice(bound_org_id, sender_warrant_id, claims, payload):
+    payload = _court_notice_payload_dict(payload)
+    sender_warrant_id = (sender_warrant_id or '').strip()
+    execution_envelope_id = payload.get('source_execution_envelope_id', '')
+    commitment = None
+    if claims.commitment_id:
+        commitment = get_commitment(claims.commitment_id, org_id=bound_org_id)
+        for ref in reversed(list((commitment or {}).get('delivery_refs') or [])):
+            ref = dict(ref or {})
+            if (ref.get('message_type') or '').strip() != 'execution_request':
+                continue
+            if sender_warrant_id and (ref.get('warrant_id') or '').strip() != sender_warrant_id:
+                continue
+            if execution_envelope_id and (ref.get('envelope_id') or '').strip() != execution_envelope_id:
+                continue
+            if (ref.get('target_host_id') or '').strip() != (claims.source_host_id or '').strip():
+                continue
+            if (ref.get('target_institution_id') or '').strip() != (claims.source_institution_id or '').strip():
+                continue
+            return ref, commitment
+    for event in query_events(
+        org_id=bound_org_id,
+        action='federation_envelope_sent',
+        limit=500,
+    ):
+        if event.get('resource') != 'execution_request':
+            continue
+        details = dict(event.get('details') or {})
+        if sender_warrant_id and (details.get('warrant_id') or '').strip() != sender_warrant_id:
+            continue
+        if execution_envelope_id and (details.get('envelope_id') or '').strip() != execution_envelope_id:
+            continue
+        if (details.get('target_host_id') or '').strip() != (claims.source_host_id or '').strip():
+            continue
+        if (details.get('target_institution_id') or '').strip() != (claims.source_institution_id or '').strip():
+            continue
+        return {
+            'message_type': 'execution_request',
+            'envelope_id': details.get('envelope_id', ''),
+            'target_host_id': details.get('target_host_id', ''),
+            'target_institution_id': details.get('target_institution_id', ''),
+            'receipt_id': details.get('receipt_id', ''),
+            'receiver_host_id': details.get('receiver_host_id', ''),
+            'receiver_institution_id': details.get('receiver_institution_id', ''),
+            'warrant_id': details.get('warrant_id', ''),
+        }, commitment
+    return None, commitment
+
+
+def _process_received_court_notice(bound_org_id, claims, receipt, *, payload=None):
+    payload = _court_notice_payload_dict(payload)
+    actor_id = claims.actor_id or f'peer:{claims.source_host_id}'
+    decision = payload.get('court_decision', '')
+    sender_warrant_id = payload.get('sender_warrant_id') or (claims.warrant_id or '').strip()
+    local_warrant_id = payload.get('local_warrant_id', '')
+    execution_envelope_id = payload.get('source_execution_envelope_id', '')
+    target_host_id = payload.get('target_host_id', '')
+    target_institution_id = payload.get('target_institution_id', '')
+    note = payload.get('note', '')
+    metadata = dict(payload.get('metadata') or {})
+
+    errors = []
+    if decision not in ('approve', 'stay', 'revoke'):
+        errors.append('court_decision must be one of approve|stay|revoke')
+    if not sender_warrant_id:
+        errors.append('sender_warrant_id is required')
+    if not local_warrant_id:
+        errors.append('local_warrant_id is required')
+    if not execution_envelope_id:
+        errors.append('source_execution_envelope_id is required')
+    if not target_host_id:
+        errors.append('target_host_id is required')
+    if not target_institution_id:
+        errors.append('target_institution_id is required')
+    if claims.warrant_id and sender_warrant_id != claims.warrant_id:
+        errors.append(
+            f"court_notice sender_warrant_id {sender_warrant_id!r} does not match envelope warrant_id {claims.warrant_id!r}"
+        )
+    if target_host_id != claims.target_host_id:
+        errors.append(
+            f"court_notice target_host_id {target_host_id!r} does not match envelope target_host_id {claims.target_host_id!r}"
+        )
+    if target_institution_id != claims.target_institution_id:
+        errors.append(
+            f"court_notice target_institution_id {target_institution_id!r} does not match envelope target_institution_id {claims.target_institution_id!r}"
+        )
+
+    warrant = get_warrant(sender_warrant_id, org_id=bound_org_id)
+    if not warrant:
+        errors.append(f"Sender warrant not found: {sender_warrant_id}")
+    elif warrant.get('action_class') != 'federated_execution':
+        errors.append(
+            f"Sender warrant '{sender_warrant_id}' action_class must be 'federated_execution'"
+        )
+    elif warrant.get('boundary_name') != 'federation_gateway':
+        errors.append(
+            f"Sender warrant '{sender_warrant_id}' boundary_name must be 'federation_gateway'"
+        )
+
+    delivery_ref, commitment = _sender_execution_delivery_ref_for_court_notice(
+        bound_org_id,
+        sender_warrant_id,
+        claims,
+        payload,
+    )
+    if not delivery_ref:
+        errors.append(
+            f"No outbound execution_request proof matches sender_warrant_id '{sender_warrant_id}' "
+            f"and envelope '{execution_envelope_id}'"
+        )
+
+    if errors:
+        error = '; '.join(errors)
+        log_event(
+            bound_org_id,
+            actor_id,
+            'federation_court_notice_blocked',
+            resource=sender_warrant_id or claims.envelope_id,
+            outcome='blocked',
+            actor_type=claims.actor_type or 'service',
+            details=_federation_audit_details(
+                claims,
+                receipt_id=(receipt or {}).get('receipt_id', ''),
+                court_decision=decision,
+                sender_warrant_id=sender_warrant_id,
+                local_warrant_id=local_warrant_id,
+                source_execution_envelope_id=execution_envelope_id,
+                error=error,
+            ),
+            session_id=claims.session_id or None,
+        )
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'received',
+            'reason': 'invalid_court_notice',
+            'error': error,
+        }
+
+    if warrant.get('execution_state') == 'executed':
+        inbox_entry = _federation_inbox_entry(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+            state='processed',
+        )
+        return {
+            'applied': False,
+            'message_type': claims.message_type,
+            'state': 'processed',
+            'reason': 'warrant_already_executed',
+            'warrant': warrant,
+            'inbox_entry': inbox_entry,
+        }
+
+    reviewed = review_warrant(
+        sender_warrant_id,
+        decision,
+        actor_id,
+        org_id=bound_org_id,
+        note=note or (
+            f"Receiver-side court_notice {decision} from {claims.source_host_id}"
+        ),
+    )
+    delivery_record = None
+    if claims.commitment_id and commitment:
+        commitment = record_delivery_ref(
+            claims.commitment_id,
+            {
+                'recorded_at': _now(),
+                'message_type': 'court_notice',
+                'envelope_id': claims.envelope_id,
+                'receipt_id': (receipt or {}).get('receipt_id', ''),
+                'source_host_id': claims.source_host_id,
+                'source_institution_id': claims.source_institution_id,
+                'target_host_id': claims.target_host_id,
+                'target_institution_id': claims.target_institution_id,
+                'warrant_id': sender_warrant_id,
+                'local_warrant_id': local_warrant_id,
+                'source_execution_envelope_id': execution_envelope_id,
+                'source_execution_job_id': payload.get('source_execution_job_id', ''),
+                'source_execution_receipt_id': payload.get('source_execution_receipt_id', ''),
+                'court_decision': decision,
+                'court_review_state': payload.get('local_court_review_state') or reviewed.get('court_review_state', ''),
+                'local_execution_state': payload.get('local_execution_state', ''),
+                'reviewed_by': payload.get('reviewed_by') or actor_id,
+                'reviewed_at': payload.get('reviewed_at') or (receipt or {}).get('accepted_at', '') or _now(),
+                'note': note or '',
+                'metadata': metadata,
+            },
+            org_id=bound_org_id,
+        )
+        delivery_record = dict((commitment.get('delivery_refs') or [])[-1] or {})
+
+    inbox_entry = _federation_inbox_entry(
+        bound_org_id,
+        claims,
+        receipt,
+        payload=payload,
+        state='processed',
+    )
+    log_event(
+        bound_org_id,
+        actor_id,
+        'federation_court_notice_applied',
+        resource=sender_warrant_id,
+        outcome='success',
+        actor_type=claims.actor_type or 'service',
+        details=_federation_audit_details(
+            claims,
+            receipt_id=(receipt or {}).get('receipt_id', ''),
+            court_decision=decision,
+            sender_warrant_id=sender_warrant_id,
+            local_warrant_id=local_warrant_id,
+            source_execution_envelope_id=execution_envelope_id,
+            court_review_state=reviewed.get('court_review_state', ''),
+        ),
+        session_id=claims.session_id or None,
+    )
+    return {
+        'applied': True,
+        'message_type': claims.message_type,
+        'state': 'processed',
+        'reason': 'court_notice_applied',
+        'warrant': reviewed,
+        'commitment': commitment,
+        'delivery_ref': delivery_record,
+        'outbound_execution_ref': dict(delivery_ref or {}),
+        'inbox_entry': inbox_entry,
+    }
+
+
 def _process_received_federation_message(bound_org_id, claims, receipt, *, payload=None):
     result = {
         'applied': False,
@@ -2277,6 +2780,14 @@ def _process_received_federation_message(bound_org_id, claims, receipt, *, paylo
 
     if claims.message_type == 'case_notice':
         return _process_received_case_notice(
+            bound_org_id,
+            claims,
+            receipt,
+            payload=payload,
+        )
+
+    if claims.message_type == 'court_notice':
+        return _process_received_court_notice(
             bound_org_id,
             claims,
             receipt,
@@ -3361,6 +3872,32 @@ def _maybe_stay_warrant_for_case(case_record, actor_id, *, org_id, session_id=No
         session_id=session_id,
         reason='case_hold_applied',
     )
+    court_notice = None
+    if execution_job:
+        try:
+            court_notice = _deliver_execution_job_court_notice(
+                org_id,
+                execution_job,
+                stayed,
+                'stay',
+                actor_id=actor_id,
+                session_id=session_id,
+                note=note or f"Stayed because case {case_record.get('case_id', '')} is active",
+            )
+        except (FederationUnavailable, FederationDeliveryError, FederationValidationError, PermissionError, LookupError, RuntimeError, ValueError) as exc:
+            log_event(
+                org_id,
+                actor_id,
+                'federation_court_notice_delivery_failed',
+                resource=(execution_job or {}).get('job_id', ''),
+                outcome='failed',
+                details={
+                    'case_id': case_record.get('case_id', ''),
+                    'local_warrant_id': warrant_id,
+                    'error': str(exc),
+                },
+                session_id=session_id,
+            )
     log_event(
         org_id,
         actor_id,
@@ -3387,6 +3924,8 @@ def _maybe_stay_warrant_for_case(case_record, actor_id, *, org_id, session_id=No
     }
     if execution_job:
         result['execution_job'] = execution_job
+    if court_notice:
+        result['court_notice'] = court_notice
     return result
 
 
@@ -4465,7 +5004,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 envelope = (body.get('envelope') or '').strip()
                 if not envelope:
                     return self._json({'error': 'Federation envelope is required'}, 400)
-                peer_registry_override = _case_notice_validation_peer_registry(
+                peer_registry_override = _control_plane_notice_validation_peer_registry(
                     inst_ctx.org_id,
                     envelope,
                 )
@@ -5293,6 +5832,32 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     session_id=_sid,
                     reason=f'workspace_warrant_{decision}',
                 )
+                court_notice = None
+                if execution_job:
+                    try:
+                        court_notice = _deliver_execution_job_court_notice(
+                            org_id,
+                            execution_job,
+                            warrant,
+                            decision,
+                            actor_id=by,
+                            session_id=_sid,
+                            note=body.get('note', ''),
+                        )
+                    except (FederationUnavailable, FederationDeliveryError, FederationValidationError, PermissionError, LookupError, RuntimeError, ValueError) as exc:
+                        log_event(
+                            org_id,
+                            by,
+                            'federation_court_notice_delivery_failed',
+                            outcome='failed',
+                            resource=(execution_job or {}).get('job_id', ''),
+                            details={
+                                'warrant_id': warrant_id,
+                                'decision': decision,
+                                'error': str(exc),
+                            },
+                            session_id=_sid,
+                        )
                 log_event(org_id, by, f'warrant_{decision}', outcome='success',
                           resource=warrant_id,
                           details={
@@ -5307,6 +5872,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 }
                 if execution_job:
                     response['execution_job'] = execution_job
+                if court_notice:
+                    response['court_notice'] = court_notice
                 return self._json(response)
 
             elif path == '/api/commitments/propose':

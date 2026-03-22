@@ -2370,7 +2370,7 @@ def _subscription_snapshot(org_id):
     payload = load_subscriptions(org_id)
     return {
         'bound_org_id': org_id,
-        'management_mode': 'workspace_api_file_backed',
+        'management_mode': 'institution_owned_service',
         'mutation_enabled': True,
         'mutation_disabled_reason': '',
         'storage_model': 'capsule_canonical',

@@ -464,6 +464,7 @@ class WorkspaceContextTests(unittest.TestCase):
             handler.do_GET()
             self.assertEqual(captured['status'], 200)
             self.assertEqual(captured['data']['bound_org_id'], 'org_a')
+            self.assertEqual(captured['data']['management_mode'], 'institution_owned_service')
             self.assertEqual(captured['data']['summary']['subscriber_count'], 1)
             self.assertEqual(captured['data']['state']['subscribers'], {'111': []})
 

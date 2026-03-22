@@ -472,8 +472,7 @@ _PROTOCOL_DEFAULTS = {
 def _default_org_id():
     try:
         from organizations import load_orgs
-        for oid in load_orgs().get('organizations', {}):
-            return oid
+        return next(iter(load_orgs().get('organizations', {})), None)
     except Exception:
         pass
     return None

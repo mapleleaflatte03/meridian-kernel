@@ -181,6 +181,60 @@ class CommitmentCapsuleTests(unittest.TestCase):
         self.assertEqual(summary['accepted'], 1)
         self.assertEqual(summary['settlement_refs_total'], 1)
 
+    def test_settlement_notice_refs_dedupe_by_envelope_and_receipt(self):
+        record = commitments.propose_commitment(
+            self.org_id,
+            'host_beta',
+            'org_beta',
+            'Settle the approved brief',
+            'user_owner',
+            warrant_id='war_demo',
+        )
+        commitments.accept_commitment(record['commitment_id'], 'user_owner', org_id=self.org_id)
+
+        updated = commitments.record_settlement_ref(
+            record['commitment_id'],
+            {
+                'envelope_id': 'fed_env_demo',
+                'receipt_id': 'fed_rcpt_demo',
+                'proposal_id': 'ppo_demo',
+                'tx_ref': 'ptx_demo',
+                'verification_state': 'host_ledger_final',
+            },
+            org_id=self.org_id,
+        )
+        self.assertEqual(len(updated['settlement_refs']), 1)
+        self.assertEqual(updated['settlement_refs'][0]['envelope_id'], 'fed_env_demo')
+
+        updated = commitments.record_settlement_ref(
+            record['commitment_id'],
+            {
+                'envelope_id': 'fed_env_demo',
+                'receipt_id': 'fed_rcpt_demo',
+                'proposal_id': 'ppo_demo_other',
+                'tx_ref': 'ptx_demo_other',
+                'verification_state': 'chain_final',
+            },
+            org_id=self.org_id,
+        )
+        self.assertEqual(len(updated['settlement_refs']), 1)
+        self.assertEqual(updated['settlement_refs'][0]['verification_state'], 'chain_final')
+        self.assertEqual(updated['settlement_refs'][0]['proposal_id'], 'ppo_demo_other')
+
+        updated = commitments.record_settlement_ref(
+            record['commitment_id'],
+            {
+                'receipt_id': 'fed_rcpt_demo_2',
+                'proposal_id': 'ppo_demo_fresh',
+                'tx_ref': 'ptx_demo_fresh',
+                'verification_state': 'accepted',
+            },
+            org_id=self.org_id,
+        )
+        self.assertEqual(len(updated['settlement_refs']), 2)
+        self.assertEqual(updated['settlement_refs'][0]['proposal_id'], 'ppo_demo_other')
+        self.assertEqual(updated['settlement_refs'][1]['receipt_id'], 'fed_rcpt_demo_2')
+
 
 if __name__ == '__main__':
     unittest.main()

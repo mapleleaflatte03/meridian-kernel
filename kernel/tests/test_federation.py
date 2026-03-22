@@ -1257,6 +1257,153 @@ class FederationTests(unittest.TestCase):
             self.assertTrue(applied)
             self.assertEqual(applied[-1]['resource'], commitment_id)
 
+    def test_workspace_federation_settlement_notice_replay_is_idempotent(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            commitment_id = 'cmt_replay_settlement'
+            _seed_commitments(
+                os.path.join(beta['economy'], 'commitments.json'),
+                [
+                    _accepted_commitment_record(
+                        org_id='org_beta',
+                        commitment_id=commitment_id,
+                        target_host_id='host_beta',
+                        target_institution_id='org_beta',
+                    ),
+                ],
+            )
+
+            from federation import FederationAuthority
+            from runtime_host import default_host_identity
+
+            sender_host = default_host_identity(
+                host_id='host_alpha',
+                federation_enabled=True,
+                peer_transport='https',
+            )
+            authority = FederationAuthority(sender_host, signing_secret='alpha-secret')
+            envelope = authority.issue(
+                'org_alpha',
+                'host_beta',
+                'org_beta',
+                'settlement_notice',
+                payload={
+                    'proposal_id': 'ppo_replay',
+                    'tx_ref': 'tx_replay',
+                    'settlement_adapter': 'internal_ledger',
+                    'proof_type': 'internal_ledger',
+                    'verification_state': 'accepted',
+                    'finality_state': 'final',
+                    'proof': {'entry': 1},
+                },
+                commitment_id=commitment_id,
+                warrant_id='',
+            )
+
+            with _run_workspace(beta), _run_workspace(alpha):
+                first_status, first_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/federation/receive',
+                    payload={
+                        'envelope': envelope,
+                        'payload': {
+                            'proposal_id': 'ppo_replay',
+                            'tx_ref': 'tx_replay',
+                            'settlement_adapter': 'internal_ledger',
+                            'proof_type': 'internal_ledger',
+                            'verification_state': 'accepted',
+                            'finality_state': 'final',
+                            'proof': {'entry': 1},
+                        },
+                    },
+                )
+                self.assertEqual(first_status, 200, first_body)
+                self.assertTrue(first_body['processing']['applied'])
+                self.assertEqual(first_body['processing']['inbox_entry']['state'], 'processed')
+
+                second_status, second_body = _http_json(
+                    'POST',
+                    beta['base_url'] + '/api/federation/receive',
+                    payload={
+                        'envelope': envelope,
+                        'payload': {
+                            'proposal_id': 'ppo_replay',
+                            'tx_ref': 'tx_replay',
+                            'settlement_adapter': 'internal_ledger',
+                            'proof_type': 'internal_ledger',
+                            'verification_state': 'accepted',
+                            'finality_state': 'final',
+                            'proof': {'entry': 1},
+                        },
+                    },
+                )
+                self.assertEqual(second_status, 409, second_body)
+                self.assertIn('nonce already consumed', second_body['error'])
+
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['total'], 1)
+                self.assertEqual(inbox_body['summary']['processed'], 1)
+
+            with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+                beta_commitments = json.load(f)
+            beta_record = beta_commitments['commitments'][commitment_id]
+            self.assertEqual(len(beta_record['settlement_refs']), 1)
+            self.assertEqual(beta_record['settlement_refs'][0]['receipt_id'], first_body['receipt']['receipt_id'])
+            self.assertEqual(beta_record['settlement_refs'][0]['envelope_id'], first_body['claims']['envelope_id'])
+
+            beta_events = _read_jsonl(beta['audit_log'])
+            applied = [
+                event for event in beta_events
+                if event.get('action') == 'federation_settlement_notice_applied'
+            ]
+            self.assertEqual(len(applied), 1)
+
     def test_workspace_federation_settlement_notice_keeps_inbox_received_when_case_blocked(self):
         try:
             port_alpha = _find_free_port()

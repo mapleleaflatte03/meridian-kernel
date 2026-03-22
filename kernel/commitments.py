@@ -108,6 +108,25 @@ def _canonical_state(record):
     return (record.get('status') or record.get('state') or '').strip()
 
 
+def _settlement_ref_keys(ref):
+    return [
+        (field, value)
+        for field in ('envelope_id', 'receipt_id', 'tx_hash', 'proposal_id', 'tx_ref')
+        for value in [str((ref or {}).get(field) or '').strip()]
+        if value
+    ]
+
+
+def _settlement_ref_matches(existing_ref, candidate_ref):
+    existing_keys = _settlement_ref_keys(existing_ref)
+    candidate_keys = _settlement_ref_keys(candidate_ref)
+    for candidate_field, candidate_value in candidate_keys:
+        for existing_field, existing_value in existing_keys:
+            if candidate_field == existing_field and candidate_value == existing_value:
+                return True
+    return False
+
+
 def _propose_commitment_record(org_id, target_host_id, target_institution_id, summary,
                                actor_id, *, commitment_id=None, terms_payload=None,
                                warrant_id='', note='', metadata=None):
@@ -372,16 +391,10 @@ def mark_commitment_settlement(commitment_id, *, org_id=None, settlement_ref=Non
     ref = dict(settlement_ref or {})
     ref.setdefault('recorded_at', _now())
     refs = list(record.get('settlement_refs', []))
-    key_proposal = (ref.get('proposal_id') or '').strip()
-    key_tx = (ref.get('tx_ref') or '').strip()
     replaced = False
-    if key_proposal or key_tx:
+    if _settlement_ref_keys(ref):
         for index, existing in enumerate(refs):
-            if key_proposal and (existing.get('proposal_id') or '').strip() == key_proposal:
-                refs[index] = ref
-                replaced = True
-                break
-            if key_tx and (existing.get('tx_ref') or '').strip() == key_tx:
+            if _settlement_ref_matches(existing, ref):
                 refs[index] = ref
                 replaced = True
                 break

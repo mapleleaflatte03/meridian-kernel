@@ -48,6 +48,7 @@ What is real today:
 - one tested kernel-side reference adapter library: `openclaw_compatible`
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 - one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
+- one receiver-side settlement application path: accepted `settlement_notice` envelopes can record a settlement ref, settle the linked commitment, and move the inbox entry from `received` to `processed`
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, and sender-side federation validation when `commitment_id` is supplied
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
@@ -145,6 +146,11 @@ trusted, and whether replay protection is file-backed or memory-only.
 `GET /api/federation/inbox` now exposes the receiver-side capsule-backed inbox
 for accepted federation messages, including per-message-type counts and the
 latest accepted entries for the bound institution.
+When the received message is a valid `settlement_notice` with a settlement-ready
+`commitment_id`, the receiver can now apply that notice directly to the local
+commitment record and mark the inbox entry as `processed`; if an active case
+blocks settlement, the transport still succeeds but the inbox entry remains
+`received`.
 That same boundary registry now declares whether a boundary requires warrants
 and which message types map to which warrant action classes.
 `/api/warrants` now exposes first-class warrant records and summary counts, and

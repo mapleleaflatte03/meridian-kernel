@@ -50,6 +50,9 @@ deliberately narrow:
 - one receiver-side federation inbox primitive now exists as a kernel reference:
   accepted envelopes persist into an institution-scoped capsule inbox instead
   of existing only as audit lines
+- one receiver-side settlement notice application path now exists as a kernel
+  reference: a valid `settlement_notice` can settle a linked commitment on the
+  receiver and transition the inbox entry from `received` to `processed`
 - one first-class warrant primitive now exists as a kernel reference:
   file-backed warrant records, warrant review state, and sender-side
   federation execution gating for `execution_request`
@@ -134,9 +137,11 @@ messages:
 - `GET /api/federation/inbox` exposes the current inbox state for the bound
   institution
 
-This is receiver-side persistence, not yet automatic execution. It ensures
-cross-host delivery can be inspected and linked before the deeper warrant-first
-execution program advances.
+This is no longer receiver-side persistence only. The current kernel reference
+can also apply a valid `settlement_notice` onto a local accepted commitment and
+append the resulting settlement reference, while still leaving blocked notices
+in `received` state when case review prevents settlement. It is not yet the
+full warrant-first cross-host execution program.
 
 ## Payout Proposal Primitive
 

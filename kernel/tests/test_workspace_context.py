@@ -44,13 +44,17 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_commitment_summary = self.workspace.commitment_summary
         self.orig_list_commitments = self.workspace.list_commitments
         self.orig_validate_commitment_for_delivery = self.workspace.validate_commitment_for_delivery
+        self.orig_validate_commitment_for_settlement = self.workspace.validate_commitment_for_settlement
         self.orig_record_delivery_ref = self.workspace.record_delivery_ref
+        self.orig_record_settlement_ref = self.workspace.record_settlement_ref
+        self.orig_settle_commitment = self.workspace.settle_commitment
         self.orig_case_summary = self.workspace.case_summary
         self.orig_list_cases = self.workspace.list_cases
         self.orig_blocking_commitment_ids = self.workspace.blocking_commitment_ids
         self.orig_blocked_peer_host_ids = self.workspace.blocked_peer_host_ids
         self.orig_blocking_commitment_case = self.workspace.blocking_commitment_case
         self.orig_blocking_peer_case = self.workspace.blocking_peer_case
+        self.orig_maybe_block_commitment_settlement = self.workspace._maybe_block_commitment_settlement
         self.orig_set_peer_trust_state = self.workspace.set_peer_trust_state
         self.orig_ensure_case_for_delivery_failure = self.workspace.ensure_case_for_delivery_failure
         self.orig_summarize_inbox_entries = self.workspace.summarize_inbox_entries
@@ -75,13 +79,17 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.commitment_summary = self.orig_commitment_summary
         self.workspace.list_commitments = self.orig_list_commitments
         self.workspace.validate_commitment_for_delivery = self.orig_validate_commitment_for_delivery
+        self.workspace.validate_commitment_for_settlement = self.orig_validate_commitment_for_settlement
         self.workspace.record_delivery_ref = self.orig_record_delivery_ref
+        self.workspace.record_settlement_ref = self.orig_record_settlement_ref
+        self.workspace.settle_commitment = self.orig_settle_commitment
         self.workspace.case_summary = self.orig_case_summary
         self.workspace.list_cases = self.orig_list_cases
         self.workspace.blocking_commitment_ids = self.orig_blocking_commitment_ids
         self.workspace.blocked_peer_host_ids = self.orig_blocked_peer_host_ids
         self.workspace.blocking_commitment_case = self.orig_blocking_commitment_case
         self.workspace.blocking_peer_case = self.orig_blocking_peer_case
+        self.workspace._maybe_block_commitment_settlement = self.orig_maybe_block_commitment_settlement
         self.workspace.set_peer_trust_state = self.orig_set_peer_trust_state
         self.workspace.ensure_case_for_delivery_failure = self.orig_ensure_case_for_delivery_failure
         self.workspace.summarize_inbox_entries = self.orig_summarize_inbox_entries
@@ -539,6 +547,124 @@ class WorkspaceContextTests(unittest.TestCase):
             snapshot['inbox_summary']['message_type_counts']['execution_request'],
             1,
         )
+
+    def test_process_received_settlement_notice_marks_inbox_processed(self):
+        from federation import FederationEnvelopeClaims
+
+        calls = {}
+        self.workspace.validate_commitment_for_settlement = (
+            lambda commitment_id, **kwargs: {'commitment_id': commitment_id, 'state': 'accepted'}
+        )
+        self.workspace._maybe_block_commitment_settlement = lambda *args, **kwargs: (None, None)
+        self.workspace.record_settlement_ref = (
+            lambda commitment_id, settlement_ref, org_id=None: calls.setdefault(
+                'settlement_ref',
+                (commitment_id, settlement_ref, org_id),
+            )
+        )
+        self.workspace.settle_commitment = (
+            lambda commitment_id, by, org_id=None, note='': {
+                'commitment_id': commitment_id,
+                'state': 'settled',
+                'settled_by': by,
+            }
+        )
+        self.workspace.log_event = lambda *args, **kwargs: calls.setdefault('audit', []).append((args, kwargs))
+
+        original_inbox_entry = self.workspace._federation_inbox_entry
+        self.workspace._federation_inbox_entry = lambda *args, **kwargs: {
+            'envelope_id': 'fed_settle',
+            'state': kwargs.get('state', 'received'),
+            'processed_at': '2026-03-22T00:00:00Z' if kwargs.get('state') == 'processed' else '',
+        }
+        try:
+            claims = FederationEnvelopeClaims(
+                envelope_id='fed_settle',
+                source_host_id='host_alpha',
+                source_institution_id='org_alpha',
+                target_host_id='host_beta',
+                target_institution_id='org_a',
+                actor_type='user',
+                actor_id='user_alpha',
+                session_id='ses_alpha',
+                boundary_name='federation_gateway',
+                identity_model='signed_host_service',
+                message_type='settlement_notice',
+                payload_hash='hash_demo',
+                warrant_id='war_demo',
+                commitment_id='cmt_demo',
+            )
+            receipt = {
+                'receipt_id': 'fedrcpt_demo',
+                'accepted_at': '2026-03-22T00:00:00Z',
+            }
+            processing = self.workspace._process_received_federation_message(
+                'org_a',
+                claims,
+                receipt,
+                payload={
+                    'proposal_id': 'pay_demo',
+                    'tx_ref': 'tx_demo',
+                    'settlement_adapter': 'internal_ledger',
+                    'proof_type': 'internal_ledger',
+                    'verification_state': 'accepted',
+                    'finality_state': 'final',
+                    'proof': {'row': 1},
+                },
+            )
+        finally:
+            self.workspace._federation_inbox_entry = original_inbox_entry
+
+        self.assertTrue(processing['applied'])
+        self.assertEqual(processing['reason'], 'settlement_notice_applied')
+        self.assertEqual(processing['state'], 'processed')
+        self.assertEqual(processing['commitment']['state'], 'settled')
+        self.assertEqual(processing['settlement_ref']['tx_ref'], 'tx_demo')
+        self.assertEqual(processing['settlement_ref']['proposal_id'], 'pay_demo')
+        self.assertEqual(processing['inbox_entry']['state'], 'processed')
+        self.assertEqual(calls['settlement_ref'][0], 'cmt_demo')
+        self.assertEqual(calls['settlement_ref'][2], 'org_a')
+
+    def test_process_received_settlement_notice_respects_case_block(self):
+        from federation import FederationEnvelopeClaims
+
+        self.workspace.validate_commitment_for_settlement = (
+            lambda commitment_id, **kwargs: {'commitment_id': commitment_id, 'state': 'accepted'}
+        )
+        self.workspace._maybe_block_commitment_settlement = lambda *args, **kwargs: (
+            {'case_id': 'case_demo', 'status': 'open', 'linked_commitment_id': 'cmt_demo'},
+            {'applied': True, 'warrant_id': 'war_demo', 'court_review_state': 'stayed'},
+        )
+        self.workspace.record_settlement_ref = lambda *args, **kwargs: self.fail('settlement ref should not be recorded')
+        self.workspace.settle_commitment = lambda *args, **kwargs: self.fail('commitment should not settle')
+        self.workspace.log_event = lambda *args, **kwargs: None
+
+        claims = FederationEnvelopeClaims(
+            envelope_id='fed_settle_blocked',
+            source_host_id='host_alpha',
+            source_institution_id='org_alpha',
+            target_host_id='host_beta',
+            target_institution_id='org_a',
+            actor_type='service',
+            actor_id='peer:host_alpha',
+            session_id='',
+            boundary_name='federation_gateway',
+            identity_model='signed_host_service',
+            message_type='settlement_notice',
+            payload_hash='hash_demo',
+            warrant_id='war_demo',
+            commitment_id='cmt_demo',
+        )
+        processing = self.workspace._process_received_federation_message(
+            'org_a',
+            claims,
+            {'receipt_id': 'fedrcpt_demo', 'accepted_at': '2026-03-22T00:00:00Z'},
+            payload={'tx_ref': 'tx_demo'},
+        )
+        self.assertFalse(processing['applied'])
+        self.assertEqual(processing['reason'], 'case_blocked')
+        self.assertEqual(processing['state'], 'received')
+        self.assertEqual(processing['case']['case_id'], 'case_demo')
 
     def test_mutate_federation_peer_upserts_registry(self):
         from runtime_host import default_host_identity

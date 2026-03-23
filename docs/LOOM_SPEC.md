@@ -16,10 +16,12 @@ sandboxing is used for capability modules where isolation matters.
 
 This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
-That scaffold now includes experimental preflight surfaces for
-`agent_identity`, `action_envelope`, `cost_attribution`, `approval_hook`, and
-`budget_gate`, but it does **not** provide governed execution or any proven
-contract hooks yet.
+That scaffold now includes experimental preflight surfaces for all seven
+contract surfaces. Two remain preview-only surfaces today:
+- `audit_emission` writes a local audit preview file, not the kernel's canonical audit log
+- `sanction_controls` records a restriction snapshot, not native runtime enforcement
+
+It still does **not** provide governed execution or any proven contract hooks.
 
 ---
 
@@ -140,7 +142,7 @@ The supervisor never assumes all execution logic is Rust.
 ### Phase 0 — Spec + Scaffold (current)
 - This document
 - Registry entry with 0/7 compliance, status `"planned"`
-- Experimental public scaffold for CLI/setup rehearsal plus 5-hook preflight capture
+- Experimental public scaffold for CLI/setup rehearsal plus 7-surface preflight coverage
 - No governed execution runtime
 
 ### Phase 1 — Shadow Mode

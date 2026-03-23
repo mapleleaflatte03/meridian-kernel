@@ -26,8 +26,8 @@ run.
   - GitHub Actions file exists in the public scaffold repository
 - [x] README with honest status: experimental scaffold, not a functional runtime
   - No aspirational feature lists; only what exists and what does not
-- [x] Experimental preflight path exists for 5 governance surfaces
-  - `agent_identity`, `action_envelope`, `cost_attribution`, `approval_hook`, `budget_gate`
+- [x] Experimental preflight path exists for all 7 governance surfaces
+  - `agent_identity`, `action_envelope`, `cost_attribution`, `approval_hook`, `audit_emission`, `sanction_controls`, `budget_gate`
   - still 0/7 proven in the runtime registry
 
 ---

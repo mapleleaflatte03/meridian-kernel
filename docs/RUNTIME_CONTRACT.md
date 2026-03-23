@@ -158,7 +158,7 @@ adapter can translate them to `log_event()` calls asynchronously.
 active sanctions.
 
 **What Meridian does with it:** Returns list of active restrictions
-(e.g., `['no_lead', 'zero_authority', 'remediation_only']`).
+(e.g., `['lead', 'assign', 'execute']`).
 
 **Implementation:**
 
@@ -166,17 +166,16 @@ active sanctions.
 from kernel.court import get_restrictions
 
 restrictions = get_restrictions(agent_id)
-if 'remediation_only' in restrictions:
-    # Block agent from all non-remediation work
-    raise RuntimeError(f'Agent {agent_id} is under remediation-only sanction')
-if 'zero_authority' in restrictions:
-    # Allow read-only work, block all privileged actions
+if 'execute' in restrictions:
+    raise RuntimeError(f'Agent {agent_id} is restricted from execute')
+if 'lead' in restrictions:
+    # Downgrade the session so the agent cannot take lead-only actions
     ...
 ```
 
-**Minimum implementation:** Check for `remediation_only` and halt the session
-if present. Full implementation maps each restriction type to a runtime
-capability constraint.
+**Minimum implementation:** Check for `execute` in the returned restriction set
+and halt privileged work if present. Full implementation maps each returned
+restriction to a runtime capability constraint.
 
 ---
 
@@ -249,8 +248,8 @@ class MeridianAdapter:
         """Call before each agent session starts."""
         from court import get_restrictions
         restrictions = get_restrictions(self.agent_id)
-        if 'remediation_only' in restrictions:
-            raise RuntimeError(f'Agent {self.agent_id} is under remediation-only sanction')
+        if 'execute' in restrictions:
+            raise RuntimeError(f'Agent {self.agent_id} is restricted from execute')
         return restrictions
 
     def pre_action_check(self, action_type, resource, estimated_cost_usd):

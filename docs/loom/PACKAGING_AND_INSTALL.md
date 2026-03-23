@@ -28,9 +28,9 @@ Phase 0–2 when the audience is the Meridian team and early contributors.
 `https://github.com/mapleleaflatte03/meridian-loom` and builds in the founder
 workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
 governed runtime. The current scaffold also exposes experimental preflight
-surfaces for `agent_identity`, `action_envelope`, `cost_attribution`,
-`approval_hook`, and `budget_gate`, all of which remain unproven against the
-runtime contract registry.
+surfaces for all seven contract areas. `audit_emission` is still a local audit
+preview and `sanction_controls` is still a restriction snapshot, so all seven
+remain unproven against the runtime contract registry.
 
 ### 2. Pre-built binary (Phase 3+)
 

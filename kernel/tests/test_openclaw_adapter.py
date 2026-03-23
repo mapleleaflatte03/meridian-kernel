@@ -74,11 +74,11 @@ class OpenClawAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             adapter.validate_action_envelope({'agent_id': 'atlas', 'action_type': 'research', 'resource': ''})
 
-    def test_pre_session_check_blocks_remediation_only(self):
-        adapter.get_restrictions = lambda agent_id, org_id=None: ['remediation_only']
+    def test_pre_session_check_blocks_execute_restriction(self):
+        adapter.get_restrictions = lambda agent_id, org_id=None: ['execute']
         result = adapter.pre_session_check('org_demo', 'atlas')
         self.assertFalse(result['allowed'])
-        self.assertIn('remediation-only', result['reason'])
+        self.assertIn('restricted from execute', result['reason'])
 
     def test_pre_action_check_blocks_authority_failure(self):
         adapter.get_restrictions = lambda agent_id, org_id=None: []

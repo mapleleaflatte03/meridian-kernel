@@ -83,10 +83,10 @@ def build_action_envelope(agent_id, action_type, resource, estimated_cost_usd=0.
 
 def pre_session_check(org_id, agent_id):
     restrictions = list(get_restrictions(agent_id, org_id=org_id) or [])
-    if 'remediation_only' in restrictions:
+    if 'execute' in restrictions or 'remediation_only' in restrictions:
         return {
             'allowed': False,
-            'reason': f'Agent {agent_id} is under remediation-only sanction',
+            'reason': f'Agent {agent_id} is restricted from execute',
             'restrictions': restrictions,
         }
     return {

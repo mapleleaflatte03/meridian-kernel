@@ -378,7 +378,7 @@ Currently registered runtimes:
 |---------|------|----------------|
 | `local_kernel` | local | Compliant (7/7) |
 | `openclaw_compatible` | hosted | Reference adapter (7/7 via tested kernel-side library) |
-| `meridian_loom` | hosted | Planned (0/7, spec + public experimental scaffold with 5-hook preflight surfaces — [LOOM_SPEC](docs/LOOM_SPEC.md)) |
+| `meridian_loom` | hosted | Planned (0/7, spec + public experimental scaffold with 7-surface preflight rehearsal — [LOOM_SPEC](docs/LOOM_SPEC.md)) |
 | `mcp_generic` | mcp_app | Planned (2/7, no adapter yet) |
 | `a2a_generic` | a2a_agent | Planned (1/7, no adapter yet) |
 | `openfang_compatible` | hosted | Planned (0/7, no adapter yet) |

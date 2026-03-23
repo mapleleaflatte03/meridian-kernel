@@ -1,4 +1,4 @@
-# Meridian Loom — CLI and Operating Modes
+# Meridian Loom // CLI and Operating Modes
 
 **Status:** Design document plus public experimental scaffold
 
@@ -6,7 +6,8 @@
 
 The public `loom` binary already exists as an experimental scaffold. It is not
 yet a runtime supervisor, but it does provide a real command surface for setup,
-inspection, preflight capture, decision capture, and shadow comparison.
+inspection, shadow rehearsal, fail-closed runtime rehearsal, runtime-side audit
+artifacts, and parity reporting.
 
 ### Current scaffold commands
 
@@ -20,11 +21,13 @@ loom contract show     Show current registry-declared compliance state
 loom agent resolve     Resolve governed agent identity against the kernel registry
 loom envelope build    Construct a normalized action envelope
 loom capsule inspect   Inspect the local capsule boundary
+loom action execute    Rehearse fail-closed execution and write runtime/parity artifacts
 loom shadow preflight  Capture 7-surface experimental preflight events
 loom shadow decide     Materialize the current allow/deny gate outcome
 loom shadow enforce    Return fail-closed exit codes from the same gate outcome
 loom shadow compare    Diff reference-adapter events vs Loom shadow events
 loom shadow report     Show the latest preflight/comparison report
+loom parity report     Show the runtime-side parity stream and latest parity report
 ```
 
 `loom init` accepts `--mode shadow|standalone|embedded` and `--kernel-path <path>`.
@@ -66,14 +69,19 @@ identical results to the primary runtime.
   identity snapshot with the read-only reference gate result
 - `loom shadow enforce` uses the same effective decision surface but returns `0`
   for allow and `2` for deny so shell automation can fail closed
+- `loom action execute` uses that same effective decision surface to materialize
+  a runtime execution receipt, a runtime-side audit artifact, and a parity
+  stream
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report
+- `loom parity report` surfaces the runtime-side parity report and, when
+  available, a live OpenClaw proof snapshot captured from the founder host
 
 **What it does not do yet:**
 - It does not subscribe to live production traffic
 - It does not shadow the real OpenClaw runtime process
-- It does not prove runtime parity
+- It does not prove per-action live runtime parity
 
 **What Phase 1 will eventually prove:** Governance-check parity without production risk.
 
@@ -137,17 +145,19 @@ For a user who wants to evaluate Loom without understanding the full Meridian
 ecosystem:
 
 ```bash
-# 1. Install Loom
-cargo install meridian-loom   # or build from source
+# 1. Build Loom from source
+cargo build
 
-# 2. Initialize with embedded governance
-loom init --mode embedded
+# 2. Initialize with embedded governance + kernel path
+./target/debug/loom init --mode embedded --kernel-path /path/to/meridian-kernel
 
-# 3. Start
-loom start
+# 3. Inspect the scaffold honestly
+./target/debug/loom doctor --format human
+./target/debug/loom contract show
+./target/debug/loom action execute --agent-id <id> --action-type research --resource web_search --estimated-cost-usd 0.05 --format human
 
-# 4. Check health
-loom health
+# 4. Inspect parity
+./target/debug/loom parity report
 ```
 
 This creates a `loom.toml` with `mode = "embedded"` and initializes the local
@@ -157,14 +167,16 @@ state boundary. In the current scaffold, the user gets:
 - registry-backed contract inspection
 - agent identity resolution against the kernel registry
 - action envelope construction
-- experimental shadow preflight, decision capture, and comparison surfaces
+- experimental shadow preflight, decision capture, comparison, fail-closed
+  runtime rehearsal, runtime-side audit artifacts, and parity reporting
 
 They do **not** get:
 - a running runtime supervisor
 - worker orchestration
 - multi-institution support
-- native sanction enforcement (only an experimental local preview + fail-closed shell surface)
+- native sanction enforcement in a live worker runtime
 - the kernel's canonical audit log
+- per-action live OpenClaw parity
 
 Those remain future runtime work, not current scaffold truth.
 

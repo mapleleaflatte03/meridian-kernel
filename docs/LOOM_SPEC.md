@@ -1,4 +1,4 @@
-# Meridian Loom — Runtime Specification
+# Meridian Loom // Runtime Specification
 
 **Status:** PLANNED (0/7 contract compliance)
 **Core language:** Rust (supervisor / runtime core)
@@ -16,13 +16,20 @@ sandboxing is used for capability modules where isolation matters.
 
 This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
-That scaffold now includes experimental preflight surfaces for all seven
-contract surfaces. Two remain preview-only surfaces today:
-- `audit_emission` uses the kernel audit serializer to write a local preview
-  file, not the kernel's canonical audit log
-- `sanction_controls`, `approval_hook`, and `budget_gate` now read the
-  kernel reference adapter through a read-only preflight path, but still do not
-  provide native Loom enforcement or governed execution
+That scaffold now includes rehearsal surfaces for all seven contract areas.
+Three important gaps have moved forward, but not to full runtime proof:
+- `audit_emission` now writes a runtime-side artifact under
+  `.loom/audit/runtime_events.jsonl`, using the kernel serializer when
+  available and a local fallback otherwise. This is still not the kernel's
+  canonical audit log
+- `sanction_controls`, `approval_hook`, and `budget_gate` are still sourced
+  from read-only kernel reference gates, but `loom action execute` now enforces
+  the current effective allow/deny outcome fail-closed instead of stopping at a
+  shell-only preflight path
+- the parity surface now emits `.loom/parity/stream.jsonl` and
+  `.loom/parity/latest.json`, and can capture a live OpenClaw proof snapshot on
+  the founder host. This is stronger than the old file-only compare, but it is
+  still not per-action live runtime parity
 - `loom shadow decide` / `loom shadow enforce` now union that read-only gate
   result with a local sanction preview derived from the resolved identity
   snapshot. If the snapshot contains `execute` or `remediation_only`, the
@@ -33,6 +40,9 @@ contract surfaces. Two remain preview-only surfaces today:
 - `loom shadow enforce` now returns fail-closed exit codes from that same
   decision surface, but it is still an experimental operator aid, not runtime
   enforcement
+- `loom action execute` now materializes a runtime execution receipt, runtime
+  audit artifact, and parity stream for the same effective decision surface, but
+  it is still an experimental rehearsal command, not a governed worker runtime
 
 It still does **not** provide governed execution or any proven contract hooks.
 
@@ -155,13 +165,17 @@ The supervisor never assumes all execution logic is Rust.
 ### Phase 0 — Spec + Scaffold (current)
 - This document
 - Registry entry with 0/7 compliance, status `"planned"`
-- Experimental public scaffold for CLI/setup rehearsal plus 7-surface preflight coverage
+- Experimental public scaffold for CLI/setup rehearsal plus 7-surface rehearsal coverage
 - Experimental decision artifact (`loom shadow decide`) for operator review of the
   current effective gate outcome
 - Experimental fail-closed command (`loom shadow enforce`) for shell automation
+- Experimental fail-closed runtime rehearsal command (`loom action execute`)
+- Runtime-side audit artifact under `.loom/audit/runtime_events.jsonl`
+- Parity stream and latest parity report under `.loom/parity/`
+- Optional founder-host OpenClaw live proof snapshot captured into the parity surface
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces
 - Local sanction preview derived from resolved identity restrictions, still
-  preflight-only and not native runtime enforcement
+  rehearsal-only and not native runtime enforcement
 - No governed execution runtime
 
 ### Phase 1 — Shadow Mode

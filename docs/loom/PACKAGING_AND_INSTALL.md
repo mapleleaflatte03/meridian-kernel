@@ -1,4 +1,4 @@
-# Meridian Loom — Packaging and Installation Strategy
+# Meridian Loom // Packaging and Installation Strategy
 
 **Status:** Design document plus public experimental scaffold
 
@@ -27,17 +27,12 @@ Phase 0–2 when the audience is the Meridian team and early contributors.
 **Current truth:** a public experimental scaffold already exists at
 `https://github.com/mapleleaflatte03/meridian-loom` and builds in the founder
 workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
-governed runtime. The current scaffold also exposes experimental preflight
-surfaces for all seven contract areas. `audit_emission` now uses the kernel
-audit serializer to write a local preview file. `sanction_controls`,
-`approval_hook`, and `budget_gate` now read
-kernel reference-adapter decisions through a read-only preflight path.
-`loom shadow decide` now materializes an effective decision surface for
-operators. That surface unions the read-only reference gate result with a local
-sanction preview derived from the resolved identity snapshot. `loom shadow
-enforce` now returns fail-closed exit codes from that same decision surface for
-shell automation. All seven still remain unproven against the runtime contract
-registry.
+governed runtime. The current scaffold now exposes rehearsal surfaces for all
+seven contract areas. `loom action execute` materializes a fail-closed runtime
+receipt, a runtime-side audit artifact, and a parity stream. The scaffold can
+also capture a live OpenClaw proof snapshot on the founder host. These are
+runtime rehearsal surfaces, not proof of a governed worker runtime. All seven
+hooks still remain unproven in the runtime registry.
 
 ### 2. Pre-built binary (Phase 3+)
 
@@ -122,8 +117,8 @@ git clone https://github.com/mapleleaflatte03/meridian-kernel.git
 git clone https://github.com/mapleleaflatte03/meridian-loom.git
 cd meridian-loom && cargo build --release
 
-# Point Loom at kernel
-loom config set kernel_path /path/to/meridian-kernel
+# Point Loom at kernel during init
+./target/release/loom init --mode embedded --kernel-path /path/to/meridian-kernel --root /tmp/loom-rehearsal
 ```
 
 In **embedded mode** (see `CLI_AND_MODES.md`), Loom is expected to ship a

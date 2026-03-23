@@ -1,4 +1,4 @@
-# Loom Shadow Mode Prerequisites
+# Meridian Loom // Shadow Mode Prerequisites
 
 ## Purpose
 
@@ -31,13 +31,20 @@ run.
   - still 0/7 proven in the runtime registry
 - [x] Read-only reference gate surface exists for sanction/approval/budget
   - Loom can compare shadow events against kernel reference-adapter decisions
-  - still file-level comparison only, not runtime parity
+  - Loom can now also materialize a runtime-side parity stream and latest report
+  - per-action live OpenClaw parity still does not exist
 - [x] Experimental decision artifact exists
   - `loom shadow decide` writes the current allow/deny outcome to `.loom/shadow/decision.json`
   - still adapter-backed preflight only, not native runtime enforcement
 - [x] Experimental fail-closed shell surface exists
   - `loom shadow enforce` returns `0` allow / `2` deny from the same gate result
   - still adapter-backed preflight only, not native runtime enforcement
+- [x] Experimental fail-closed runtime rehearsal surface exists
+  - `loom action execute` returns the same fail-closed decision and writes
+    `.loom/runtime/last_execution.json`
+  - runtime-side audit artifacts now land in `.loom/audit/runtime_events.jsonl`
+  - parity artifacts now land in `.loom/parity/`
+  - still rehearsal-only, not a governed worker runtime
 - [x] Experimental local sanction preview exists
   - derived from the resolved identity snapshot, not a live Loom runtime
   - `execute` / `remediation_only` can deny locally even if the read-only reference gate allows
@@ -63,7 +70,8 @@ run.
   - must include: input hash for reproducibility
 - [ ] Shadow divergence comparison against a primary runtime
   - current scaffold can compare Loom shadow events against kernel reference-adapter events
-  - future Phase 1 still requires pairing Loom decisions with real OpenClaw runtime decisions
+  - current scaffold can capture a live OpenClaw proof snapshot into the parity surface
+  - future Phase 1 still requires pairing Loom decisions with real per-action OpenClaw runtime decisions
 
 ---
 
@@ -101,6 +109,9 @@ run.
 - [ ] `loom shadow report` compares governance events
   - reads shadow event log and primary runtime log
   - reports: total events, matches, divergences, divergence percentage
+- [x] `loom parity report` surfaces runtime-side parity artifacts
+  - reads `.loom/parity/latest.json` and `.loom/parity/stream.jsonl`
+  - includes live OpenClaw proof snapshot when available on the founder host
 - [ ] 3+ consecutive shadow runs with zero governance divergence
   - each run processes at least 10 governance events
   - zero divergence across all three runs

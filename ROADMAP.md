@@ -1,3 +1,32 @@
+<p align="center">
+  <img src="docs/assets/meridian_lockup_flat.svg" alt="Meridian Constitutional Kernel" width="720">
+</p>
+
+<p align="center">
+  Ordered programs for the kernel, public proof, Loom scaffold, and future capsule/operator work.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/current-kernel%20and%20proof-0c1117?style=flat-square" alt="Kernel and proof current">
+  <img src="https://img.shields.io/badge/loom-public%20scaffold-0f766e?style=flat-square" alt="Loom public scaffold">
+  <img src="https://img.shields.io/badge/capsule-formalized%20lane-1f6feb?style=flat-square" alt="Capsule lane">
+  <img src="https://img.shields.io/badge/operator-terminal--first-475569?style=flat-square" alt="Operator terminal first">
+</p>
+
+<p align="center">
+  <a href="README.md">README</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="docs/CAPSULE_SPEC.md">Capsule Spec</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/meridian_roadmap_panels.svg" alt="Meridian roadmap overview" width="960">
+</p>
+
+> The roadmap is split on purpose: current proof, near-term Loom rehearsal, and future runtime/capsule/operator programs should never be collapsed into one false “done” story.
+
 # Roadmap
 
 ## v0.1 — Core Kernel (Current)

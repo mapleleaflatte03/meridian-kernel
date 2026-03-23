@@ -1,6 +1,30 @@
 <p align="center">
-  <img src="assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+  <img src="assets/meridian_lockup_flat.svg" alt="Meridian" width="720">
 </p>
+
+<p align="center">
+  Terminal-first doctrine for kernel proof surfaces and the public Loom scaffold.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/surface-terminal--first-0c1117?style=flat-square" alt="Terminal first">
+  <img src="https://img.shields.io/badge/kernel-thin%20CLI%20future-1f6feb?style=flat-square" alt="Kernel CLI future">
+  <img src="https://img.shields.io/badge/loom-human%20grammar%20live-0f766e?style=flat-square" alt="Loom grammar live">
+  <img src="https://img.shields.io/badge/proof-claims%20bound%20to%20evidence-475569?style=flat-square" alt="Claims bound to evidence">
+</p>
+
+<p align="center">
+  <a href="../README.md">Kernel README</a> ·
+  <a href="LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="loom/CLI_AND_MODES.md">Loom CLI</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a>
+</p>
+
+<p align="center">
+  <img src="assets/meridian_operator_panels.svg" alt="Meridian operator surface overview" width="960">
+</p>
+
+> Operator language is part of the product, not documentation garnish. The terminal has to carry the same truth boundary and same authority grammar as the web and proof surfaces.
 
 # Meridian Operator Language
 

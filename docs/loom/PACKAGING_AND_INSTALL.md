@@ -1,5 +1,22 @@
 <p align="center">
-  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="720">
+</p>
+
+<p align="center">
+  Truthful install and distribution story for a public scaffold that is inspectable before it is mature.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/install-source%20first-0c1117?style=flat-square" alt="Source first">
+  <img src="https://img.shields.io/badge/repo-public%20scaffold-0f766e?style=flat-square" alt="Public scaffold">
+  <img src="https://img.shields.io/badge/runtime-not%20production-8b0000?style=flat-square" alt="Not production">
+</p>
+
+<p align="center">
+  <a href="../LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="CLI_AND_MODES.md">CLI and Modes</a> ·
+  <a href="SHADOW_PREREQUISITES.md">Shadow Prerequisites</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a>
 </p>
 
 # Meridian Loom // Packaging and Installation Strategy

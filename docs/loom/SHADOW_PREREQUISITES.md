@@ -1,5 +1,22 @@
 <p align="center">
-  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="720">
+</p>
+
+<p align="center">
+  The gates Loom must satisfy before shadow mode can claim more than rehearsal and report files.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/shadow-currently%20rehearsal-0c1117?style=flat-square" alt="Currently rehearsal">
+  <img src="https://img.shields.io/badge/parity-not%20replacement%20proof-8b0000?style=flat-square" alt="Not replacement proof">
+  <img src="https://img.shields.io/badge/operator-surface%20real-0f766e?style=flat-square" alt="Operator surface real">
+</p>
+
+<p align="center">
+  <a href="../LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="CLI_AND_MODES.md">CLI and Modes</a> ·
+  <a href="PACKAGING_AND_INSTALL.md">Packaging</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a>
 </p>
 
 # Meridian Loom // Shadow Mode Prerequisites

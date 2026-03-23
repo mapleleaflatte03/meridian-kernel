@@ -1,5 +1,22 @@
 <p align="center">
-  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="720">
+</p>
+
+<p align="center">
+  Current scaffold commands, operating modes, and the honest “user only needs Loom” path.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/cli-public%20scaffold-0c1117?style=flat-square" alt="CLI public scaffold">
+  <img src="https://img.shields.io/badge/modes-embedded%20shadow%20standalone-1f6feb?style=flat-square" alt="Embedded, shadow, standalone">
+  <img src="https://img.shields.io/badge/operator-human%20grammar%20implemented-0f766e?style=flat-square" alt="Human grammar implemented">
+</p>
+
+<p align="center">
+  <a href="../LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="PACKAGING_AND_INSTALL.md">Packaging</a> ·
+  <a href="SHADOW_PREREQUISITES.md">Shadow Prerequisites</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a>
 </p>
 
 # Meridian Loom // CLI and Operating Modes

@@ -1,3 +1,32 @@
+<p align="center">
+  <img src="docs/assets/meridian_lockup_flat.svg" alt="Meridian Constitutional Kernel" width="720">
+</p>
+
+<p align="center">
+  Runtime-neutral design doctrine for the governance layer above execution.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/design-runtime--neutral-0c1117?style=flat-square" alt="Runtime neutral">
+  <img src="https://img.shields.io/badge/proof-boundary%20still%20narrow-8b0000?style=flat-square" alt="Proof boundary narrow">
+  <img src="https://img.shields.io/badge/loom-public%20scaffold-0f766e?style=flat-square" alt="Loom public scaffold">
+  <img src="https://img.shields.io/badge/kernel-governance%20above%20runtimes-1f6feb?style=flat-square" alt="Governance above runtimes">
+</p>
+
+<p align="center">
+  <a href="README.md">README</a> ·
+  <a href="docs/PROOF_MATRIX.md">Proof Matrix</a> ·
+  <a href="docs/RUNTIME_CONTRACT.md">Runtime Contract</a> ·
+  <a href="docs/LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="docs/OPERATOR_LANGUAGE.md">Operator Language</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/meridian_kernel_surfaces.svg" alt="Meridian Kernel architecture surfaces" width="960">
+</p>
+
+> Architecture in Meridian is not “the runtime.” It is the governance boundary, the proof boundary, and the separation that lets runtimes change without corrupting constitutional state.
+
 # Architecture
 
 ## Design Thesis

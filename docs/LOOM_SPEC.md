@@ -1,5 +1,23 @@
 <p align="center">
-  <img src="assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+  <img src="assets/meridian_lockup_flat.svg" alt="Meridian" width="720">
+</p>
+
+<p align="center">
+  Public runtime thesis for Meridian-native execution, with strict separation between scaffold truth and future runtime claims.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/phase-0%20public%20scaffold-0c1117?style=flat-square" alt="Phase 0 public scaffold">
+  <img src="https://img.shields.io/badge/proven-hooks-0%2F7-8b0000?style=flat-square" alt="0 of 7 proven hooks">
+  <img src="https://img.shields.io/badge/runtime-live%20host%20still%20OpenClaw-1f6feb?style=flat-square" alt="Live host still OpenClaw">
+  <img src="https://img.shields.io/badge/focus-product%20shape%20and%20operator%20shape-0f766e?style=flat-square" alt="Product and operator shape">
+</p>
+
+<p align="center">
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a> ·
+  <a href="loom/CLI_AND_MODES.md">CLI and Modes</a> ·
+  <a href="loom/PACKAGING_AND_INSTALL.md">Packaging</a> ·
+  <a href="loom/SHADOW_PREREQUISITES.md">Shadow Prerequisites</a>
 </p>
 
 # Meridian Loom // Runtime Specification

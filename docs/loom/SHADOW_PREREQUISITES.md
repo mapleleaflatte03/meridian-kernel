@@ -32,6 +32,9 @@ run.
 - [x] Read-only reference gate surface exists for sanction/approval/budget
   - Loom can compare shadow events against kernel reference-adapter decisions
   - still file-level comparison only, not runtime parity
+- [x] Experimental decision artifact exists
+  - `loom shadow decide` writes the current allow/deny outcome to `.loom/shadow/decision.json`
+  - still adapter-backed preflight only, not native runtime enforcement
 
 ---
 

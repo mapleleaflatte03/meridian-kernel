@@ -23,6 +23,9 @@ contract surfaces. Two remain preview-only surfaces today:
 - `sanction_controls`, `approval_hook`, and `budget_gate` now read the
   kernel reference adapter through a read-only preflight path, but still do not
   provide native Loom enforcement or governed execution
+- `loom shadow decide` now writes a standalone decision artifact using the same
+  reference gate result, but that is still an experimental preflight surface,
+  not governed runtime enforcement
 
 It still does **not** provide governed execution or any proven contract hooks.
 
@@ -146,6 +149,8 @@ The supervisor never assumes all execution logic is Rust.
 - This document
 - Registry entry with 0/7 compliance, status `"planned"`
 - Experimental public scaffold for CLI/setup rehearsal plus 7-surface preflight coverage
+- Experimental decision artifact (`loom shadow decide`) for operator review of the
+  current gate outcome
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces
 - No governed execution runtime
 

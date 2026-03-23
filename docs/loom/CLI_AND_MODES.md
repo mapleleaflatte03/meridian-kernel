@@ -1,55 +1,46 @@
 # Meridian Loom — CLI and Operating Modes
 
-**Status:** Design document (no implementation yet)
+**Status:** Design document plus public experimental scaffold
 
 ## CLI Surface
 
-The Loom binary exposes a minimal CLI. Commands are deliberately few —
-Loom is a runtime, not a Swiss Army knife.
+The public `loom` binary already exists as an experimental scaffold. It is not
+yet a runtime supervisor, but it does provide a real command surface for setup,
+inspection, preflight capture, decision capture, and shadow comparison.
 
-### Core commands
+### Current scaffold commands
 
 ```
 loom init              Create loom.toml and initialize local state
-loom start             Start the runtime (reads loom.toml)
-loom stop              Graceful shutdown
-loom health            Structured health check (JSON)
+loom doctor            Validate config, local state, kernel path, and registry access
+loom health            Structured health check
 loom status            Human-readable status summary
 loom config show       Print resolved configuration
-loom config set <k> <v>  Set a config value in loom.toml
+loom contract show     Show current registry-declared compliance state
+loom agent resolve     Resolve governed agent identity against the kernel registry
+loom envelope build    Construct a normalized action envelope
+loom capsule inspect   Inspect the local capsule boundary
+loom shadow preflight  Capture 7-surface experimental preflight events
+loom shadow decide     Materialize the current allow/deny gate outcome
+loom shadow compare    Diff reference-adapter events vs Loom shadow events
+loom shadow report     Show the latest preflight/comparison report
 ```
 
-`loom init` accepts `--mode shadow|standalone|embedded` (default: `standalone`)
-and `--kernel-path <path>` (required for standalone/shadow, ignored for embedded).
-It writes a `loom.toml` in the current directory. If one already exists, it
-exits with an error — no silent overwrite.
+`loom init` accepts `--mode shadow|standalone|embedded` and `--kernel-path <path>`.
+The current rehearsal path uses `embedded` plus a kernel path so the scaffold can
+read the runtime registry and agent registry honestly. `loom init` writes a
+`loom.toml` in the target directory and refuses to overwrite an existing config.
 
-### Governance commands
+### Future commands (not implemented yet)
 
-```
-loom contract check    Run 7-hook compliance check against kernel
-loom contract show     Show current compliance state (null/true/false per hook)
-```
-
-### Worker commands
+These remain planned runtime surfaces, not current CLI truth:
 
 ```
-loom worker list       List registered workers and their status
-loom worker spawn <id> Manually spawn a worker (debug/dev use)
-loom worker stop <id>  Stop a specific worker
-```
-
-### Shadow mode commands (Phase 1)
-
-```
-loom shadow start      Start in shadow mode alongside primary runtime
-loom shadow compare    Diff governance events: Loom vs primary
-loom shadow report     Summary of shadow-mode divergence
-```
-
-### Scheduler commands (Phase 5)
-
-```
+loom start             Start the Loom runtime supervisor
+loom stop              Graceful shutdown of the runtime supervisor
+loom worker list       List live worker processes
+loom worker spawn <id> Spawn a worker (debug/dev)
+loom worker stop <id>  Stop a live worker
 loom schedule list     Show scheduled jobs
 loom schedule run <id> Trigger a job immediately
 ```
@@ -60,21 +51,26 @@ Loom has three modes. The mode is set in `loom.toml` under `[runtime].mode`.
 
 ### 1. Shadow mode (`mode = "shadow"`)
 
-**Purpose:** Run alongside the primary runtime (OpenClaw) without affecting
-production. Loom receives the same inputs and runs the same governance hooks
-but its outputs are discarded.
+**Purpose:** Eventually run alongside the primary runtime (OpenClaw) without
+affecting production. Loom will receive the same inputs and run the same
+governance hooks while its outputs are discarded.
 
 **When to use:** Phase 1 — proving that Loom's governance checks produce
 identical results to the primary runtime.
 
-**What it does:**
-- Listens for the same cron/scheduling events as the primary runtime
-- Calls the kernel's 7-hook API for each event
-- Logs governance events tagged `"source": "loom_shadow"`
-- Does NOT deliver outputs to any channel
-- Produces a comparison report: `loom shadow compare`
+**Current scaffold truth:**
+- `loom shadow preflight` captures experimental events for all 7 contract surfaces
+- `loom shadow decide` writes a standalone decision artifact (`decision.json`)
+- `loom shadow compare` compares Loom's captured events against a
+  kernel-reference event log, not a live OpenClaw runtime stream
+- `loom shadow report` surfaces the latest comparison or preflight report
 
-**What it proves:** Governance-check parity without production risk.
+**What it does not do yet:**
+- It does not subscribe to live production traffic
+- It does not shadow the real OpenClaw runtime process
+- It does not prove runtime parity
+
+**What Phase 1 will eventually prove:** Governance-check parity without production risk.
 
 ### 2. Standalone mode (`mode = "standalone"`)
 
@@ -149,25 +145,32 @@ loom start
 loom health
 ```
 
-This creates a `loom.toml` with `mode = "embedded"`, initializes the local
-governance store, and starts the runtime. The user gets:
-- Agent identity management (register, list, inspect)
-- Budget tracking per agent
-- Audit logging to local store
-- Worker spawning with governance checks
+This creates a `loom.toml` with `mode = "embedded"` and initializes the local
+state boundary. In the current scaffold, the user gets:
+- local config and capsule state
+- doctor/health/status surfaces
+- registry-backed contract inspection
+- agent identity resolution against the kernel registry
+- action envelope construction
+- experimental shadow preflight, decision capture, and comparison surfaces
 
-They do NOT get multi-institution support, court/sanctions administration,
-or the broader kernel ecosystem. Those require upgrading to standalone mode
-with a full kernel install.
+They do **not** get:
+- a running runtime supervisor
+- worker orchestration
+- multi-institution support
+- native sanction enforcement
+- the kernel's canonical audit log
+
+Those remain future runtime work, not current scaffold truth.
 
 ## CLI design principles
 
 1. **No implicit behavior.** Every action requires an explicit command or
    config entry. Loom does not auto-discover or auto-configure.
-2. **Structured output.** `loom health` and `loom contract check` return JSON.
-   `loom status` returns human-readable text. Both formats are always available
-   via `--json` / `--human` flags.
-3. **No destructive defaults.** `loom start` in a directory without `loom.toml`
-   fails with an error, not a wizard.
+2. **Structured output.** `loom health`, `loom contract show`, and the shadow
+   surfaces return JSON or human-readable output. Comparison results now include
+   hook-level divergence details instead of only aggregate counts.
+3. **No destructive defaults.** `loom init` refuses overwrite. Future runtime
+   lifecycle commands should also fail closed when config or kernel bindings are missing.
 4. **Config is the truth.** The CLI modifies `loom.toml`; `loom.toml` drives
    behavior. There is no hidden state beyond what the config file declares.

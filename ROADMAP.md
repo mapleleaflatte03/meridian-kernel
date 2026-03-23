@@ -95,13 +95,14 @@ Stable API, production storage, comprehensive tests, security audit.
 ## Meridian Loom — Native Runtime (Planned)
 
 Meridian Loom is a planned Meridian-native execution runtime designed to
-implement all 7 contract hooks natively without adapter translation. A local
-experimental scaffold now exists for CLI/setup rehearsal, but no governed
-runtime exists yet. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
+implement all 7 contract hooks natively without adapter translation. A public
+experimental scaffold now exists at
+`https://github.com/mapleleaflatte03/meridian-loom`, but no governed runtime
+exists yet. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
 
 | Phase | Goal | Contract Hooks | Gate |
 |-------|------|---------------|------|
-| 0 (current) | Spec + local scaffold | 0/7 | — |
+| 0 (current) | Spec + public scaffold | 0/7 | — |
 | 1 | Shadow mode alongside primary runtime | 2/7 | Zero governance divergence over 3+ runs |
 | 2 | Governed worker cells | 5+/7 | Single agent completes end-to-end in Loom |
 | 3 | Capability ABI | 7/7 maintained | Custom capability loads at runtime |

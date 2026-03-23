@@ -18,12 +18,12 @@ run.
 
 ## Repository Prerequisites
 
-- [~] `meridian-loom` repository scaffold created locally
-  - public GitHub publication still pending
+- [x] `meridian-loom` repository scaffold created publicly
+  - https://github.com/mapleleaflatte03/meridian-loom
 - [x] `Cargo.toml` with workspace structure
   - workspace root with `loom-core`, `loom-cli`, `loom-shadow` crates
 - [x] CI workflow defined for `cargo build` and `cargo test`
-  - GitHub Actions file exists in the local scaffold; public publication still pending
+  - GitHub Actions file exists in the public scaffold repository
 - [x] README with honest status: experimental scaffold, not a functional runtime
   - No aspirational feature lists; only what exists and what does not
 
@@ -97,7 +97,7 @@ run.
 - Not a timeline or sprint plan.
   There are no dates here because dates without prerequisites are fiction.
 - Not a claim that shadow mode is near.
-  Even with a local scaffold, the hook implementation and divergence engine do
+  Even with a public scaffold, the hook implementation and divergence engine do
   not exist yet.
 - Not a Rust tutorial.
   The runtime prerequisites assume familiarity with Rust and Cargo.

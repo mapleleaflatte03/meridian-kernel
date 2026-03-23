@@ -14,7 +14,7 @@ Loom is polyglot by design: a Rust supervisor manages lifecycle, isolation, and
 governance bridging, while workers may be written in Python or TypeScript. WASM
 sandboxing is used for capability modules where isolation matters.
 
-This document began as a pure spec. An experimental local scaffold now exists
+This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
 That scaffold does **not** provide governed execution or any proven contract
 hooks yet.
@@ -138,7 +138,7 @@ The supervisor never assumes all execution logic is Rust.
 ### Phase 0 — Spec + Scaffold (current)
 - This document
 - Registry entry with 0/7 compliance, status `"planned"`
-- Experimental local scaffold for CLI/setup rehearsal only
+- Experimental public scaffold for CLI/setup rehearsal only
 - No governed execution runtime
 
 ### Phase 1 — Shadow Mode

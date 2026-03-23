@@ -1,6 +1,6 @@
 # Meridian Loom — Packaging and Installation Strategy
 
-**Status:** Design document plus local experimental scaffold
+**Status:** Design document plus public experimental scaffold
 
 ## Build Requirements
 
@@ -16,7 +16,7 @@
 ### 1. Source build (primary path during early phases)
 
 ```bash
-git clone https://github.com/<org>/meridian-loom.git
+git clone https://github.com/mapleleaflatte03/meridian-loom.git
 cd meridian-loom
 cargo build --release
 ```
@@ -24,8 +24,10 @@ cargo build --release
 Binary lands at `target/release/loom`. This is the expected path during
 Phase 0–2 when the audience is the Meridian team and early contributors.
 
-**Current truth:** a local experimental scaffold already exists and builds in
-the founder workspace. Public GitHub publication of that repo is still pending.
+**Current truth:** a public experimental scaffold already exists at
+`https://github.com/mapleleaflatte03/meridian-loom` and builds in the founder
+workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
+governed runtime.
 
 ### 2. Pre-built binary (Phase 3+)
 
@@ -104,10 +106,10 @@ Loom does **not** bundle the kernel. The kernel is a separate install:
 
 ```bash
 # Get kernel (pure Python, stdlib-only — no pip install needed)
-git clone https://github.com/<org>/meridian-kernel.git
+git clone https://github.com/mapleleaflatte03/meridian-kernel.git
 
 # Install Loom (Rust)
-git clone https://github.com/<org>/meridian-loom.git
+git clone https://github.com/mapleleaflatte03/meridian-loom.git
 cd meridian-loom && cargo build --release
 
 # Point Loom at kernel
@@ -127,7 +129,7 @@ not carry its own version number today. Compatibility is expressed as
 the count of proven hooks:
 
 ```
-Loom 0.1.0 — 0/7 hooks proven (Phase 0, spec + local scaffold)
+Loom 0.1.0 — 0/7 hooks proven (Phase 0, spec + public scaffold)
 Loom 0.2.0 — 2/7 hooks proven (Phase 1, shadow mode)
 ```
 
@@ -141,7 +143,7 @@ just elapsed time.
 
 | Gate | Requirement | What it unlocks |
 |------|-------------|-----------------|
-| **Pre-alpha** (current) | Spec exists, registry entry at 0/7, local scaffold builds | CLI/setup rehearsal only |
+| **Pre-alpha** (current) | Spec exists, registry entry at 0/7, public scaffold builds | CLI/setup rehearsal only |
 | **Alpha** | 2+/7 hooks proven, shadow mode runs | Evaluation by contributors |
 | **Beta** | 5+/7 hooks proven, governed worker cells pass | Opt-in use alongside primary runtime |
 | **GA** | 7/7 hooks proven, 7 consecutive clean night-shift runs | Production use, OpenClaw retirement eligible |

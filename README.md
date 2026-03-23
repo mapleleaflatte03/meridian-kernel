@@ -93,11 +93,14 @@ What is not yet broadly proven:
 The executable proof map now lives in [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md).
 For the smallest high-signal rerun, generate the public proof bundle with
 [`examples/generate_public_proof_bundle.py`](examples/generate_public_proof_bundle.py).
+For a terminal-friendly summary instead of raw JSON, add `--format human`.
 That bundle now emits:
 - a structured three-host federation summary
 - a structured OpenClaw reference-adapter federation summary
 - an optional live host receipt when `--live-manifest-url` is supplied
 - an explicit `not_live_proven` list
+
+See [`examples/public-proof-bundle-human.txt`](examples/public-proof-bundle-human.txt) for a checked-in human-format example captured in a restricted environment.
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
 

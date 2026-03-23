@@ -354,11 +354,12 @@ How operators verify claims about the kernel.
 
 Generate the public proof bundle. Calls `examples/generate_public_proof_bundle.py`.
 Outputs a JSON artifact containing federation summaries, adapter proofs, and
-an explicit `not_live_proven` list. The bundle is the canonical artifact for
-external verification.
+an explicit `not_live_proven` list. Add `--format human` when the operator
+needs a terminal summary instead of the machine artifact. The bundle is the
+canonical artifact for external verification.
 
 ```
-meridian proof-bundle [--live-manifest-url <url>]
+meridian proof-bundle [--format human|json] [--live-manifest-url <url>]
 ```
 
 ### `meridian proof-matrix`

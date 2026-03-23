@@ -48,6 +48,12 @@ Generate the high-signal public proof bundle:
 python3 examples/generate_public_proof_bundle.py
 ```
 
+For a human-readable operator view instead of JSON:
+
+```bash
+python3 examples/generate_public_proof_bundle.py --format human
+```
+
 To embed a truthful live host receipt as well, pass the public live manifest:
 
 ```bash
@@ -62,6 +68,9 @@ This emits a JSON artifact containing:
 3. an optional live host receipt from `GET /api/federation/manifest`
 4. an optional live runtime receipt from `GET /api/runtime-proof`
 5. an explicit `not_live_proven` list
+
+A checked-in human-format example lives at
+[`examples/public-proof-bundle-human.txt`](../examples/public-proof-bundle-human.txt).
 
 In restricted environments the bundle may mark a proof `skipped` instead of
 failing, for example when localhost socket binding is unavailable. That is

@@ -266,6 +266,149 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
     }
 
 
+def _proof_status_label(item):
+    if item.get('passed'):
+        return 'PROVEN'
+    if item.get('skipped'):
+        return 'SKIPPED'
+    return 'UNAVAILABLE'
+
+
+def _receipt_status_label(item):
+    if item.get('included'):
+        return 'CAPTURED'
+    if item.get('attempted'):
+        return 'UNAVAILABLE'
+    return 'NOT_REQUESTED'
+
+
+def _render_live_receipt_summary(item, title, identity_path, detail_path):
+    lines = [
+        title,
+        '-' * len(title),
+        f"status:      {_receipt_status_label(item)}",
+    ]
+    route = item.get('route') or '(none)'
+    lines.append(f"route:       {route}")
+    if item.get('included'):
+        lines.append(f"fetched_at:  {item.get('fetched_at', '')}")
+        lines.append(f"body_sha256: {item.get('body_sha256', '')}")
+        identity = item
+        for key in identity_path:
+            identity = (identity or {}).get(key, {})
+        if isinstance(identity, dict):
+            detail = identity
+            for key in detail_path:
+                detail = (detail or {}).get(key, {})
+            if detail_path:
+                identity = detail
+        if isinstance(identity, dict):
+            host_id = identity.get('host_id') or identity.get('runtime_id') or ''
+            label = identity.get('label') or identity.get('proof_type') or ''
+            if host_id:
+                lines.append(f"subject:     {host_id}")
+            if label:
+                lines.append(f"detail:      {label}")
+        else:
+            lines.append(f"detail:      {identity}")
+    else:
+        reason = item.get('reason') or item.get('error') or 'not requested'
+        lines.append(f"reason:      {reason}")
+    return '\n'.join(lines)
+
+
+def render_bundle_human(bundle):
+    three_host = bundle.get('three_host_federation', {}) or {}
+    openclaw = bundle.get('openclaw_reference_adapter_federation', {}) or {}
+    live_host = bundle.get('live_host_receipt', {}) or {}
+    live_runtime = bundle.get('live_runtime_receipt', {}) or {}
+    not_live_proven = bundle.get('not_live_proven', []) or []
+
+    three_host_summary = three_host.get('summary', {}) or {}
+    openclaw_summary = openclaw.get('summary', {}) or {}
+
+    lines = [
+        'Meridian Kernel // PUBLIC PROOF BUNDLE',
+        '======================================',
+        f"generated_at:    {bundle.get('generated_at', '')}",
+        f"bundle_version:  {bundle.get('proof_bundle_version', '')}",
+        f"reference_scope: {bundle.get('reference_scope', '')}",
+        'phase:           oss reference proofs + optional live host receipts',
+        'boundary:        proves kernel reference surfaces; does not imply broad live deployment',
+        '',
+        'Reference proofs',
+        '================',
+        f"three_host_federation:               {_proof_status_label(three_host)}",
+    ]
+    if three_host.get('passed'):
+        witness = (three_host_summary.get('witness_archive') or {}).get('summary', {})
+        lines.extend(
+            [
+                f"  boundary_name:                     {three_host_summary.get('boundary_name', '')}",
+                f"  local_kernel_runtime_declared:     {three_host_summary.get('local_kernel_runtime_declared', False)}",
+                f"  witness_archive_total_records:     {witness.get('total_records', 0)}",
+            ]
+        )
+    else:
+        lines.append(f"  reason:                            {three_host.get('reason', 'not available')}")
+
+    lines.append(f"openclaw_reference_adapter:          {_proof_status_label(openclaw)}")
+    if openclaw.get('passed'):
+        delivery = openclaw_summary.get('delivery', {}) or {}
+        audit = openclaw_summary.get('audit_event', {}) or {}
+        lines.extend(
+            [
+                f"  adapter_kind:                      {openclaw_summary.get('adapter_kind', '')}",
+                f"  scope:                             {openclaw_summary.get('scope', '')}",
+                f"  action_gate_stage:                 {(openclaw_summary.get('action_gate') or {}).get('stage', '')}",
+                f"  execution_message_type:            {delivery.get('execution_message_type', '')}",
+                f"  audit_outcome:                     {audit.get('outcome', '')}",
+            ]
+        )
+    else:
+        lines.append(f"  reason:                            {openclaw.get('reason', 'not available')}")
+
+    lines.extend(
+        [
+            '',
+            'Live receipts',
+            '=============',
+            _render_live_receipt_summary(
+                live_host,
+                'Live host manifest receipt',
+                ['manifest', 'host_identity'],
+                [],
+            ),
+            '',
+            _render_live_receipt_summary(
+                live_runtime,
+                'Live runtime proof receipt',
+                ['receipt'],
+                [],
+            ),
+            '',
+            'Not live proven',
+            '===============',
+        ]
+    )
+    if not_live_proven:
+        lines.extend([f"- {item}" for item in not_live_proven])
+    else:
+        lines.append('(none declared)')
+    lines.extend(
+        [
+            '',
+            'Next',
+            '====',
+            '1. Re-run with --format json when you need a machine-readable artifact.',
+            '2. Pass --live-manifest-url to attach a truthful live host receipt.',
+            '3. Treat every missing live receipt as boundary evidence, not a formatting bug.',
+            '',
+        ]
+    )
+    return '\n'.join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate the Meridian public proof bundle.')
     parser.add_argument(
@@ -283,13 +426,22 @@ def main():
         default='',
         help='Optional public live runtime-proof URL; defaults to a sibling of --live-manifest-url when omitted',
     )
+    parser.add_argument(
+        '--format',
+        choices=('json', 'human'),
+        default='json',
+        help='Render the bundle as structured JSON (default) or human-readable terminal output',
+    )
     args = parser.parse_args()
 
     bundle = build_bundle(
         live_manifest_url=args.live_manifest_url or None,
         live_runtime_proof_url=args.live_runtime_proof_url or None,
     )
-    raw = json.dumps(bundle, indent=2, sort_keys=True) + '\n'
+    if args.format == 'human':
+        raw = render_bundle_human(bundle) + '\n'
+    else:
+        raw = json.dumps(bundle, indent=2, sort_keys=True) + '\n'
     if args.output == '-':
         sys.stdout.write(raw)
         return

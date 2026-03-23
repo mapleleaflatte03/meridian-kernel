@@ -1,0 +1,41 @@
+Meridian Kernel // PUBLIC PROOF BUNDLE
+======================================
+generated_at:    2026-03-23T15:09:58+00:00
+bundle_version:  3
+reference_scope: oss_kernel_reference
+phase:           oss reference proofs + optional live host receipts
+boundary:        proves kernel reference surfaces; does not imply broad live deployment
+
+Reference proofs
+================
+three_host_federation:               SKIPPED
+  reason:                            localhost socket bind unavailable in sandbox: [Errno 1] Operation not permitted
+openclaw_reference_adapter:          SKIPPED
+  reason:                            localhost socket bind unavailable in sandbox: [Errno 1] Operation not permitted
+
+Live receipts
+=============
+Live host manifest receipt
+--------------------------
+status:      NOT_REQUESTED
+route:       (none)
+reason:      no_live_manifest_url_supplied
+
+Live runtime proof receipt
+--------------------------
+status:      NOT_REQUESTED
+route:       (none)
+reason:      no_live_runtime_proof_url_supplied
+
+Not live proven
+===============
+- live multi-host federation between independent deployments
+- live OpenClaw end-to-end hosted wiring
+- live non-internal settlement execution
+
+Next
+====
+1. Re-run with --format json when you need a machine-readable artifact.
+2. Pass --live-manifest-url to attach a truthful live host receipt.
+3. Treat every missing live receipt as boundary evidence, not a formatting bug.
+

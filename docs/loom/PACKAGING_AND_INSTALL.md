@@ -28,8 +28,9 @@ Phase 0–2 when the audience is the Meridian team and early contributors.
 `https://github.com/mapleleaflatte03/meridian-loom` and builds in the founder
 workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
 governed runtime. The current scaffold also exposes experimental preflight
-surfaces for all seven contract areas. `audit_emission` is still a local audit
-preview. `sanction_controls`, `approval_hook`, and `budget_gate` now read
+surfaces for all seven contract areas. `audit_emission` now uses the kernel
+audit serializer to write a local preview file. `sanction_controls`,
+`approval_hook`, and `budget_gate` now read
 kernel reference-adapter decisions through a read-only preflight path, but all
 seven still remain unproven against the runtime contract registry.
 

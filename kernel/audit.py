@@ -20,7 +20,10 @@ import os
 import uuid
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
-AUDIT_FILE = os.path.join(PLATFORM_DIR, 'audit_log.jsonl')
+AUDIT_FILE = os.environ.get(
+    'MERIDIAN_AUDIT_FILE',
+    os.path.join(PLATFORM_DIR, 'audit_log.jsonl'),
+)
 
 # Max audit log size before rotation (10MB)
 MAX_LOG_SIZE = 10 * 1024 * 1024

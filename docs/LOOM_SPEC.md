@@ -18,7 +18,8 @@ This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
 That scaffold now includes experimental preflight surfaces for all seven
 contract surfaces. Two remain preview-only surfaces today:
-- `audit_emission` writes a local audit preview file, not the kernel's canonical audit log
+- `audit_emission` uses the kernel audit serializer to write a local preview
+  file, not the kernel's canonical audit log
 - `sanction_controls`, `approval_hook`, and `budget_gate` now read the
   kernel reference adapter through a read-only preflight path, but still do not
   provide native Loom enforcement or governed execution

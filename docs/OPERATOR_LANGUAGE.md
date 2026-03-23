@@ -8,10 +8,13 @@ The kernel has 5 primitives (Institution, Agent, Authority, Treasury, Court),
 how operators interact with Meridian through terminal commands, what they see in
 response, and the canonical vocabulary for governance state.
 
-No CLI binary exists today. The kernel modules (`court.py`, `treasury.py`,
-`runtime_adapter.py`, `agent_registry.py`, `authority.py`) already expose
-argparse CLIs that serve as the existing foundation. This document defines the
-target surface that a thin `meridian` entrypoint would unify them under.
+No production Meridian CLI binary exists today. The kernel modules
+(`court.py`, `treasury.py`, `runtime_adapter.py`, `agent_registry.py`,
+`authority.py`) already expose argparse CLIs that serve as the existing
+foundation. A separate experimental `loom` binary now exists in a local Loom
+scaffold, but it only validates setup/operator shape for the planned runtime.
+This document defines the target surface that a thin `meridian` entrypoint
+would unify under.
 
 ---
 

@@ -14,7 +14,10 @@ Loom is polyglot by design: a Rust supervisor manages lifecycle, isolation, and
 governance bridging, while workers may be written in Python or TypeScript. WASM
 sandboxing is used for capability modules where isolation matters.
 
-This document is a spec. No Loom code exists yet.
+This document began as a pure spec. An experimental local scaffold now exists
+to validate the CLI shape, setup flow, local state layout, and rehearsal path.
+That scaffold does **not** provide governed execution or any proven contract
+hooks yet.
 
 ---
 
@@ -59,9 +62,10 @@ Current compliance: **0/7** (all `null` — unproven).
 
 ## 3. Target Performance
 
-These are **directional goals**, not proven Meridian numbers. No Loom code
-exists yet. Competitor observations are labeled with confidence based on
-source quality and recency.
+These are **directional goals**, not proven Meridian numbers. The current Loom
+scaffold is non-functional as a runtime and provides no performance evidence.
+Competitor observations are labeled with confidence based on source quality and
+recency.
 
 | Metric | Directional Target | Rationale | Confidence |
 |--------|--------------------|-----------|------------|
@@ -131,10 +135,11 @@ The supervisor never assumes all execution logic is Rust.
 
 ## 5. Phased Migration
 
-### Phase 0 — Spec (current)
+### Phase 0 — Spec + Scaffold (current)
 - This document
 - Registry entry with 0/7 compliance, status `"planned"`
-- No code
+- Experimental local scaffold for CLI/setup rehearsal only
+- No governed execution runtime
 
 ### Phase 1 — Shadow Mode
 - Loom runs alongside OpenClaw, receiving same inputs, outputs discarded

@@ -1,6 +1,10 @@
 # Meridian Loom — Repository Strategy
 
-**Status:** Decision document (no code exists yet)
+**Status:** Decision document plus local experimental scaffold
+
+A separate `meridian-loom` scaffold now exists locally to validate the repo
+shape, Rust workspace layout, CI workflow, and setup rehearsal path. Public
+GitHub publication of that repo is still pending.
 
 ## Decision: Separate Repository
 

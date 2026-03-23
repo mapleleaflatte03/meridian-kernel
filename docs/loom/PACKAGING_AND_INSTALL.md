@@ -1,6 +1,6 @@
 # Meridian Loom — Packaging and Installation Strategy
 
-**Status:** Design document (no implementation yet)
+**Status:** Design document plus local experimental scaffold
 
 ## Build Requirements
 
@@ -23,6 +23,9 @@ cargo build --release
 
 Binary lands at `target/release/loom`. This is the expected path during
 Phase 0–2 when the audience is the Meridian team and early contributors.
+
+**Current truth:** a local experimental scaffold already exists and builds in
+the founder workspace. Public GitHub publication of that repo is still pending.
 
 ### 2. Pre-built binary (Phase 3+)
 
@@ -111,9 +114,10 @@ cd meridian-loom && cargo build --release
 loom config set kernel_path /path/to/meridian-kernel
 ```
 
-In **embedded mode** (see `CLI_AND_MODES.md`), Loom ships a vendored copy of
-the kernel's governance checks as a compiled library. But the canonical install
-path keeps them separate.
+In **embedded mode** (see `CLI_AND_MODES.md`), Loom is expected to ship a
+vendored copy of the kernel's governance checks as a compiled library. The
+current scaffold does not implement that bundling yet. The canonical install
+path still keeps kernel and Loom separate.
 
 ## Versioning
 
@@ -123,7 +127,7 @@ not carry its own version number today. Compatibility is expressed as
 the count of proven hooks:
 
 ```
-Loom 0.1.0 — 0/7 hooks proven (Phase 0, spec only)
+Loom 0.1.0 — 0/7 hooks proven (Phase 0, spec + local scaffold)
 Loom 0.2.0 — 2/7 hooks proven (Phase 1, shadow mode)
 ```
 
@@ -137,7 +141,7 @@ just elapsed time.
 
 | Gate | Requirement | What it unlocks |
 |------|-------------|-----------------|
-| **Pre-alpha** (current) | Spec exists, registry entry at 0/7 | Nothing — design-only |
+| **Pre-alpha** (current) | Spec exists, registry entry at 0/7, local scaffold builds | CLI/setup rehearsal only |
 | **Alpha** | 2+/7 hooks proven, shadow mode runs | Evaluation by contributors |
 | **Beta** | 5+/7 hooks proven, governed worker cells pass | Opt-in use alongside primary runtime |
 | **GA** | 7/7 hooks proven, 7 consecutive clean night-shift runs | Production use, OpenClaw retirement eligible |

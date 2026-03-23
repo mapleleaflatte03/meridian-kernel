@@ -59,12 +59,24 @@ Current compliance: **0/7** (all `null` — unproven).
 
 ## 3. Target Performance
 
-| Metric | Target | Rationale |
-|--------|--------|-----------|
-| Memory | <50 MB | OpenClaw uses ~100 MB; Rust runtimes (ZeroClaw, SkyClaw) achieve <15 MB |
-| Cold start | <500 ms | OpenClaw takes ~30s; ZeroClaw achieves 10ms |
-| Isolation | WASM + container | Dual-metered like OpenFang; WASM for tools, container for untrusted code |
-| Contract compliance | 7/7 native | No adapter translation needed |
+These are **directional goals**, not proven Meridian numbers. No Loom code
+exists yet. Competitor observations are labeled with confidence based on
+source quality and recency.
+
+| Metric | Directional Target | Rationale | Confidence |
+|--------|--------------------|-----------|------------|
+| Memory | <50 MB | Comparable Rust runtimes (ZeroClaw, SkyClaw) report <15 MB in their docs; OpenClaw's JS runtime is observed at ~100 MB in local testing. Loom targets well below OpenClaw but does not claim parity with minimal embedded runtimes. | DIRECTIONAL — no Loom measurement exists |
+| Cold start | <500 ms | ZeroClaw docs claim 10ms; OpenClaw observed at ~30s locally. Loom's target is conservative relative to reported Rust runtimes but aspirational relative to current state (no code). | DIRECTIONAL — no Loom measurement exists |
+| Isolation | WASM + container | OpenFang demonstrates dual-metered WASM isolation. Loom plans the same architecture class. | DESIGN GOAL |
+| Contract compliance | 7/7 native | The kernel defines 7 hooks. Loom aims to implement all natively without adapter translation. | DESIGN GOAL — current compliance: 0/7 |
+
+**What these numbers are not:**
+- Not proven Meridian benchmarks (no Loom binary exists)
+- Not guaranteed post-implementation figures
+- Not claims about competitor runtimes beyond what their public docs state
+
+Actual Loom performance numbers will be published when Phase 1 (shadow mode)
+produces measurable runtime data.
 
 ---
 

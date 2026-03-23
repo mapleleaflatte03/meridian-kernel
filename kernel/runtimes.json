@@ -169,7 +169,7 @@
       },
       "adapter_available": false,
       "status": "planned",
-      "notes": "Spec only. No code exists yet. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Target: <50MB memory, <500ms cold start, native 7/7 contract compliance. Phases: spec -> shadow -> governed cells -> capability ABI -> checkpoint/sanction -> native ingress."
+      "notes": "Spec only. No code exists yet. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Directional targets: <50MB memory, <500ms cold start, native 7/7 contract compliance (all unproven). See docs/LOOM_SPEC.md for spec, docs/loom/ for productization strategy."
     }
   },
   "contract_requirements": {

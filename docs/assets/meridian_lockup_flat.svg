@@ -4,8 +4,8 @@
   <defs>
     <style>
       .mk { fill: #0a0a0f; }
-      .word { fill: #0a0a0f; font: 700 88px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: 7px; }
-      .accent { fill: #475569; font: 500 20px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: 4.5px; text-transform: uppercase; }
+      .word { fill: #0a0a0f; font: 700 88px/1 'Space Grotesk', Inter, sans-serif; letter-spacing: 7px; }
+      .accent { fill: #475569; font: 500 20px/1 'JetBrains Mono', monospace; letter-spacing: 4.5px; text-transform: uppercase; }
       @media (prefers-color-scheme: dark) {
         .mk { fill: #e0e0e0; }
         .word { fill: #e0e0e0; }
@@ -20,5 +20,5 @@
   </g>
   <!-- Wordmark -->
   <text x="286" y="124" class="word">Meridian</text>
-  <text x="290" y="166" class="accent">Constitutional Kernel</text>
+  <text x="290" y="166" class="accent">Governance Kernel</text>
 </svg>

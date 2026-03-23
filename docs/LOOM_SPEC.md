@@ -168,15 +168,20 @@ The supervisor never assumes all execution logic is Rust.
 
 ## 6. Verification
 
-At each phase, the runtime adapter tooling proves compliance:
+At each phase, the runtime adapter tooling assesses registry-declared
+compliance. The tooling reads the `contract_compliance` fields in
+`runtimes.json` and reports their current state — it does not independently
+verify a live runtime:
 
 ```bash
-# Show current state
+# Show registry-declared state
 python3 kernel/runtime_adapter.py show --runtime_id meridian_loom
 
-# Check contract compliance
+# Report contract compliance from registry
 python3 kernel/runtime_adapter.py check-contract --runtime_id meridian_loom
 ```
 
-`null` = unproven, `true` = proven by test, `false` = non-compliant.
-No field is set to `true` until a test proves it.
+`null` = unproven (no test exists), `true` = proven by a passing test,
+`false` = tested and non-compliant.
+No field is set to `true` until a test proves it. The registry is the
+source of truth; the tooling reports what it says.

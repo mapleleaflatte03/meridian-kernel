@@ -3,8 +3,8 @@
   <desc id="desc">The Meridian wordmark in Inter 700 with cyberpunk palette.</desc>
   <defs>
     <style>
-      .word { fill: #0a0a0f; font: 700 72px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: 5.8px; }
-      .accent { fill: #475569; font: 500 18px/1 Inter, "Segoe UI", system-ui, sans-serif; letter-spacing: 4px; text-transform: uppercase; }
+      .word { fill: #0a0a0f; font: 700 72px/1 'Space Grotesk', Inter, sans-serif; letter-spacing: 5.8px; }
+      .accent { fill: #475569; font: 500 18px/1 'JetBrains Mono', monospace; letter-spacing: 4px; text-transform: uppercase; }
       @media (prefers-color-scheme: dark) {
         .word { fill: #e0e0e0; }
         .accent { fill: #666; }
@@ -12,5 +12,5 @@
     </style>
   </defs>
   <text x="0" y="78" class="word">Meridian</text>
-  <text x="4" y="112" class="accent">Constitutional Kernel</text>
+  <text x="4" y="112" class="accent">Governance Kernel</text>
 </svg>

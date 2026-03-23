@@ -71,6 +71,16 @@ Several important gaps have moved forward, but not to full runtime proof:
   in a real local daemon-lifecycle shell with `runtime_state.json`, background
   logging, and stop-request handling. This is still a bounded local rehearsal,
   not a hosted supervisor service
+- `loom service start/status/submit/stop` now wrap that same local runtime path
+  in a service shell with runtime state, service events, ingress receipts, and
+  truthful transport reporting. When the local Unix socket boundary is
+  unavailable, the service falls back to file-backed ingress under
+  `.loom/runtime/ingress/`
+- `loom service import-commitments` can now import sender-side
+  `execution_request` delivery refs from a commitments snapshot into the local
+  Loom queue, writing import markers under
+  `.loom/runtime/imports/commitment_execution/`. This is a real local ingress
+  seam from kernel truth, not hosted cross-host replacement
 - the parity surface now emits `.loom/parity/stream.jsonl` and
   `.loom/parity/latest.json`, and can capture per-action live OpenClaw probe
   artifacts under `.loom/parity/openclaw/<input_hash>.json` plus
@@ -228,6 +238,9 @@ The supervisor never assumes all execution logic is Rust.
 - Runtime-side canonical artifact under `kernel/runtime_audit/loom_runtime_events.jsonl`
 - Bounded `loom supervisor watch` loop with heartbeat/status artifacts
 - Local daemon lifecycle rehearsal with runtime state and stop-request handling
+- Local runtime service rehearsal with service state, ingress receipts, and
+  truthful file-backed ingress fallback
+- Sender-side commitment outbox import into the local Loom queue
 - Parity stream and latest parity report under `.loom/parity/`
 - Optional per-action founder-host OpenClaw live probe artifact captured into the parity surface
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces

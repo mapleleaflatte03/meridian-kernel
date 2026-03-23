@@ -174,6 +174,71 @@ class AuditEnvOverrideTests(unittest.TestCase):
             self.assertEqual(event['details']['runtime_event_id'], 'loom.runtime.v1::evt_default')
             self.assertEqual(event['details']['budget_reservation_status'], 'committed')
 
+    def test_summarize_runtime_cli_prints_proof_first_human_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_path = pathlib.Path(tmpdir) / 'audit-runtime.jsonl'
+            runtime_events = [
+                {
+                    'id': 'evt_runtime_1',
+                    'timestamp': '2026-03-23T00:00:01Z',
+                    'org_id': 'org_demo',
+                    'agent_id': 'agent_alpha',
+                    'actor_type': 'agent',
+                    'action': 'research',
+                    'resource': 'web_search',
+                    'outcome': 'success',
+                    'details': {'runtime_event_id': 'loom.runtime.v1::evt_1'},
+                    'policy_ref': 'experimental_runtime_rehearsal',
+                },
+                {
+                    'id': 'evt_runtime_2',
+                    'timestamp': '2026-03-23T00:00:02Z',
+                    'org_id': 'org_demo',
+                    'agent_id': 'agent_alpha',
+                    'actor_type': 'agent',
+                    'action': 'summarize',
+                    'resource': 'runtime_audit',
+                    'outcome': 'success',
+                    'details': {'runtime_event_id': 'loom.runtime.v1::evt_2'},
+                    'policy_ref': 'experimental_runtime_rehearsal',
+                },
+            ]
+            runtime_path.write_text('\n'.join(json.dumps(row) for row in runtime_events) + '\n')
+
+            env = os.environ.copy()
+            env['MERIDIAN_AUDIT_FILE'] = str(runtime_path)
+            env['MERIDIAN_RUNTIME_AUDIT_FILE'] = str(runtime_path)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUDIT_PATH),
+                    'summarize-runtime',
+                    '--org_id', 'org_demo',
+                    '--limit', '2',
+                ],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            output = result.stdout.strip().splitlines()
+            self.assertEqual(output[0], 'Runtime audit inspection')
+            self.assertIn(f'file: {runtime_path}', output[1])
+            self.assertIn('org_id: org_demo', output[2])
+            self.assertIn('total_events: 2', result.stdout)
+            self.assertIn('showing_last: 2', result.stdout)
+            self.assertIn('distinct_orgs: 1', result.stdout)
+            self.assertIn('distinct_agents: 1', result.stdout)
+            self.assertIn('"research": 1', result.stdout)
+            self.assertIn('"summarize": 1', result.stdout)
+            self.assertIn('Latest proof', result.stdout)
+            self.assertIn('evt_runtime_2', result.stdout)
+            self.assertIn('Recent events', result.stdout)
+            self.assertIn('evt_runtime_1', result.stdout)
+            self.assertIn('evt_runtime_2', result.stdout)
+            self.assertLess(result.stdout.find('evt_runtime_2'), result.stdout.rfind('evt_runtime_1') + 1000)
+
 
 if __name__ == '__main__':
     unittest.main()

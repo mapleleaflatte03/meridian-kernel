@@ -47,6 +47,11 @@ loom job list          Show persisted runtime-owned job state
 loom job inspect       Inspect a specific job lifecycle snapshot
 loom action enqueue    Materialize a queued governed action artifact
 loom action execute    Rehearse fail-closed execution and write runtime/parity artifacts
+loom service start     Start the local runtime service rehearsal shell
+loom service status    Inspect the local runtime service state
+loom service submit    Submit a governed action through the service boundary
+loom service import-commitments Import sender-side execution_request delivery refs
+loom service stop      Request a clean stop for the local runtime service shell
 loom supervisor run    Process queued actions through the local queue supervisor
 loom supervisor watch  Poll the local queue supervisor and write heartbeat/status artifacts
 loom supervisor status Read the latest bounded supervisor state and heartbeat summary
@@ -120,6 +125,15 @@ identical results to the primary runtime.
 - `loom action enqueue` and `loom supervisor run` now exercise the same allow/
   deny boundary through a local queue supervisor, moving queued artifacts from
   `.loom/runtime/queue/pending/` into `.loom/runtime/queue/processed/`
+- `loom service start/status/submit/stop` now expose a local runtime-service
+  shell with runtime state, service events, ingress receipts, and truthful
+  transport reporting
+- when the Unix socket boundary is unavailable, that same service shell falls
+  back to file-backed ingress under `.loom/runtime/ingress/`
+- `loom service import-commitments` can now import sender-side
+  `execution_request` delivery refs from a commitments snapshot into the local
+  Loom queue and write import markers under
+  `.loom/runtime/imports/commitment_execution/`
 - `loom supervisor watch` now runs that same local queue supervisor in a bounded
   polling loop and writes `.loom/runtime/supervisor/status.json` plus
   `.loom/runtime/supervisor/heartbeat.jsonl`
@@ -137,6 +151,8 @@ identical results to the primary runtime.
 - It does not subscribe to live production traffic
 - It does not shadow the real OpenClaw runtime process
 - It does not prove per-action live runtime parity
+- It does not prove a hosted runtime service or durable ingress transport
+- It does not prove live sender-host commitment import cutover
 - It does not prove a hosted daemon supervisor or scheduler
 
 **What Phase 1 will eventually prove:** Governance-check parity without production risk.
@@ -225,11 +241,13 @@ state boundary. In the current scaffold, the user gets:
 - action envelope construction
 - a runtime-owned job ledger with `loom job list` / `loom job inspect`
 - experimental shadow preflight, decision capture, comparison, fail-closed
-  runtime rehearsal, queue-backed supervisor rehearsal, runtime-side audit
-  artifacts, and parity reporting
+  runtime rehearsal, queue-backed supervisor rehearsal, local runtime service
+  rehearsal, sender-side commitment import, runtime-side audit artifacts, and
+  parity reporting
 
 They do **not** get:
 - a running runtime supervisor
+- a hosted runtime service
 - a long-running worker supervisor
 - a hosted daemon supervisor or scheduler
 - a hosted long-running scheduler or worker pool

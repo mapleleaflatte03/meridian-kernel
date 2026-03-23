@@ -131,7 +131,7 @@ exists yet. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
 
 | Phase | Goal | Contract Hooks | Gate |
 |-------|------|---------------|------|
-| 0 (current) | Spec + public scaffold + 7-surface rehearsal + fail-closed `loom action execute` + governed local worker dispatch on allow-path + queue-backed `action enqueue` / `supervisor run` rehearsal + runtime-owned `job list` / `job inspect` surfaces + bounded `supervisor watch` loop with heartbeat/status artifacts + local daemon lifecycle rehearsal + kernel-owned runtime audit artifacts + parity stream with per-action OpenClaw probe artifacts | 0/7 | — |
+| 0 (current) | Spec + public scaffold + 7-surface rehearsal + fail-closed `loom action execute` + governed local worker dispatch on allow-path + queue-backed `action enqueue` / `supervisor run` rehearsal + runtime-owned `job list` / `job inspect` surfaces + bounded `supervisor watch` loop with heartbeat/status artifacts + local daemon lifecycle rehearsal + local runtime service with socket-first ingress and truthful file-backed fallback + commitment-backed sender-side `execution_request` import + kernel-owned runtime audit artifacts + parity stream with per-action OpenClaw probe artifacts | 0/7 | — |
 | 1 | Shadow mode alongside primary runtime | 2/7 | Zero governance divergence over 3+ runs |
 | 2 | Governed worker cells | 5+/7 | Single agent completes end-to-end in Loom |
 | 3 | Capability ABI | 7/7 maintained | Custom capability loads at runtime |

@@ -51,9 +51,12 @@ workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
 governed runtime. The current scaffold now exposes rehearsal surfaces for all
 seven contract areas. `loom action execute` materializes a fail-closed runtime
 receipt, a runtime-side audit artifact, and a parity stream. The scaffold can
-also capture a live OpenClaw proof snapshot on the founder host. These are
-runtime rehearsal surfaces, not proof of a governed worker runtime. All seven
-hooks still remain unproven in the runtime registry.
+also capture a live OpenClaw proof snapshot on the founder host. `loom service`
+now exposes a local service shell with truthful file-backed ingress fallback,
+and `loom service import-commitments` can import sender-side
+`execution_request` delivery refs from a commitments snapshot into the local
+queue. These are runtime rehearsal surfaces, not proof of a governed hosted
+runtime. All seven hooks still remain unproven in the runtime registry.
 
 ### 2. Pre-built binary (Phase 3+)
 

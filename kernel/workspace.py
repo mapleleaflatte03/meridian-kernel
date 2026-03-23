@@ -3461,6 +3461,18 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
             )
             raise
     delivery_commitment_id = (claims_commitment_id or commitment_id or '').strip()
+    if not delivery_commitment_id and message_type == 'execution_request' and isinstance(payload, dict):
+        adapter_envelope = payload.get('adapter_envelope')
+        adapter_details = (
+            dict(adapter_envelope.get('details') or {})
+            if isinstance(adapter_envelope, dict)
+            else {}
+        )
+        delivery_commitment_id = (
+            payload.get('commitment_id')
+            or adapter_details.get('commitment_id')
+            or ''
+        ).strip()
 
     blocking_case = _blocking_case_for_delivery(
         org_id=bound_org_id,
@@ -3579,9 +3591,11 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
             },
         )
     commitment_delivery_ref = None
+    if not linked_commitment and delivery_commitment_id:
+        linked_commitment = get_commitment(delivery_commitment_id, org_id=bound_org_id)
     if linked_commitment:
         commitment_delivery_ref = record_delivery_ref(
-            commitment_id,
+            delivery_commitment_id,
             org_id=bound_org_id,
             delivery_ref={
                 'recorded_at': _now(),
@@ -3593,13 +3607,25 @@ def _deliver_federation_envelope(bound_org_id, target_host_id, target_org_id,
                 'receiver_host_id': receipt.get('receiver_host_id', ''),
                 'receiver_institution_id': receipt.get('receiver_institution_id', ''),
                 'warrant_id': warrant_id,
+                'payload_hash': (claims or {}).get('payload_hash', ''),
+                'task': (
+                    payload.get('task', '')
+                    if isinstance(payload, dict)
+                    else ''
+                ),
+                'adapter_envelope': (
+                    dict((payload.get('adapter_envelope') or {}))
+                    if isinstance(payload, dict)
+                    and isinstance(payload.get('adapter_envelope'), dict)
+                    else {}
+                ),
             },
         )
         log_event(
             bound_org_id,
             actor_id or f'host:{host_identity.host_id}',
             'commitment_delivery_recorded',
-            resource=commitment_id,
+            resource=delivery_commitment_id,
             outcome='success',
             actor_type=actor_type or 'service',
             details={

@@ -81,6 +81,7 @@ What is real today:
 - one receiver-side execution review path: accepted `execution_request` envelopes can materialize a local federated execution job plus a pending local warrant instead of implying remote work is already authorized
 - one sender-side review feedback path: receiver-side warrant review for a federated `execution_request` can emit a signed `court_notice` back to the source host, so sender-side warrant state and commitment provenance reflect remote review before settlement
 - one tested OpenClaw-compatible federation seam in OSS: the kernel-side `openclaw_compatible` adapter can wrap a federated `execution_request` story in tests by gating the action envelope before dispatch and emitting metering/audit proof after the federated receipt returns, without claiming a live OpenClaw deployment is already wired
+- one sender-side commitment outbox seam that Loom can now consume locally: successful `execution_request` deliveries can append sender-side `delivery_refs` with `payload_hash` and `adapter_envelope` to the linked commitment, making the kernel's own commitment truth rich enough for Loom to import into a local runtime queue
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, sender-side federation validation when `commitment_id` is supplied, and warrant-bound `commitment_proposal` / `commitment_acceptance` / `commitment_breach_notice` envelopes
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
@@ -102,6 +103,17 @@ That bundle now emits:
 - a local Loom runtime receipt when `kernel/runtime_audit/loom_runtime_events.jsonl`
   exists, including canonical runtime IDs and budget reservation status
 - an explicit `not_live_proven` list
+
+The kernel audit CLI also has two proof-first local runtime inspection surfaces:
+
+```bash
+python3 kernel/audit.py tail-runtime --limit 10
+python3 kernel/audit.py summarize-runtime --limit 20
+```
+
+Those commands summarize Loom runtime audit events from the kernel-owned local
+runtime audit file without pretending the hosted audit trail is already owned by
+Loom.
 
 See [`examples/public-proof-bundle-human.txt`](examples/public-proof-bundle-human.txt) for a checked-in human-format example captured in a restricted environment.
 

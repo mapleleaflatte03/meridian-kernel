@@ -158,6 +158,101 @@ def tail_runtime_events(limit=20, org_id=None):
     return events[-limit:]
 
 
+def _runtime_event_counts(events):
+    """Build lightweight proof-oriented counts for runtime inspection output."""
+    actions = {}
+    outcomes = {}
+    agents = set()
+    orgs = set()
+    for e in events:
+        action = e.get('action', '')
+        outcome = e.get('outcome', '')
+        if action:
+            actions[action] = actions.get(action, 0) + 1
+        if outcome:
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        if e.get('agent_id'):
+            agents.add(e['agent_id'])
+        if e.get('org_id'):
+            orgs.add(e['org_id'])
+    return {
+        'actions': actions,
+        'outcomes': outcomes,
+        'distinct_agents': len(agents),
+        'distinct_orgs': len(orgs),
+    }
+
+
+def summarize_runtime_events(limit=20, org_id=None):
+    """Return a truthful runtime-audit summary and the newest events."""
+    events = tail_runtime_events(limit=10**9, org_id=org_id)
+    if not events:
+        return {
+            'runtime_audit_file': RUNTIME_AUDIT_FILE,
+            'org_id': org_id,
+            'total_events': 0,
+            'events': [],
+            'counts': {'actions': {}, 'outcomes': {}, 'distinct_agents': 0, 'distinct_orgs': 0},
+            'earliest': None,
+            'latest': None,
+            'showing_last': 0,
+        }
+
+    counts = _runtime_event_counts(events)
+    recent = events[-limit:] if limit else []
+    return {
+        'runtime_audit_file': RUNTIME_AUDIT_FILE,
+        'org_id': org_id,
+        'total_events': len(events),
+        'events': recent,
+        'counts': counts,
+        'earliest': events[0].get('timestamp'),
+        'latest': events[-1].get('timestamp'),
+        'showing_last': len(recent),
+    }
+
+
+def _format_runtime_event(event):
+    return (
+        f"  {event.get('timestamp', '')}  "
+        f"{event.get('id', ''):<16} "
+        f"{event.get('action', ''):<25} "
+        f"{event.get('outcome', ''):<12} "
+        f"org={event.get('org_id', '')} "
+        f"agent={event.get('agent_id', '')} "
+        f"resource={event.get('resource', '')}"
+    )
+
+
+def print_runtime_summary(limit=20, org_id=None):
+    """Print a proof-first human summary of the runtime audit trail."""
+    summary = summarize_runtime_events(limit=limit, org_id=org_id)
+    print('Runtime audit inspection')
+    print(f"  file: {summary['runtime_audit_file']}")
+    print(f"  org_id: {summary['org_id'] or '*'}")
+    print(f"  total_events: {summary['total_events']}")
+    print(f"  showing_last: {summary['showing_last']}")
+    print(f"  earliest: {summary['earliest'] or 'n/a'}")
+    print(f"  latest: {summary['latest'] or 'n/a'}")
+    print(f"  distinct_orgs: {summary['counts']['distinct_orgs']}")
+    print(f"  distinct_agents: {summary['counts']['distinct_agents']}")
+    print(f"  actions: {json.dumps(summary['counts']['actions'], sort_keys=True)}")
+    print(f"  outcomes: {json.dumps(summary['counts']['outcomes'], sort_keys=True)}")
+    if summary['events']:
+        latest = summary['events'][-1]
+        print('Latest proof')
+        print(_format_runtime_event(latest))
+        print('Recent events')
+        for event in summary['events']:
+            print(_format_runtime_event(event))
+    else:
+        print('Latest proof')
+        print('  no runtime audit events found')
+        print('Recent events')
+        print('  no runtime audit events found')
+    return summary
+
+
 def stats(org_id):
     """Return summary stats for an organization's audit events."""
     events = query_events(org_id=org_id, limit=10000)
@@ -239,6 +334,14 @@ def main():
     t.add_argument('--org_id', default=None)
     t.add_argument('--limit', type=int, default=20)
 
+    rt = sub.add_parser('tail-runtime')
+    rt.add_argument('--org_id', default=None)
+    rt.add_argument('--limit', type=int, default=20)
+
+    rs = sub.add_parser('summarize-runtime')
+    rs.add_argument('--org_id', default=None)
+    rs.add_argument('--limit', type=int, default=20)
+
     s = sub.add_parser('stats')
     s.add_argument('--org_id', required=True)
 
@@ -309,6 +412,11 @@ def main():
     elif args.command == 'tail':
         for e in tail_events(args.limit, org_id=args.org_id):
             print(f"  {e['timestamp']}  {e['action']:<25} {e['outcome']:<10} org={e.get('org_id','')}")
+    elif args.command == 'tail-runtime':
+        for e in tail_runtime_events(args.limit, org_id=args.org_id):
+            print(_format_runtime_event(e))
+    elif args.command == 'summarize-runtime':
+        print_runtime_summary(limit=args.limit, org_id=args.org_id)
     elif args.command == 'stats':
         print(json.dumps(stats(args.org_id), indent=2))
     else:

@@ -68,6 +68,11 @@ run.
   - runtime-side audit artifacts now land in `kernel/runtime_audit/loom_runtime_events.jsonl` when a kernel audit path is present
   - parity artifacts now land in `.loom/parity/`
   - still rehearsal-only, not a governed worker runtime
+- [x] Experimental local runtime service and commitment-import seams exist
+  - `loom service start/status/submit/stop` now expose a local runtime service shell
+  - the service prefers Unix socket ingress but truthfully falls back to file-backed ingress under `.loom/runtime/ingress/`
+  - `loom service import-commitments` can import sender-side `execution_request` delivery refs from commitment snapshots
+  - these are local rehearsal seams, not proof that Loom receives the same live input stream as OpenClaw
 - [x] Experimental local sanction preview exists
   - derived from the resolved identity snapshot, not a live Loom runtime
   - `execute` / `remediation_only` can deny locally even if the read-only reference gate allows

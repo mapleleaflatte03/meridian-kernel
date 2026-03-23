@@ -154,6 +154,11 @@ Today that proof is also deliberately narrow:
   warrant without inventing peer suspension semantics
 - successful delivery can append delivery references back onto the commitment
   record
+- successful sender-side `execution_request` deliveries can now preserve import-
+  grade delivery provenance (`receipt_id`, `payload_hash`, `task`, and
+  `adapter_envelope`) on the linked commitment record, giving Loom a kernel-
+  owned sender handoff without claiming a general execution outbox or transport
+  replacement
 
 This is the first real commitment primitive in public code. It is not yet the
 full cross-institution commitments, payout, and breach-handling program.

@@ -46,6 +46,8 @@ loom capsule inspect   Inspect the local capsule boundary
 loom action enqueue    Materialize a queued governed action artifact
 loom action execute    Rehearse fail-closed execution and write runtime/parity artifacts
 loom supervisor run    Process queued actions through the local queue supervisor
+loom supervisor watch  Poll the local queue supervisor and write heartbeat/status artifacts
+loom supervisor status Read the latest bounded supervisor state and heartbeat summary
 loom shadow preflight  Capture 7-surface experimental preflight events
 loom shadow decide     Materialize the current allow/deny gate outcome
 loom shadow enforce    Return fail-closed exit codes from the same gate outcome
@@ -58,6 +60,8 @@ Current human-mode output uses the same `Meridian Loom // ...` header grammar
 across init, doctor, health, status, config, contract, identity, envelope,
 capsule, shadow, runtime, parity, and help surfaces so the operator shell reads
 as one system instead of a pile of unrelated subcommands.
+`loom supervisor watch` extends that grammar into a bounded loop surface with
+heartbeat/status artifacts instead of introducing a separate ad hoc operator style.
 When stdout is a TTY, the CLI now adds a restrained ANSI shell layer for
 headers and status cues. `NO_COLOR=1` disables it without changing the
 underlying artifact grammar.
@@ -107,6 +111,9 @@ identical results to the primary runtime.
 - `loom action enqueue` and `loom supervisor run` now exercise the same allow/
   deny boundary through a local queue supervisor, moving queued artifacts from
   `.loom/runtime/queue/pending/` into `.loom/runtime/queue/processed/`
+- `loom supervisor watch` now runs that same local queue supervisor in a bounded
+  polling loop and writes `.loom/runtime/supervisor/status.json` plus
+  `.loom/runtime/supervisor/heartbeat.jsonl`
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report

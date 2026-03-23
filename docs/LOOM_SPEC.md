@@ -54,6 +54,10 @@ Several important gaps have moved forward, but not to full runtime proof:
 - `loom action enqueue` and `loom supervisor run` now materialize and process
   queued actions under `.loom/runtime/queue/`, exercising the same decision and
   worker dispatch path through a local queue supervisor
+- `loom supervisor watch` now runs that same local queue supervisor in a bounded
+  polling loop and writes `.loom/runtime/supervisor/status.json` plus
+  `.loom/runtime/supervisor/heartbeat.jsonl`. This makes local supervisor state
+  inspectable, but it is still not a daemonized or hosted scheduler
 - the parity surface now emits `.loom/parity/stream.jsonl` and
   `.loom/parity/latest.json`, and can capture per-action live OpenClaw probe
   artifacts under `.loom/parity/openclaw/<input_hash>.json` plus
@@ -202,6 +206,7 @@ The supervisor never assumes all execution logic is Rust.
 - Experimental fail-closed runtime rehearsal command (`loom action execute`)
 - Experimental governed local worker supervisor on allow-path
 - Runtime-side canonical artifact under `kernel/runtime_audit/loom_runtime_events.jsonl`
+- Bounded `loom supervisor watch` loop with heartbeat/status artifacts
 - Parity stream and latest parity report under `.loom/parity/`
 - Optional per-action founder-host OpenClaw live probe artifact captured into the parity surface
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces

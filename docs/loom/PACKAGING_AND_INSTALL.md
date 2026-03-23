@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+</p>
+
 # Meridian Loom // Packaging and Installation Strategy
 
 **Status:** Design document plus public experimental scaffold

@@ -1,9 +1,15 @@
+<p align="center">
+  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+</p>
+
 # Meridian Loom // Shadow Mode Prerequisites
 
 ## Purpose
 
 This document lists the prerequisites for Loom Phase 1 (shadow mode).
-It is a checklist, not a timeline. None of these prerequisites are met today.
+It is a checklist, not a timeline. Some repository-level prerequisites now
+exist, but the runtime and verification gates for true Phase 1 shadow mode are
+still not met.
 
 Shadow mode means: Loom receives the same input stream as the primary
 runtime (OpenClaw), runs its own governance hooks, and discards output.

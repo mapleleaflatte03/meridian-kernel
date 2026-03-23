@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+</p>
+
 # Meridian Loom // CLI and Operating Modes
 
 **Status:** Design document plus public experimental scaffold
@@ -13,6 +17,7 @@ artifacts, and parity reporting.
 
 ```
 loom init              Create loom.toml and initialize local state
+loom help              Show the grouped scaffold command surface
 loom doctor            Validate config, local state, kernel path, and registry access
 loom health            Structured health check
 loom status            Human-readable status summary
@@ -29,6 +34,11 @@ loom shadow compare    Diff reference-adapter events vs Loom shadow events
 loom shadow report     Show the latest preflight/comparison report
 loom parity report     Show the runtime-side parity stream and latest parity report
 ```
+
+Current human-mode output uses the same `Meridian Loom // ...` header grammar
+across init, doctor, health, status, config, contract, identity, envelope,
+capsule, shadow, runtime, parity, and help surfaces so the operator shell reads
+as one system instead of a pile of unrelated subcommands.
 
 `loom init` accepts `--mode shadow|standalone|embedded` and `--kernel-path <path>`.
 The current rehearsal path uses `embedded` plus a kernel path so the scaffold can

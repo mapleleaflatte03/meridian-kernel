@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+</p>
+
 # Meridian Loom // Runtime Specification
 
-**Status:** PLANNED (0/7 contract compliance)
+**Status:** PLANNED / PUBLIC EXPERIMENTAL SCAFFOLD (0/7 contract compliance)
 **Core language:** Rust (supervisor / runtime core)
 **Worker languages:** Python, TypeScript (where appropriate)
 **Sandbox:** WASM for capability modules
@@ -17,7 +21,7 @@ sandboxing is used for capability modules where isolation matters.
 This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
 That scaffold now includes rehearsal surfaces for all seven contract areas.
-Three important gaps have moved forward, but not to full runtime proof:
+Several important gaps have moved forward, but not to full runtime proof:
 - `audit_emission` now writes a runtime-side artifact under
   `.loom/audit/runtime_events.jsonl`, using the kernel serializer when
   available and a local fallback otherwise. This is still not the kernel's
@@ -90,7 +94,8 @@ Current compliance: **0/7** (all `null` — unproven).
 ## 3. Target Performance
 
 These are **directional goals**, not proven Meridian numbers. The current Loom
-scaffold is non-functional as a runtime and provides no performance evidence.
+scaffold is not yet a governed execution runtime and provides no meaningful
+performance evidence.
 Competitor observations are labeled with confidence based on source quality and
 recency.
 
@@ -102,7 +107,7 @@ recency.
 | Contract compliance | 7/7 native | The kernel defines 7 hooks. Loom aims to implement all natively without adapter translation. | DESIGN GOAL — current compliance: 0/7 |
 
 **What these numbers are not:**
-- Not proven Meridian benchmarks (no Loom binary exists)
+- Not proven Meridian benchmarks (a public Loom binary scaffold exists, but no governed runtime benchmark exists)
 - Not guaranteed post-implementation figures
 - Not claims about competitor runtimes beyond what their public docs state
 

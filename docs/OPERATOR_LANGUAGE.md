@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/meridian_lockup_flat.svg" alt="Meridian" width="420">
+</p>
+
 # Meridian Operator Language
 
 The grammar and vocabulary for all Meridian terminal surfaces.
@@ -464,8 +468,11 @@ Meridian is the governance kernel. The namespaces are separate.
 Current human-mode rehearsal output already uses the canonical header grammar:
 
 ```text
+Meridian Loom // INIT
 Meridian Loom // DOCTOR
+Meridian Loom // HEALTH
 Meridian Loom // STATUS
+Meridian Loom // CONFIG
 Meridian Loom // CONTRACT
 Meridian Loom // AGENT IDENTITY
 Meridian Loom // ACTION ENVELOPE
@@ -475,6 +482,7 @@ Meridian Loom // SHADOW DECISION
 Meridian Loom // RUNTIME EXECUTE
 Meridian Loom // SHADOW REPORT
 Meridian Loom // PARITY REPORT
+Meridian Loom // HELP
 ```
 
 ### Lifecycle

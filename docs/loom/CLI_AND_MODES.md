@@ -48,6 +48,9 @@ loom action execute    Rehearse fail-closed execution and write runtime/parity a
 loom supervisor run    Process queued actions through the local queue supervisor
 loom supervisor watch  Poll the local queue supervisor and write heartbeat/status artifacts
 loom supervisor status Read the latest bounded supervisor state and heartbeat summary
+loom supervisor daemon start  Spawn a local daemon rehearsal for the queue supervisor
+loom supervisor daemon status Show the daemon rehearsal lifecycle state
+loom supervisor daemon stop   Request a clean local daemon stop
 loom shadow preflight  Capture 7-surface experimental preflight events
 loom shadow decide     Materialize the current allow/deny gate outcome
 loom shadow enforce    Return fail-closed exit codes from the same gate outcome
@@ -62,6 +65,8 @@ capsule, shadow, runtime, parity, and help surfaces so the operator shell reads
 as one system instead of a pile of unrelated subcommands.
 `loom supervisor watch` extends that grammar into a bounded loop surface with
 heartbeat/status artifacts instead of introducing a separate ad hoc operator style.
+`loom supervisor daemon start/status/stop` extend that same grammar into a local
+daemon-lifecycle surface; this is still a rehearsal shell, not hosted runtime truth.
 When stdout is a TTY, the CLI now adds a restrained ANSI shell layer for
 headers and status cues. `NO_COLOR=1` disables it without changing the
 underlying artifact grammar.
@@ -114,6 +119,9 @@ identical results to the primary runtime.
 - `loom supervisor watch` now runs that same local queue supervisor in a bounded
   polling loop and writes `.loom/runtime/supervisor/status.json` plus
   `.loom/runtime/supervisor/heartbeat.jsonl`
+- `loom supervisor daemon start/status/stop` now wrap that same local queue
+  supervisor in a real local daemon-lifecycle shell with `runtime_state.json`,
+  background logging, and stop-request handling
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report
@@ -125,6 +133,7 @@ identical results to the primary runtime.
 - It does not subscribe to live production traffic
 - It does not shadow the real OpenClaw runtime process
 - It does not prove per-action live runtime parity
+- It does not prove a hosted daemon supervisor or scheduler
 
 **What Phase 1 will eventually prove:** Governance-check parity without production risk.
 
@@ -217,7 +226,8 @@ state boundary. In the current scaffold, the user gets:
 They do **not** get:
 - a running runtime supervisor
 - a long-running worker supervisor
-- a daemonized or hosted supervisor loop
+- a hosted daemon supervisor or scheduler
+- a hosted long-running scheduler or worker pool
 - multi-institution support
 - native sanction enforcement in a hosted worker runtime
 - the hosted kernel's canonical audit log

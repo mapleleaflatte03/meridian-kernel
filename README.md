@@ -19,6 +19,7 @@
   <a href="docs/RUNTIME_CONTRACT.md">Runtime Contract</a> ·
   <a href="ARCHITECTURE.md">Architecture</a> ·
   <a href="docs/LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md">Loom 100 Improvements</a> ·
   <a href="https://app.welliam.codes">Live Host</a>
 </p>
 
@@ -101,6 +102,10 @@ That bundle now emits:
 - an explicit `not_live_proven` list
 
 See [`examples/public-proof-bundle-human.txt`](examples/public-proof-bundle-human.txt) for a checked-in human-format example captured in a restricted environment.
+
+For the broader frontier agenda behind Loom as a future runtime, see
+[`docs/LOOM_100_IMPROVEMENTS.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md).
+That document is intentionally a research docket, not a present-tense product claim.
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
 

@@ -17,7 +17,8 @@
   <a href="https://github.com/mapleleaflatte03/meridian-loom">Loom Repo</a> ·
   <a href="loom/CLI_AND_MODES.md">CLI and Modes</a> ·
   <a href="loom/PACKAGING_AND_INSTALL.md">Packaging</a> ·
-  <a href="loom/SHADOW_PREREQUISITES.md">Shadow Prerequisites</a>
+  <a href="loom/SHADOW_PREREQUISITES.md">Shadow Prerequisites</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md">100 Improvements</a>
 </p>
 
 # Meridian Loom // Runtime Specification
@@ -38,6 +39,10 @@ sandboxing is used for capability modules where isolation matters.
 
 This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
+The broader speculative and near-term runtime agenda now lives in the separate
+research docket at
+[`meridian-loom/docs/LOOM_100_IMPROVEMENTS.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md),
+so this spec can stay focused on truth boundary, contract shape, and migration.
 That scaffold now includes rehearsal surfaces for all seven contract areas.
 Several important gaps have moved forward, but not to full runtime proof:
 - `audit_emission` now writes runtime-side artifacts through the kernel-owned

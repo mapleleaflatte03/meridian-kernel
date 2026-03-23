@@ -504,6 +504,49 @@ Any workflow can be mapped the same way:
 The intelligence vertical uses the `local_kernel` runtime. The same
 constitutional pipeline applies to any runtime that satisfies the contract.
 
+## Capsule Isolation
+
+`kernel/capsule.py` (539 LOC) provides institution-scoped state isolation.
+Each institution gets its own capsule directory containing:
+
+- `ledger.json` — economy ledger state
+- `revenue.json` — revenue records
+- `authority_queue.json` — pending authority requests
+- `court.json` — violation and sanction records
+- `commitments.json` — cross-institution commitments
+- `cases.json` — dispute cases
+- `warrants.json` — inspection/execution warrants
+- `federation_inbox.json` — received federation envelopes
+- `subscriptions.json` — subscription entitlements
+- `accounting.json` — owner accounting records
+
+**Current state (PROVEN):** capsules provide directory-level isolation within
+a single process. One capsule per institution. No cross-institution state bleed.
+Used by workspace.py and tested across 5 test files.
+
+**Future formalization:** portable governed capsules — signed, transmittable
+bundles with integrity manifests and provenance chains. See
+[CAPSULE_SPEC.md](docs/CAPSULE_SPEC.md) for the full formalization, including
+what exists today, what is proposed, and what remains future work.
+
+## Operator Language
+
+Meridian defines a terminal-first operator grammar shared across all command
+surfaces. This includes:
+
+- **Command voice:** `meridian init`, `meridian check`, `meridian doctor`
+- **Status vocabulary:** governance-native terms (`NOMINAL`, `PROBATION`,
+  `ZERO_AUTHORITY`, `FUNDED`, `BELOW_FLOOR`) instead of generic green/yellow/red
+- **Output severity:** `OK`, `NOTICE`, `WARN`, `CRITICAL`, `BLOCKED`
+- **Proof commands:** `meridian proof-bundle`, `meridian verify-runtime`
+
+Today the operator surface is the workspace HTML dashboard plus CLI subcommands
+in `runtime_adapter.py`, `court.py`, and `treasury.py`. The operator language
+spec formalizes these into a unified grammar that future CLI tooling and TUI
+surfaces will implement.
+
+See [OPERATOR_LANGUAGE.md](docs/OPERATOR_LANGUAGE.md) for the full specification.
+
 ## Subsystems
 
 ### Contributor Treasury Protocol

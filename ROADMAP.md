@@ -112,6 +112,24 @@ modules. Separate repository (`meridian-loom`). Loom depends on the kernel
 contract; the kernel never depends on Loom. See [docs/loom/](docs/loom/)
 for packaging, CLI, modes, and repository strategy.
 
+Shadow mode prerequisites (checklist): [docs/loom/SHADOW_PREREQUISITES.md](docs/loom/SHADOW_PREREQUISITES.md)
+
+## Capsule Formalization
+
+The capsule isolation primitive (`kernel/capsule.py`) is proven and tested.
+The next architectural lane is formalizing capsules as portable governed work
+units — signed, transmittable bundles with integrity manifests and provenance.
+
+See [docs/CAPSULE_SPEC.md](docs/CAPSULE_SPEC.md) for current state vs. design
+thesis, phased implementation, and integrity verification design.
+
+## Operator Language
+
+Terminal-first operator grammar shared across all command surfaces. Defines
+command voice, status vocabulary, severity levels, and proof surface commands.
+
+See [docs/OPERATOR_LANGUAGE.md](docs/OPERATOR_LANGUAGE.md).
+
 ## Future
 
 Ideas under consideration (not committed):

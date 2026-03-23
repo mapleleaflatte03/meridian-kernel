@@ -397,6 +397,23 @@ Each phase checks authority, respects budget gates, and records court violations
 
 This is an example workload, not the definition of Meridian. You can build any governed workflow on the same kernel.
 
+### Governance Simulation
+
+See governance enforcement in action without starting a server:
+
+```bash
+python3 examples/simulate_governance.py
+```
+
+Runs 10 governed actions including 2 deliberate failures. You will see:
+- A **budget gate** block an action that would breach the treasury reserve floor
+- A **court violation** filed for rejected output, with a PROBATION sanction applied
+- An **authority check** block a sanctioned agent from leading work
+- **REP and AUTH rewards** for accepted output
+- Every action audited with agent identity and cost attribution
+
+This uses temporary state and cleans up after itself.
+
 ---
 
 ## Contributing

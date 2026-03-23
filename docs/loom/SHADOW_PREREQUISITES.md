@@ -38,6 +38,10 @@ run.
 - [x] Experimental fail-closed shell surface exists
   - `loom shadow enforce` returns `0` allow / `2` deny from the same gate result
   - still adapter-backed preflight only, not native runtime enforcement
+- [x] Experimental local sanction preview exists
+  - derived from the resolved identity snapshot, not a live Loom runtime
+  - `execute` / `remediation_only` can deny locally even if the read-only reference gate allows
+  - still preflight-only, not native runtime enforcement
 
 ---
 

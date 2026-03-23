@@ -23,9 +23,13 @@ contract surfaces. Two remain preview-only surfaces today:
 - `sanction_controls`, `approval_hook`, and `budget_gate` now read the
   kernel reference adapter through a read-only preflight path, but still do not
   provide native Loom enforcement or governed execution
+- `loom shadow decide` / `loom shadow enforce` now union that read-only gate
+  result with a local sanction preview derived from the resolved identity
+  snapshot. If the snapshot contains `execute` or `remediation_only`, the
+  decision fails closed locally even if the reference gate would otherwise allow
 - `loom shadow decide` now writes a standalone decision artifact using the same
-  reference gate result, but that is still an experimental preflight surface,
-  not governed runtime enforcement
+  effective decision surface, but that is still an experimental preflight
+  surface, not governed runtime enforcement
 - `loom shadow enforce` now returns fail-closed exit codes from that same
   decision surface, but it is still an experimental operator aid, not runtime
   enforcement
@@ -153,9 +157,11 @@ The supervisor never assumes all execution logic is Rust.
 - Registry entry with 0/7 compliance, status `"planned"`
 - Experimental public scaffold for CLI/setup rehearsal plus 7-surface preflight coverage
 - Experimental decision artifact (`loom shadow decide`) for operator review of the
-  current gate outcome
+  current effective gate outcome
 - Experimental fail-closed command (`loom shadow enforce`) for shell automation
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces
+- Local sanction preview derived from resolved identity restrictions, still
+  preflight-only and not native runtime enforcement
 - No governed execution runtime
 
 ### Phase 1 — Shadow Mode

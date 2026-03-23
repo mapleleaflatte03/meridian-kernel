@@ -102,7 +102,7 @@ exists yet. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
 
 | Phase | Goal | Contract Hooks | Gate |
 |-------|------|---------------|------|
-| 0 (current) | Spec + public scaffold + 7-surface experimental preflight + read-only reference gates | 0/7 | — |
+| 0 (current) | Spec + public scaffold + 7-surface experimental preflight + read-only reference gates + local sanction preview fail-closed shell surface | 0/7 | — |
 | 1 | Shadow mode alongside primary runtime | 2/7 | Zero governance divergence over 3+ runs |
 | 2 | Governed worker cells | 5+/7 | Single agent completes end-to-end in Loom |
 | 3 | Capability ABI | 7/7 maintained | Custom capability loads at runtime |

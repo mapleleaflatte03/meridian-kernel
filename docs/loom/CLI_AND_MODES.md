@@ -62,8 +62,10 @@ identical results to the primary runtime.
 **Current scaffold truth:**
 - `loom shadow preflight` captures experimental events for all 7 contract surfaces
 - `loom shadow decide` writes a standalone decision artifact (`decision.json`)
-- `loom shadow enforce` uses the same decision surface but returns `0` for allow
-  and `2` for deny so shell automation can fail closed
+- that decision surface unions a local sanction preview from the resolved
+  identity snapshot with the read-only reference gate result
+- `loom shadow enforce` uses the same effective decision surface but returns `0`
+  for allow and `2` for deny so shell automation can fail closed
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report
@@ -161,7 +163,7 @@ They do **not** get:
 - a running runtime supervisor
 - worker orchestration
 - multi-institution support
-- native sanction enforcement
+- native sanction enforcement (only an experimental local preview + fail-closed shell surface)
 - the kernel's canonical audit log
 
 Those remain future runtime work, not current scaffold truth.

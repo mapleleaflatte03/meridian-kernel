@@ -53,6 +53,7 @@ _econ_revenue_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_econ_revenue_mod)
 load_revenue = _econ_revenue_mod.load_revenue
 load_ledger = _econ_revenue_mod.load_ledger
+save_ledger = _econ_revenue_mod.save_ledger
 
 # Optional accounting import -- accounting.py is a private company module.
 # When not present, contribute/reserve-floor operations degrade gracefully.
@@ -82,12 +83,217 @@ except Exception:
     _current_phase = None
 
 
+_RUNTIME_BUDGET_RESERVATIONS_FILE = 'runtime_budget_reservations.json'
+
+
 def _now():
     return datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def _parse_ts(value):
     return datetime.datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ')
+
+
+def _budget_reservations_path(org_id=None):
+    return capsule_path(org_id, _RUNTIME_BUDGET_RESERVATIONS_FILE)
+
+
+def _empty_budget_reservation_store():
+    return {
+        'version': 1,
+        'schema': 'meridian-runtime-budget-reservations-v1',
+        'updatedAt': _now(),
+        'reservations': {},
+    }
+
+
+def _normalize_budget_reservation_store(store):
+    payload = dict(store or {})
+    payload.setdefault('version', 1)
+    payload.setdefault('schema', 'meridian-runtime-budget-reservations-v1')
+    payload.setdefault('reservations', {})
+    payload.setdefault('updatedAt', _now())
+    return payload
+
+
+def _load_budget_reservation_store(org_id=None):
+    path = _budget_reservations_path(org_id)
+    if org_id and not os.path.isdir(os.path.dirname(path)):
+        _missing_org_error(org_id)
+    if os.path.exists(path):
+        with open(path) as f:
+            return _normalize_budget_reservation_store(json.load(f))
+    return _empty_budget_reservation_store()
+
+
+def _save_budget_reservation_store(store, org_id=None):
+    path = _budget_reservations_path(org_id)
+    if org_id and not os.path.isdir(os.path.dirname(path)):
+        _missing_org_error(org_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = _normalize_budget_reservation_store(store)
+    payload['updatedAt'] = _now()
+    with open(path, 'w') as f:
+        json.dump(payload, f, indent=2)
+
+
+def _ensure_runtime_budget_fields(ledger):
+    treasury = ledger.setdefault('treasury', {})
+    treasury.setdefault('runtime_budget_reserved_usd', 0.0)
+    treasury.setdefault('runtime_budget_committed_usd', 0.0)
+    treasury.setdefault('runtime_budget_released_usd', 0.0)
+    treasury.setdefault('runtime_budget_expired_usd', 0.0)
+    treasury.setdefault('runtime_budget_active_reservations', 0)
+    return treasury
+
+
+def _resolve_budget_agent(agent_id, org_id=None):
+    from agent_registry import get_agent_by_economy_key, resolve_agent
+
+    agent = get_agent_by_economy_key(agent_id, org_id=org_id)
+    if agent:
+        return agent
+    return resolve_agent(agent_id, org_id=org_id)
+
+
+def _reservation_datetime(value):
+    if not value:
+        return None
+    try:
+        return _parse_ts(value)
+    except Exception:
+        return None
+
+
+def _active_budget_reservations(store, *, org_id=None, agent_id=None, status='reserved'):
+    rows = list((store or {}).get('reservations', {}).values())
+    if status:
+        rows = [row for row in rows if row.get('status') == status]
+    if agent_id:
+        rows = [row for row in rows if row.get('agent_id') == agent_id]
+    if org_id is not None:
+        rows = [row for row in rows if row.get('org_id') == org_id]
+    rows.sort(key=lambda row: (row.get('created_at', ''), row.get('reservation_id', '')))
+    return rows
+
+
+def budget_reservation_summary(org_id=None, *, agent_id=None):
+    """Summarize runtime budget reservations for the current institution."""
+    store = expire_runtime_budget_reservations(org_id, _now())
+    ledger = load_ledger(org_id)
+    treasury = _ensure_runtime_budget_fields(ledger)
+    rows = _active_budget_reservations(store, org_id=org_id, agent_id=agent_id, status=None)
+    status_counts = {}
+    active_reserved_usd = 0.0
+    committed_usd = 0.0
+    released_usd = 0.0
+    expired_usd = 0.0
+    denied_usd = 0.0
+    for row in rows:
+        status = row.get('status', 'unknown')
+        status_counts[status] = status_counts.get(status, 0) + 1
+        amount = float(row.get('estimated_cost_usd', 0.0) or 0.0)
+        if status == 'reserved':
+            active_reserved_usd += amount
+        elif status == 'committed':
+            committed_usd += float(row.get('actual_cost_usd', amount) or amount)
+        elif status == 'released':
+            released_usd += amount
+        elif status == 'expired':
+            expired_usd += amount
+        elif status == 'denied':
+            denied_usd += amount
+    runway = get_runway(org_id)
+    available = max(0.0, runway - active_reserved_usd)
+    return {
+        'org_id': org_id,
+        'agent_id': agent_id,
+        'reservation_count': len(rows),
+        'status_counts': status_counts,
+        'active_reservation_count': status_counts.get('reserved', 0),
+        'committed_reservation_count': status_counts.get('committed', 0),
+        'released_reservation_count': status_counts.get('released', 0),
+        'expired_reservation_count': status_counts.get('expired', 0),
+        'denied_reservation_count': status_counts.get('denied', 0),
+        'active_reserved_usd': round(active_reserved_usd, 4),
+        'committed_usd': round(committed_usd, 4),
+        'released_usd': round(released_usd, 4),
+        'expired_usd': round(expired_usd, 4),
+        'denied_usd': round(denied_usd, 4),
+        'runway_usd': round(runway, 4),
+        'available_for_reservation_usd': round(available, 4),
+        'ledger_runtime_budget_reserved_usd': round(float(treasury.get('runtime_budget_reserved_usd', 0.0) or 0.0), 4),
+        'ledger_runtime_budget_committed_usd': round(float(treasury.get('runtime_budget_committed_usd', 0.0) or 0.0), 4),
+        'ledger_runtime_budget_released_usd': round(float(treasury.get('runtime_budget_released_usd', 0.0) or 0.0), 4),
+        'ledger_runtime_budget_expired_usd': round(float(treasury.get('runtime_budget_expired_usd', 0.0) or 0.0), 4),
+        'ledger_runtime_budget_active_reservations': int(treasury.get('runtime_budget_active_reservations', 0) or 0),
+        'updatedAt': store.get('updatedAt', _now()),
+    }
+
+
+def list_runtime_budget_reservations(org_id=None, *, agent_id=None, status=None):
+    store = expire_runtime_budget_reservations(org_id, _now())
+    return _active_budget_reservations(store, org_id=org_id, agent_id=agent_id, status=status)
+
+
+def get_runtime_budget_reservation(reservation_id, org_id=None):
+    if not reservation_id:
+        return None
+    store = expire_runtime_budget_reservations(org_id, _now())
+    return store.get('reservations', {}).get(reservation_id)
+
+
+def _append_runtime_budget_audit_event(org_id, agent_id, action, reservation, outcome='success', reason=''):
+    try:
+        from audit import log_event
+        log_event(
+            org_id,
+            agent_id,
+            action,
+            resource=reservation.get('reservation_id', ''),
+            outcome=outcome,
+            details={
+                'reservation_id': reservation.get('reservation_id', ''),
+                'estimated_cost_usd': reservation.get('estimated_cost_usd', 0.0),
+                'actual_cost_usd': reservation.get('actual_cost_usd', 0.0),
+                'status': reservation.get('status', ''),
+                'reason': reason,
+                'action': reservation.get('action', ''),
+                'resource': reservation.get('resource', ''),
+                'context': reservation.get('context', {}),
+            },
+            policy_ref=reservation.get('policy_ref', ''),
+        )
+    except Exception:
+        pass
+
+
+def _update_runtime_budget_ledger(org_id, *, reserved_delta=0.0, committed_delta=0.0,
+                                  released_delta=0.0, expired_delta=0.0,
+                                  active_delta=0):
+    ledger = load_ledger(org_id)
+    treasury = _ensure_runtime_budget_fields(ledger)
+    treasury['runtime_budget_reserved_usd'] = round(
+        float(treasury.get('runtime_budget_reserved_usd', 0.0) or 0.0) + float(reserved_delta or 0.0),
+        4,
+    )
+    treasury['runtime_budget_committed_usd'] = round(
+        float(treasury.get('runtime_budget_committed_usd', 0.0) or 0.0) + float(committed_delta or 0.0),
+        4,
+    )
+    treasury['runtime_budget_released_usd'] = round(
+        float(treasury.get('runtime_budget_released_usd', 0.0) or 0.0) + float(released_delta or 0.0),
+        4,
+    )
+    treasury['runtime_budget_expired_usd'] = round(
+        float(treasury.get('runtime_budget_expired_usd', 0.0) or 0.0) + float(expired_delta or 0.0),
+        4,
+    )
+    treasury['runtime_budget_active_reservations'] = max(
+        0,
+        int(treasury.get('runtime_budget_active_reservations', 0) or 0) + int(active_delta or 0),
+    )
+    save_ledger(ledger, org_id)
 
 
 _PROTOCOL_DEFAULTS = {
@@ -436,13 +642,246 @@ def check_budget(agent_id, cost_usd, org_id=None):
     allowed, reason = _agent_check_budget(lookup_id, cost_usd)
     if not allowed:
         return False, reason
-    # Then check treasury runway -- negative runway blocks all spending
-    runway = get_runway(org_id)
+    summary = budget_reservation_summary(org_id, agent_id=lookup_id)
+    runway = summary['runway_usd']
+    available = summary['available_for_reservation_usd']
     if runway < 0:
         return False, f'Treasury below reserve floor (runway ${runway:.2f}). Recapitalize before spending.'
-    if runway < cost_usd:
-        return False, f'Treasury runway insufficient (${runway:.2f} available, ${cost_usd:.2f} requested)'
+    if available < cost_usd:
+        return False, f'Treasury runway insufficient (${available:.2f} available after reservations, ${cost_usd:.2f} requested)'
     return True, 'ok'
+
+
+def reserve_runtime_budget(agent_id, estimated_cost_usd, *, org_id=None, action='',
+                           resource='', context=None, lease_seconds=900, policy_ref=''):
+    """Reserve runtime budget before execution.
+
+    Returns a structured decision dict with reservation metadata when allowed.
+    """
+    from authority import check_authority
+
+    estimated_cost_usd = round(float(estimated_cost_usd), 4)
+    if estimated_cost_usd < 0:
+        raise ValueError('estimated_cost_usd must be non-negative')
+
+    resolved_agent = _resolve_budget_agent(agent_id, org_id=org_id)
+    if not resolved_agent:
+        return {
+            'allowed': False,
+            'stage': 'approval_hook',
+            'reason': 'Agent not found',
+            'reservation': None,
+            'budget': budget_reservation_summary(org_id),
+        }
+
+    lookup_id = resolved_agent['id']
+    auth_allowed, auth_reason = check_authority(lookup_id, action or 'runtime_budget_reservation', org_id=org_id)
+    if not auth_allowed:
+        stage = 'sanction_controls'
+        if 'kill switch' in auth_reason.lower() or 'delegat' in auth_reason.lower():
+            stage = 'approval_hook'
+        return {
+            'allowed': False,
+            'stage': stage,
+            'reason': auth_reason,
+            'reservation': None,
+            'budget': budget_reservation_summary(org_id, agent_id=lookup_id),
+            'sanction': {
+                'source': 'authority',
+                'restrictions': [],
+            },
+        }
+
+    budget_allowed, budget_reason = check_budget(lookup_id, estimated_cost_usd, org_id=org_id)
+    if not budget_allowed:
+        return {
+            'allowed': False,
+            'stage': 'budget_gate',
+            'reason': budget_reason,
+            'reservation': None,
+            'budget': budget_reservation_summary(org_id, agent_id=lookup_id),
+        }
+
+    store = _load_budget_reservation_store(org_id)
+    reservation_id = f'bud_{uuid.uuid4().hex[:12]}'
+    now = _now()
+    expires_at = (
+        datetime.datetime.utcnow() + datetime.timedelta(seconds=max(1, int(lease_seconds or 0)))
+    ).strftime('%Y-%m-%dT%H:%M:%SZ')
+    reservation = {
+        'reservation_id': reservation_id,
+        'org_id': org_id,
+        'agent_id': lookup_id,
+        'requested_agent_ref': agent_id,
+        'status': 'reserved',
+        'estimated_cost_usd': estimated_cost_usd,
+        'actual_cost_usd': 0.0,
+        'action': action,
+        'resource': resource,
+        'context': dict(context or {}),
+        'policy_ref': policy_ref,
+        'lease_seconds': int(lease_seconds or 0),
+        'created_at': now,
+        'expires_at': expires_at,
+        'committed_at': None,
+        'released_at': None,
+        'release_reason': '',
+        'commit_reason': '',
+        'overage_usd': 0.0,
+    }
+    store['reservations'][reservation_id] = reservation
+    _save_budget_reservation_store(store, org_id)
+    _update_runtime_budget_ledger(
+        org_id,
+        reserved_delta=estimated_cost_usd,
+        active_delta=1,
+    )
+    _append_runtime_budget_audit_event(
+        org_id,
+        lookup_id,
+        'runtime_budget_reserved',
+        reservation,
+        reason='ok',
+    )
+    return {
+        'allowed': True,
+        'stage': 'budget_gate',
+        'reason': 'ok',
+        'reservation': reservation,
+        'budget': budget_reservation_summary(org_id, agent_id=lookup_id),
+    }
+
+
+def commit_runtime_budget(reservation_id, actual_cost_usd=None, *, org_id=None, note=''):
+    """Finalize a runtime budget reservation."""
+    reservation_id = (reservation_id or '').strip()
+    if not reservation_id:
+        raise ValueError('reservation_id is required')
+    store = _load_budget_reservation_store(org_id)
+    reservation = store.get('reservations', {}).get(reservation_id)
+    if not reservation:
+        raise LookupError(f'Budget reservation not found: {reservation_id}')
+    if reservation.get('status') not in ('reserved',):
+        raise ValueError(f"Reservation {reservation_id} is already {reservation.get('status')}")
+
+    expires_at = _reservation_datetime(reservation.get('expires_at'))
+    if expires_at and datetime.datetime.utcnow() > expires_at:
+        raise PermissionError(f'Reservation {reservation_id} expired at {reservation.get("expires_at")}')
+
+    estimated = float(reservation.get('estimated_cost_usd', 0.0) or 0.0)
+    actual = estimated if actual_cost_usd is None else round(float(actual_cost_usd), 4)
+    if actual < 0:
+        raise ValueError('actual_cost_usd must be non-negative')
+    overage = round(max(0.0, actual - estimated), 4)
+    reservation['status'] = 'committed'
+    reservation['actual_cost_usd'] = actual
+    reservation['overage_usd'] = overage
+    reservation['commit_reason'] = note or 'runtime budget committed'
+    reservation['committed_at'] = _now()
+    store['reservations'][reservation_id] = reservation
+    _save_budget_reservation_store(store, org_id)
+    _update_runtime_budget_ledger(
+        org_id,
+        reserved_delta=-estimated,
+        committed_delta=actual,
+        active_delta=-1,
+    )
+    _append_runtime_budget_audit_event(
+        org_id,
+        reservation.get('agent_id'),
+        'runtime_budget_committed',
+        reservation,
+        reason=note or 'committed',
+    )
+    return {
+        'allowed': True,
+        'reservation': reservation,
+        'status': 'committed',
+        'overage_usd': overage,
+        'budget': budget_reservation_summary(org_id, agent_id=reservation.get('agent_id')),
+    }
+
+
+def release_runtime_budget(reservation_id, *, org_id=None, reason=''):
+    """Release a runtime budget reservation without execution."""
+    reservation_id = (reservation_id or '').strip()
+    if not reservation_id:
+        raise ValueError('reservation_id is required')
+    store = _load_budget_reservation_store(org_id)
+    reservation = store.get('reservations', {}).get(reservation_id)
+    if not reservation:
+        raise LookupError(f'Budget reservation not found: {reservation_id}')
+    if reservation.get('status') not in ('reserved',):
+        raise ValueError(f"Reservation {reservation_id} is already {reservation.get('status')}")
+    estimated = float(reservation.get('estimated_cost_usd', 0.0) or 0.0)
+    reservation['status'] = 'released'
+    reservation['released_at'] = _now()
+    reservation['release_reason'] = reason or 'released'
+    store['reservations'][reservation_id] = reservation
+    _save_budget_reservation_store(store, org_id)
+    _update_runtime_budget_ledger(
+        org_id,
+        reserved_delta=-estimated,
+        released_delta=estimated,
+        active_delta=-1,
+    )
+    _append_runtime_budget_audit_event(
+        org_id,
+        reservation.get('agent_id'),
+        'runtime_budget_released',
+        reservation,
+        outcome='success',
+        reason=reason or 'released',
+    )
+    return {
+        'allowed': True,
+        'reservation': reservation,
+        'status': 'released',
+        'budget': budget_reservation_summary(org_id, agent_id=reservation.get('agent_id')),
+    }
+
+
+def expire_runtime_budget_reservations(org_id=None, now=None):
+    """Expire any reservations whose lease has ended."""
+    now_dt = None
+    if now is None:
+        now_dt = datetime.datetime.utcnow()
+    elif isinstance(now, str):
+        now_dt = _parse_ts(now)
+    else:
+        now_dt = now
+
+    store = _load_budget_reservation_store(org_id)
+    changed = False
+    expired = []
+    for reservation in store.get('reservations', {}).values():
+        if reservation.get('status') != 'reserved':
+            continue
+        expires_at = _reservation_datetime(reservation.get('expires_at'))
+        if expires_at and now_dt > expires_at:
+            estimated = float(reservation.get('estimated_cost_usd', 0.0) or 0.0)
+            reservation['status'] = 'expired'
+            reservation['expired_at'] = _now()
+            reservation['expired_reason'] = 'lease_expired'
+            expired.append(reservation)
+            changed = True
+            _update_runtime_budget_ledger(
+                org_id,
+                reserved_delta=-estimated,
+                expired_delta=estimated,
+                active_delta=-1,
+            )
+            _append_runtime_budget_audit_event(
+                org_id,
+                reservation.get('agent_id'),
+                'runtime_budget_expired',
+                reservation,
+                outcome='expired',
+                reason='lease_expired',
+            )
+    if changed:
+        _save_budget_reservation_store(store, org_id)
+    return store
 
 
 def record_expense(org_id, agent_id, amount_usd, category, description):
@@ -1623,6 +2062,7 @@ def treasury_snapshot(org_id=None):
         'protocol': protocol,
         'settlement_adapter_summary': settlement_adapter_summary(org_id),
         'settlement_adapters': list_settlement_adapters(org_id),
+        'runtime_budget': budget_reservation_summary(org_id),
         'remediation': remediation,
         'snapshot_at': _now(),
     }

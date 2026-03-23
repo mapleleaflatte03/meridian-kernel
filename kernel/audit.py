@@ -193,6 +193,12 @@ def main():
     runtime.add_argument('--worker_status', default='')
     runtime.add_argument('--worker_kind', default='')
     runtime.add_argument('--parity_status', default='')
+    runtime.add_argument('--event_schema_version', default='')
+    runtime.add_argument('--job_id', default='')
+    runtime.add_argument('--execution_id', default='')
+    runtime.add_argument('--decision_id', default='')
+    runtime.add_argument('--parity_id', default='')
+    runtime.add_argument('--audit_id', default='')
     runtime.add_argument('--session_id', default=None)
 
     q = sub.add_parser('query')
@@ -237,6 +243,12 @@ def main():
                 'worker_status': args.worker_status,
                 'worker_kind': args.worker_kind,
                 'parity_status': args.parity_status,
+                'event_schema_version': args.event_schema_version,
+                'job_id': args.job_id,
+                'execution_id': args.execution_id,
+                'decision_id': args.decision_id,
+                'parity_id': args.parity_id,
+                'audit_id': args.audit_id,
                 'experimental': True,
             },
             policy_ref='experimental_runtime_rehearsal',

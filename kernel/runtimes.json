@@ -169,7 +169,7 @@
       },
       "adapter_available": false,
       "status": "planned",
-      "notes": "Experimental public scaffold exists for CLI/setup rehearsal and 7-surface preflight coverage. Audit emission currently writes a local preview file and sanction controls currently record a restriction snapshot; no governed execution runtime or proven hooks exist yet. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Directional targets: <50MB memory, <500ms cold start, native 7/7 contract compliance (all unproven). See docs/LOOM_SPEC.md for spec, docs/loom/ for productization strategy."
+      "notes": "Experimental public scaffold exists for CLI/setup rehearsal and 7-surface preflight coverage. Audit emission currently writes a local preview file. Sanction controls, approval hook, and budget gate now read kernel reference-adapter decisions through a read-only preflight path, but there is still no native Loom enforcement, governed execution runtime, or proven hook compliance. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Directional targets: <50MB memory, <500ms cold start, native 7/7 contract compliance (all unproven). See docs/LOOM_SPEC.md for spec, docs/loom/ for productization strategy."
     }
   },
   "contract_requirements": {

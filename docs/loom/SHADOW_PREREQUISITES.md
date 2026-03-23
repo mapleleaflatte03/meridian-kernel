@@ -29,6 +29,9 @@ run.
 - [x] Experimental preflight path exists for all 7 governance surfaces
   - `agent_identity`, `action_envelope`, `cost_attribution`, `approval_hook`, `audit_emission`, `sanction_controls`, `budget_gate`
   - still 0/7 proven in the runtime registry
+- [x] Read-only reference gate surface exists for sanction/approval/budget
+  - Loom can compare shadow events against kernel reference-adapter decisions
+  - still file-level comparison only, not runtime parity
 
 ---
 
@@ -48,9 +51,9 @@ run.
   - envelope schema for shadowed actions
   - must include: timestamp, hook name, primary decision, shadow decision
   - must include: input hash for reproducibility
-- [ ] Shadow divergence comparison script
-  - compares Loom governance decisions against primary runtime
-  - reads paired events and reports match / mismatch per hook
+- [ ] Shadow divergence comparison against a primary runtime
+  - current scaffold can compare Loom shadow events against kernel reference-adapter events
+  - future Phase 1 still requires pairing Loom decisions with real OpenClaw runtime decisions
 
 ---
 

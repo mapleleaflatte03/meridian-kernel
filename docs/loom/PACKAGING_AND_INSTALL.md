@@ -29,8 +29,9 @@ Phase 0–2 when the audience is the Meridian team and early contributors.
 workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
 governed runtime. The current scaffold also exposes experimental preflight
 surfaces for all seven contract areas. `audit_emission` is still a local audit
-preview and `sanction_controls` is still a restriction snapshot, so all seven
-remain unproven against the runtime contract registry.
+preview. `sanction_controls`, `approval_hook`, and `budget_gate` now read
+kernel reference-adapter decisions through a read-only preflight path, but all
+seven still remain unproven against the runtime contract registry.
 
 ### 2. Pre-built binary (Phase 3+)
 

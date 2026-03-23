@@ -19,7 +19,9 @@ to validate the CLI shape, setup flow, local state layout, and rehearsal path.
 That scaffold now includes experimental preflight surfaces for all seven
 contract surfaces. Two remain preview-only surfaces today:
 - `audit_emission` writes a local audit preview file, not the kernel's canonical audit log
-- `sanction_controls` records a restriction snapshot, not native runtime enforcement
+- `sanction_controls`, `approval_hook`, and `budget_gate` now read the
+  kernel reference adapter through a read-only preflight path, but still do not
+  provide native Loom enforcement or governed execution
 
 It still does **not** provide governed execution or any proven contract hooks.
 
@@ -143,6 +145,7 @@ The supervisor never assumes all execution logic is Rust.
 - This document
 - Registry entry with 0/7 compliance, status `"planned"`
 - Experimental public scaffold for CLI/setup rehearsal plus 7-surface preflight coverage
+- Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces
 - No governed execution runtime
 
 ### Phase 1 — Shadow Mode

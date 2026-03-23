@@ -145,6 +145,58 @@ def _fetch_live_runtime_proof(url):
     }
 
 
+def _latest_local_runtime_receipt():
+    runtime_audit_path = os.path.join(ROOT_DIR, 'kernel', 'runtime_audit', 'loom_runtime_events.jsonl')
+    if not os.path.exists(runtime_audit_path):
+        return {
+            'included': False,
+            'attempted': False,
+            'path': runtime_audit_path,
+            'reason': 'no_local_runtime_audit_artifact',
+        }
+
+    last_row = None
+    with open(runtime_audit_path, encoding='utf-8') as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                last_row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    if not last_row:
+        return {
+            'included': False,
+            'attempted': True,
+            'path': runtime_audit_path,
+            'reason': 'runtime_audit_file_empty',
+        }
+
+    details = last_row.get('details', {}) or {}
+    return {
+        'included': True,
+        'attempted': True,
+        'path': runtime_audit_path,
+        'captured_at': last_row.get('timestamp', ''),
+        'audit_event_id': last_row.get('id', ''),
+        'receipt': {
+            'runtime_event_id': details.get('runtime_event_id', ''),
+            'event_schema_version': details.get('event_schema_version', ''),
+            'job_id': details.get('job_id', ''),
+            'execution_id': details.get('execution_id', ''),
+            'decision_id': details.get('decision_id', ''),
+            'parity_id': details.get('parity_id', ''),
+            'audit_id': details.get('audit_id', ''),
+            'runtime_outcome': details.get('runtime_outcome', ''),
+            'worker_status': details.get('worker_status', ''),
+            'parity_status': details.get('parity_status', ''),
+            'budget_reservation_status': details.get('budget_reservation_status', ''),
+            'budget_reservation_reason': details.get('budget_reservation_reason', ''),
+        },
+    }
+
+
 def _summarize_openclaw_reference_proof(proof):
     return {
         'runtime_id': proof.get('runtime_id'),
@@ -258,6 +310,7 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
                 'reason': 'no_live_runtime_proof_url_supplied',
             }
         ),
+        'local_loom_runtime_receipt': _latest_local_runtime_receipt(),
         'not_live_proven': [
             'live multi-host federation between independent deployments',
             'live OpenClaw end-to-end hosted wiring',
@@ -288,10 +341,10 @@ def _render_live_receipt_summary(item, title, identity_path, detail_path):
         '-' * len(title),
         f"status:      {_receipt_status_label(item)}",
     ]
-    route = item.get('route') or '(none)'
+    route = item.get('route') or item.get('path') or '(none)'
     lines.append(f"route:       {route}")
     if item.get('included'):
-        lines.append(f"fetched_at:  {item.get('fetched_at', '')}")
+        lines.append(f"fetched_at:  {item.get('fetched_at', item.get('captured_at', ''))}")
         lines.append(f"body_sha256: {item.get('body_sha256', '')}")
         identity = item
         for key in identity_path:
@@ -309,6 +362,21 @@ def _render_live_receipt_summary(item, title, identity_path, detail_path):
                 lines.append(f"subject:     {host_id}")
             if label:
                 lines.append(f"detail:      {label}")
+            runtime_event_id = identity.get('runtime_event_id') or ''
+            job_id = identity.get('job_id') or ''
+            execution_id = identity.get('execution_id') or ''
+            parity_id = identity.get('parity_id') or ''
+            budget_status = identity.get('budget_reservation_status') or ''
+            if runtime_event_id:
+                lines.append(f"runtime_evt: {runtime_event_id}")
+            if job_id:
+                lines.append(f"job_id:      {job_id}")
+            if execution_id:
+                lines.append(f"execution:   {execution_id}")
+            if parity_id:
+                lines.append(f"parity_id:   {parity_id}")
+            if budget_status:
+                lines.append(f"budget:      {budget_status}")
         else:
             lines.append(f"detail:      {identity}")
     else:
@@ -322,6 +390,7 @@ def render_bundle_human(bundle):
     openclaw = bundle.get('openclaw_reference_adapter_federation', {}) or {}
     live_host = bundle.get('live_host_receipt', {}) or {}
     live_runtime = bundle.get('live_runtime_receipt', {}) or {}
+    local_runtime = bundle.get('local_loom_runtime_receipt', {}) or {}
     not_live_proven = bundle.get('not_live_proven', []) or []
 
     three_host_summary = three_host.get('summary', {}) or {}
@@ -383,6 +452,13 @@ def render_bundle_human(bundle):
             _render_live_receipt_summary(
                 live_runtime,
                 'Live runtime proof receipt',
+                ['receipt'],
+                [],
+            ),
+            '',
+            _render_live_receipt_summary(
+                local_runtime,
+                'Local Loom runtime receipt',
                 ['receipt'],
                 [],
             ),

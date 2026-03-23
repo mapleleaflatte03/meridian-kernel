@@ -55,7 +55,7 @@ class AuditEnvOverrideTests(unittest.TestCase):
             runtime_path = pathlib.Path(tmpdir) / 'audit-runtime.jsonl'
             env = os.environ.copy()
             env['MERIDIAN_AUDIT_FILE'] = str(runtime_path)
-            subprocess.run(
+            result = subprocess.run(
                 [
                     sys.executable,
                     str(AUDIT_PATH),
@@ -74,6 +74,16 @@ class AuditEnvOverrideTests(unittest.TestCase):
                     '--worker_status', 'completed',
                     '--worker_kind', 'python_reference_worker',
                     '--parity_status', 'match',
+                    '--runtime_event_id', 'loom.runtime.v1::evt_demo',
+                    '--event_schema_version', 'loom.runtime.v1',
+                    '--job_id', 'job::demo',
+                    '--execution_id', 'execution::demo',
+                    '--decision_id', 'decision::demo',
+                    '--parity_id', 'parity::demo',
+                    '--audit_id', 'audit::demo',
+                    '--budget_reservation_id', 'bud_demo',
+                    '--budget_reservation_status', 'reserved',
+                    '--budget_reservation_reason', 'ok',
                     '--session_id', 'sess_demo',
                 ],
                 env=env,
@@ -81,11 +91,14 @@ class AuditEnvOverrideTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            receipt = json.loads(result.stdout.strip())
 
             self.assertTrue(runtime_path.exists())
             rows = runtime_path.read_text().strip().splitlines()
             self.assertEqual(len(rows), 1)
             event = json.loads(rows[0])
+            self.assertEqual(receipt['runtime_event_id'], 'loom.runtime.v1::evt_demo')
+            self.assertEqual(receipt['budget_reservation_status'], 'reserved')
             self.assertEqual(event['org_id'], 'org_demo')
             self.assertEqual(event['agent_id'], 'agent_atlas')
             self.assertEqual(event['action'], 'research')
@@ -98,6 +111,11 @@ class AuditEnvOverrideTests(unittest.TestCase):
             self.assertEqual(event['details']['worker_status'], 'completed')
             self.assertEqual(event['details']['worker_kind'], 'python_reference_worker')
             self.assertEqual(event['details']['parity_status'], 'match')
+            self.assertEqual(event['details']['runtime_event_id'], 'loom.runtime.v1::evt_demo')
+            self.assertEqual(event['details']['event_schema_version'], 'loom.runtime.v1')
+            self.assertEqual(event['details']['job_id'], 'job::demo')
+            self.assertEqual(event['details']['budget_reservation_id'], 'bud_demo')
+            self.assertEqual(event['details']['budget_reservation_status'], 'reserved')
 
     def test_log_runtime_cli_defaults_to_kernel_runtime_audit_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -110,7 +128,7 @@ class AuditEnvOverrideTests(unittest.TestCase):
             env = os.environ.copy()
             env.pop('MERIDIAN_AUDIT_FILE', None)
             env.pop('MERIDIAN_RUNTIME_AUDIT_FILE', None)
-            subprocess.run(
+            result = subprocess.run(
                 [
                     sys.executable,
                     str(audit_copy),
@@ -129,6 +147,14 @@ class AuditEnvOverrideTests(unittest.TestCase):
                     '--worker_status', 'completed',
                     '--worker_kind', 'python_reference_worker',
                     '--parity_status', 'match',
+                    '--runtime_event_id', 'loom.runtime.v1::evt_default',
+                    '--event_schema_version', 'loom.runtime.v1',
+                    '--job_id', 'job::default',
+                    '--execution_id', 'execution::default',
+                    '--decision_id', 'decision::default',
+                    '--parity_id', 'parity::default',
+                    '--audit_id', 'audit::default',
+                    '--budget_reservation_status', 'committed',
                 ],
                 cwd=root,
                 env=env,
@@ -136,13 +162,17 @@ class AuditEnvOverrideTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            receipt = json.loads(result.stdout.strip())
 
             self.assertTrue(expected.exists())
             rows = expected.read_text().strip().splitlines()
             self.assertEqual(len(rows), 1)
             event = json.loads(rows[0])
+            self.assertEqual(receipt['runtime_audit_file'], str(expected))
             self.assertEqual(event['org_id'], 'org_demo')
             self.assertEqual(event['details']['source'], 'loom_runtime_execute')
+            self.assertEqual(event['details']['runtime_event_id'], 'loom.runtime.v1::evt_default')
+            self.assertEqual(event['details']['budget_reservation_status'], 'committed')
 
 
 if __name__ == '__main__':

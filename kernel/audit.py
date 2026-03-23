@@ -136,6 +136,28 @@ def tail_events(limit=20, org_id=None):
     return events[-limit:]
 
 
+def tail_runtime_events(limit=20, org_id=None):
+    """Return the most recent N runtime audit events from the canonical runtime log."""
+    if not os.path.exists(RUNTIME_AUDIT_FILE):
+        return []
+
+    events = []
+    with open(RUNTIME_AUDIT_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if org_id and event.get('org_id') != org_id:
+                continue
+            events.append(event)
+
+    return events[-limit:]
+
+
 def stats(org_id):
     """Return summary stats for an organization's audit events."""
     events = query_events(org_id=org_id, limit=10000)
@@ -193,12 +215,16 @@ def main():
     runtime.add_argument('--worker_status', default='')
     runtime.add_argument('--worker_kind', default='')
     runtime.add_argument('--parity_status', default='')
+    runtime.add_argument('--runtime_event_id', default='')
     runtime.add_argument('--event_schema_version', default='')
     runtime.add_argument('--job_id', default='')
     runtime.add_argument('--execution_id', default='')
     runtime.add_argument('--decision_id', default='')
     runtime.add_argument('--parity_id', default='')
     runtime.add_argument('--audit_id', default='')
+    runtime.add_argument('--budget_reservation_id', default='')
+    runtime.add_argument('--budget_reservation_status', default='')
+    runtime.add_argument('--budget_reservation_reason', default='')
     runtime.add_argument('--session_id', default=None)
 
     q = sub.add_parser('query')
@@ -225,6 +251,29 @@ def main():
                         session_id=args.session_id)
         print(f'Logged: {eid}')
     elif args.command == 'log-runtime':
+        runtime_details = {
+            'source': 'loom_runtime_execute',
+            'runtime_event_id': args.runtime_event_id,
+            'input_hash': args.input_hash,
+            'estimated_cost_usd': args.estimated_cost_usd,
+            'effective_source': args.effective_source,
+            'effective_stage': args.effective_stage,
+            'reference_stage': args.reference_stage,
+            'runtime_outcome': args.runtime_outcome,
+            'worker_status': args.worker_status,
+            'worker_kind': args.worker_kind,
+            'parity_status': args.parity_status,
+            'event_schema_version': args.event_schema_version,
+            'job_id': args.job_id,
+            'execution_id': args.execution_id,
+            'decision_id': args.decision_id,
+            'parity_id': args.parity_id,
+            'audit_id': args.audit_id,
+            'budget_reservation_id': args.budget_reservation_id,
+            'budget_reservation_status': args.budget_reservation_status,
+            'budget_reservation_reason': args.budget_reservation_reason,
+            'experimental': True,
+        }
         eid = log_event(
             args.org_id,
             args.agent_id,
@@ -232,30 +281,26 @@ def main():
             resource=args.resource,
             outcome=args.outcome,
             actor_type='agent',
-            details={
-                'source': 'loom_runtime_execute',
-                'input_hash': args.input_hash,
-                'estimated_cost_usd': args.estimated_cost_usd,
-                'effective_source': args.effective_source,
-                'effective_stage': args.effective_stage,
-                'reference_stage': args.reference_stage,
-                'runtime_outcome': args.runtime_outcome,
-                'worker_status': args.worker_status,
-                'worker_kind': args.worker_kind,
-                'parity_status': args.parity_status,
-                'event_schema_version': args.event_schema_version,
-                'job_id': args.job_id,
-                'execution_id': args.execution_id,
-                'decision_id': args.decision_id,
-                'parity_id': args.parity_id,
-                'audit_id': args.audit_id,
-                'experimental': True,
-            },
+            details=runtime_details,
             policy_ref='experimental_runtime_rehearsal',
             session_id=args.session_id,
             audit_file=RUNTIME_AUDIT_FILE,
         )
-        print(f'Logged: {eid}')
+        payload = {
+            'audit_event_id': eid,
+            'runtime_event_id': args.runtime_event_id,
+            'event_schema_version': args.event_schema_version,
+            'job_id': args.job_id,
+            'execution_id': args.execution_id,
+            'decision_id': args.decision_id,
+            'parity_id': args.parity_id,
+            'audit_id': args.audit_id,
+            'budget_reservation_id': args.budget_reservation_id,
+            'budget_reservation_status': args.budget_reservation_status,
+            'budget_reservation_reason': args.budget_reservation_reason,
+            'runtime_audit_file': RUNTIME_AUDIT_FILE,
+        }
+        print(json.dumps(payload, sort_keys=True))
     elif args.command == 'query':
         events = query_events(args.org_id, args.agent_id, args.action,
                               args.since, args.outcome, args.limit)

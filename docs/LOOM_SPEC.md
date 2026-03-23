@@ -74,8 +74,12 @@ Several important gaps have moved forward, but not to full runtime proof:
 - the parity surface now emits `.loom/parity/stream.jsonl` and
   `.loom/parity/latest.json`, and can capture per-action live OpenClaw probe
   artifacts under `.loom/parity/openclaw/<input_hash>.json` plus
-  `.loom/parity/openclaw_live_stream.jsonl`. This is stronger than the old
-  file-only compare, but it is still not hosted per-action runtime parity
+  `.loom/parity/openclaw_live_stream.jsonl`
+- that same parity surface now persists a stable-ID action comparison receipt
+  under `.loom/parity/comparisons/<input_hash>.json` plus
+  `.loom/parity/comparison_stream.jsonl`, so Loom runtime events, reference
+  decisions, and audit IDs can be inspected together. This is stronger than the
+  old file-only compare, but it is still not hosted per-action runtime parity
 - `loom shadow decide` / `loom shadow enforce` now union that read-only gate
   result with a local sanction preview derived from the resolved identity
   snapshot. If the snapshot contains `execute` or `remediation_only`, the
@@ -89,6 +93,9 @@ Several important gaps have moved forward, but not to full runtime proof:
 - `loom action execute` now materializes a runtime execution receipt, runtime
   audit artifact, and parity stream for the same effective decision surface, but
   it is still an experimental rehearsal command, not a governed worker runtime
+- the local Wasm lane is now executable via `loom wasm run`, which proves
+  Wasmtime store limits and pooling profiles through a local guest path without
+  claiming a hosted capability runtime already exists
 
 It still does **not** provide governed execution or any proven contract hooks.
 

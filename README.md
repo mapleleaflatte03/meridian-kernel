@@ -99,6 +99,8 @@ That bundle now emits:
 - a structured three-host federation summary
 - a structured OpenClaw reference-adapter federation summary
 - an optional live host receipt when `--live-manifest-url` is supplied
+- a local Loom runtime receipt when `kernel/runtime_audit/loom_runtime_events.jsonl`
+  exists, including canonical runtime IDs and budget reservation status
 - an explicit `not_live_proven` list
 
 See [`examples/public-proof-bundle-human.txt`](examples/public-proof-bundle-human.txt) for a checked-in human-format example captured in a restricted environment.

@@ -22,6 +22,7 @@ loom envelope build    Construct a normalized action envelope
 loom capsule inspect   Inspect the local capsule boundary
 loom shadow preflight  Capture 7-surface experimental preflight events
 loom shadow decide     Materialize the current allow/deny gate outcome
+loom shadow enforce    Return fail-closed exit codes from the same gate outcome
 loom shadow compare    Diff reference-adapter events vs Loom shadow events
 loom shadow report     Show the latest preflight/comparison report
 ```
@@ -61,6 +62,8 @@ identical results to the primary runtime.
 **Current scaffold truth:**
 - `loom shadow preflight` captures experimental events for all 7 contract surfaces
 - `loom shadow decide` writes a standalone decision artifact (`decision.json`)
+- `loom shadow enforce` uses the same decision surface but returns `0` for allow
+  and `2` for deny so shell automation can fail closed
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report

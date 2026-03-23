@@ -35,6 +35,9 @@ run.
 - [x] Experimental decision artifact exists
   - `loom shadow decide` writes the current allow/deny outcome to `.loom/shadow/decision.json`
   - still adapter-backed preflight only, not native runtime enforcement
+- [x] Experimental fail-closed shell surface exists
+  - `loom shadow enforce` returns `0` allow / `2` deny from the same gate result
+  - still adapter-backed preflight only, not native runtime enforcement
 
 ---
 

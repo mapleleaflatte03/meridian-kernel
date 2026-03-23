@@ -33,8 +33,9 @@ audit serializer to write a local preview file. `sanction_controls`,
 `approval_hook`, and `budget_gate` now read
 kernel reference-adapter decisions through a read-only preflight path, and
 `loom shadow decide` now materializes that gate result as a standalone decision
-artifact for operators. All seven still remain unproven against the runtime
-contract registry.
+artifact for operators. `loom shadow enforce` now returns fail-closed exit
+codes from the same decision surface for shell automation. All seven still
+remain unproven against the runtime contract registry.
 
 ### 2. Pre-built binary (Phase 3+)
 

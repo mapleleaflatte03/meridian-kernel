@@ -130,6 +130,9 @@ identical results to the primary runtime.
   transport reporting
 - when the Unix socket boundary is unavailable, that same service shell falls
   back to file-backed ingress under `.loom/runtime/ingress/`
+- `loom service start --http-address ... --service-token ...` can now expose a
+  tokenized local HTTP control plane, and the same service shell can accept
+  `GET /status`, `POST /submit`, and `POST /stop` over that local boundary
 - `loom service import-commitments` can now import sender-side
   `execution_request` delivery refs from a commitments snapshot into the local
   Loom queue and write import markers under

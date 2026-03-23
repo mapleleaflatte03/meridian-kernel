@@ -76,6 +76,9 @@ Several important gaps have moved forward, but not to full runtime proof:
   truthful transport reporting. When the local Unix socket boundary is
   unavailable, the service falls back to file-backed ingress under
   `.loom/runtime/ingress/`
+- `loom service start --http-address ... --service-token ...` can now expose a
+  tokenized local HTTP control plane with `GET /status`, `POST /submit`, and
+  `POST /stop` when the host permits local binding
 - `loom service import-commitments` can now import sender-side
   `execution_request` delivery refs from a commitments snapshot into the local
   Loom queue, writing import markers under

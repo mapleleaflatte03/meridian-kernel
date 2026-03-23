@@ -53,7 +53,9 @@ seven contract areas. `loom action execute` materializes a fail-closed runtime
 receipt, a runtime-side audit artifact, and a parity stream. The scaffold can
 also capture a live OpenClaw proof snapshot on the founder host. `loom service`
 now exposes a local service shell with truthful file-backed ingress fallback,
-and `loom service import-commitments` can import sender-side
+and it can optionally bind a tokenized local HTTP control plane for
+`GET /status`, `POST /submit`, and `POST /stop` when the host permits local
+binding. `loom service import-commitments` can import sender-side
 `execution_request` delivery refs from a commitments snapshot into the local
 queue. These are runtime rehearsal surfaces, not proof of a governed hosted
 runtime. All seven hooks still remain unproven in the runtime registry.

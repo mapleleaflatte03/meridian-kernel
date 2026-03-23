@@ -92,6 +92,26 @@ Stable API, production storage, comprehensive tests, security audit.
 - [ ] Production deployment guide
 - [ ] OpenSSF Best Practices badge
 
+## Meridian Loom — Native Runtime (Planned)
+
+Meridian Loom is a planned Meridian-native execution runtime designed to
+implement all 7 contract hooks natively without adapter translation. It is
+spec-only today — no code exists. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
+
+| Phase | Goal | Contract Hooks | Gate |
+|-------|------|---------------|------|
+| 0 (current) | Spec + registry entry | 0/7 | — |
+| 1 | Shadow mode alongside primary runtime | 2/7 | Zero governance divergence over 3+ runs |
+| 2 | Governed worker cells | 5+/7 | Single agent completes end-to-end in Loom |
+| 3 | Capability ABI | 7/7 maintained | Custom capability loads at runtime |
+| 4 | Checkpoint/sanction native layer | 7/7 | Sanctioned agent blocked natively |
+| 5 | Native ingress (OpenClaw replacement) | 7/7 | 7 consecutive clean runs + owner approval |
+
+Architecture: Rust supervisor, Python/TypeScript workers, WASM capability
+modules. Separate repository (`meridian-loom`). Loom depends on the kernel
+contract; the kernel never depends on Loom. See [docs/loom/](docs/loom/)
+for packaging, CLI, modes, and repository strategy.
+
 ## Future
 
 Ideas under consideration (not committed):

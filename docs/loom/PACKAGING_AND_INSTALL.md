@@ -100,9 +100,8 @@ No implicit behavior — if a transport isn't enabled in config, it isn't loaded
 Loom does **not** bundle the kernel. The kernel is a separate install:
 
 ```bash
-# Install kernel (Python, no build step)
+# Get kernel (pure Python, stdlib-only — no pip install needed)
 git clone https://github.com/<org>/meridian-kernel.git
-cd meridian-kernel && pip install -e .   # or just use directly
 
 # Install Loom (Rust)
 git clone https://github.com/<org>/meridian-loom.git
@@ -118,13 +117,30 @@ path keeps them separate.
 
 ## Versioning
 
-Loom versions independently from the kernel. The contract spec version
-(from `runtimes.json`) is the compatibility anchor:
+Loom versions independently from the kernel. The seven-hook contract
+defined in `kernel/runtimes.json` is the compatibility anchor — it does
+not carry its own version number today. Compatibility is expressed as
+the count of proven hooks:
 
 ```
-Kernel contract spec: v1.0
-Loom version: 0.1.0 (implements contract spec v1.0, 2/7 hooks proven)
+Loom 0.1.0 — 0/7 hooks proven (Phase 0, spec only)
+Loom 0.2.0 — 2/7 hooks proven (Phase 1, shadow mode)
 ```
 
 Loom's version number does not imply kernel version compatibility beyond
-the stated contract spec version.
+the hook count it has proven against the current contract definition.
+
+## Maturity Gates
+
+Loom follows a graduated maturity model. Each gate requires proof, not
+just elapsed time.
+
+| Gate | Requirement | What it unlocks |
+|------|-------------|-----------------|
+| **Pre-alpha** (current) | Spec exists, registry entry at 0/7 | Nothing — design-only |
+| **Alpha** | 2+/7 hooks proven, shadow mode runs | Evaluation by contributors |
+| **Beta** | 5+/7 hooks proven, governed worker cells pass | Opt-in use alongside primary runtime |
+| **GA** | 7/7 hooks proven, 7 consecutive clean night-shift runs | Production use, OpenClaw retirement eligible |
+
+No gate is reached until the corresponding `contract_compliance` fields
+in `runtimes.json` are set to `true` by passing tests. `null` = unproven.

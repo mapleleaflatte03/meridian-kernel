@@ -10,6 +10,7 @@ Loom is a runtime, not a Swiss Army knife.
 ### Core commands
 
 ```
+loom init              Create loom.toml and initialize local state
 loom start             Start the runtime (reads loom.toml)
 loom stop              Graceful shutdown
 loom health            Structured health check (JSON)
@@ -17,6 +18,11 @@ loom status            Human-readable status summary
 loom config show       Print resolved configuration
 loom config set <k> <v>  Set a config value in loom.toml
 ```
+
+`loom init` accepts `--mode shadow|standalone|embedded` (default: `standalone`)
+and `--kernel-path <path>` (required for standalone/shadow, ignored for embedded).
+It writes a `loom.toml` in the current directory. If one already exists, it
+exits with an error — no silent overwrite.
 
 ### Governance commands
 

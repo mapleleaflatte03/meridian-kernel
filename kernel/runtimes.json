@@ -143,6 +143,33 @@
       "adapter_available": false,
       "status": "planned",
       "notes": "A2A provides stable agent identity via agent card. Action envelope mapping from A2A task schema is partial. All treasury, audit, court integration requires a Meridian A2A adapter. Planned for v0.2."
+    },
+    "meridian_loom": {
+      "id": "meridian_loom",
+      "label": "Meridian Loom",
+      "description": "Planned Meridian-native execution runtime in Rust. Designed to implement all 7 contract hooks natively without adapter translation. Replaces OpenClaw through a phased shadow-mode migration.",
+      "type": "hosted",
+      "protocol_support": ["custom", "MCP", "A2A"],
+      "identity_mode": "string_id",
+      "execution_ownership": "meridian",
+      "capability_exposure": [],
+      "contract_compliance": {
+        "agent_identity": null,
+        "action_envelope": null,
+        "cost_attribution": null,
+        "approval_hook": null,
+        "audit_emission": null,
+        "sanction_controls": null,
+        "budget_gate": null
+      },
+      "integration": {
+        "treasury": "planned",
+        "audit": "planned",
+        "court": "planned"
+      },
+      "adapter_available": false,
+      "status": "planned",
+      "notes": "Spec only. No code exists yet. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Target: <50MB memory, <500ms cold start, native 7/7 contract compliance. Phases: spec -> shadow -> governed cells -> capability ABI -> checkpoint/sanction -> native ingress."
     }
   },
   "contract_requirements": {
@@ -159,5 +186,5 @@
     "partial": 4,
     "non_compliant": 0
   },
-  "updatedAt": "2026-03-21T18:19:41Z"
+  "updatedAt": "2026-03-23T00:00:00Z"
 }

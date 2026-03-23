@@ -1,0 +1,170 @@
+# Meridian Loom — Runtime Specification
+
+**Status:** PLANNED (0/7 contract compliance)
+**Core language:** Rust (supervisor / runtime core)
+**Worker languages:** Python, TypeScript (where appropriate)
+**Sandbox:** WASM for capability modules
+**Registry ID:** `meridian_loom`
+
+Meridian Loom is the planned Meridian-native execution runtime. It is designed to
+implement all 7 governance contract hooks natively — without adapter translation —
+and to replace OpenClaw through a phased shadow-mode migration.
+
+Loom is polyglot by design: a Rust supervisor manages lifecycle, isolation, and
+governance bridging, while workers may be written in Python or TypeScript. WASM
+sandboxing is used for capability modules where isolation matters.
+
+This document is a spec. No Loom code exists yet.
+
+---
+
+## 1. Separation of Concerns
+
+**Meridian Kernel** owns governance:
+- Institution, Agent, Authority, Treasury, Court
+- 7 contract hooks (identity, envelope, cost, approval, audit, sanctions, budget)
+
+**Meridian Loom** owns execution:
+- Process lifecycle (start, stop, health, restart)
+- LLM call routing and model selection
+- Tool execution and sandboxing
+- Channel/transport adapters (Telegram, MCP, A2A, HTTP)
+- Session management and context windows
+- Container/WASM isolation
+- Cron/scheduling primitives
+
+**The boundary:** Loom calls UP into the Kernel via the 7 hooks.
+The Kernel never calls down into Loom.
+
+---
+
+## 2. Contract Requirements
+
+Every runtime in the Meridian ecosystem must satisfy 7 contract hooks
+(defined in `kernel/runtimes.json` under `contract_requirements`).
+
+| # | Hook | What Loom Must Do |
+|---|------|-------------------|
+| 1 | `agent_identity` | Provide stable unique agent ID mapping to kernel agent records |
+| 2 | `action_envelope` | Wrap each governed action: agent_id, action_type, resource, estimated_cost_usd |
+| 3 | `cost_attribution` | Report actual cost post-action via kernel `metering.record()` |
+| 4 | `approval_hook` | Call `check_authority(agent_id, action)` before privileged actions; block on `False` |
+| 5 | `audit_emission` | Emit structured events to kernel audit_log (timestamp, agent_id, action, outcome) |
+| 6 | `sanction_controls` | Query `get_restrictions(agent_id)` per session; enforce restrictions |
+| 7 | `budget_gate` | Call `check_budget(agent_id, cost)` before cost-bearing ops; block on `False` |
+
+Current compliance: **0/7** (all `null` — unproven).
+
+---
+
+## 3. Target Performance
+
+| Metric | Target | Rationale |
+|--------|--------|-----------|
+| Memory | <50 MB | OpenClaw uses ~100 MB; Rust runtimes (ZeroClaw, SkyClaw) achieve <15 MB |
+| Cold start | <500 ms | OpenClaw takes ~30s; ZeroClaw achieves 10ms |
+| Isolation | WASM + container | Dual-metered like OpenFang; WASM for tools, container for untrusted code |
+| Contract compliance | 7/7 native | No adapter translation needed |
+
+---
+
+## 4. Module Layout
+
+```
+meridian-loom/
+  loom.toml                       # Runtime config
+  Cargo.toml                      # Rust supervisor manifest
+
+  # ── Rust core (supervisor, lifecycle, governance bridge) ──
+  src/
+    main.rs                       # Entry point
+    runtime/
+      mod.rs
+      lifecycle.rs                # Start, stop, health, restart
+      session.rs                  # Session management
+      scheduler.rs                # Cron + night-shift scheduling
+    execution/
+      mod.rs
+      sandbox.rs                  # Container/WASM isolation boundary
+      worker_spawn.rs             # Spawn Python/TS/Rust workers
+      llm_router.rs               # Model selection + call routing
+    transport/
+      mod.rs
+      telegram.rs                 # Telegram channel adapter
+      mcp.rs                      # MCP server/client
+      a2a.rs                      # A2A protocol adapter
+      http.rs                     # HTTP API surface
+    governance/
+      mod.rs
+      contract_bridge.rs          # 7-hook bridge to Meridian Kernel
+      envelope.rs                 # Action envelope construction
+      metering_emitter.rs         # Cost attribution emission
+
+  # ── Workers (polyglot — language chosen per task) ──
+  workers/
+    python/                       # Python workers (research, analysis)
+    typescript/                   # TypeScript workers (channel adapters)
+    wasm/                         # WASM capability modules (sandboxed tools)
+
+  tests/
+    contract_compliance_test.rs   # Proves 7/7 compliance
+    shadow_mode_test.rs           # Shadow vs. primary comparison
+```
+
+The Rust core handles lifecycle, isolation, and governance bridging. Workers are
+spawned as separate processes (Python, TypeScript) or loaded as WASM modules.
+The supervisor never assumes all execution logic is Rust.
+
+---
+
+## 5. Phased Migration
+
+### Phase 0 — Spec (current)
+- This document
+- Registry entry with 0/7 compliance, status `"planned"`
+- No code
+
+### Phase 1 — Shadow Mode
+- Loom runs alongside OpenClaw, receiving same inputs, outputs discarded
+- Governance hooks call the real kernel
+- Target: 2/7 compliance (agent_identity + action_envelope)
+- Verification: zero governance-check divergence over 3+ night-shift runs
+
+### Phase 2 — Governed Worker Cells
+- Loom executes real agent tasks in isolated cells
+- Cost attribution and budget gate implemented
+- Target: 5+/7 compliance
+- Verification: single governed agent completes end-to-end in Loom
+
+### Phase 3 — Capability ABI
+- Stable binary interface for capabilities (tools, transports, sandboxes)
+- Loadable without recompilation
+- Target: 7/7 compliance maintained
+
+### Phase 4 — Checkpoint/Sanction Native Layer
+- Native checkpoint emission and sanction enforcement
+- No adapter translation for restrictions
+- Target: 7/7 compliance, sanctioned agent blocked natively
+
+### Phase 5 — Native Ingress
+- Telegram bot adapter, MCP server, scheduler
+- Full OpenClaw replacement
+- Justification gate: Phase 4 stable AND owner confirms retirement
+- Verification: 7 consecutive clean night-shift runs before OpenClaw retirement
+
+---
+
+## 6. Verification
+
+At each phase, the runtime adapter tooling proves compliance:
+
+```bash
+# Show current state
+python3 kernel/runtime_adapter.py show --runtime_id meridian_loom
+
+# Check contract compliance
+python3 kernel/runtime_adapter.py check-contract --runtime_id meridian_loom
+```
+
+`null` = unproven, `true` = proven by test, `false` = non-compliant.
+No field is set to `true` until a test proves it.

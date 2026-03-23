@@ -56,6 +56,9 @@ Current human-mode output uses the same `Meridian Loom // ...` header grammar
 across init, doctor, health, status, config, contract, identity, envelope,
 capsule, shadow, runtime, parity, and help surfaces so the operator shell reads
 as one system instead of a pile of unrelated subcommands.
+When stdout is a TTY, the CLI now adds a restrained ANSI shell layer for
+headers and status cues. `NO_COLOR=1` disables it without changing the
+underlying artifact grammar.
 
 `loom init` accepts `--mode shadow|standalone|embedded` and `--kernel-path <path>`.
 The current rehearsal path uses `embedded` plus a kernel path so the scaffold can
@@ -97,13 +100,14 @@ identical results to the primary runtime.
 - `loom shadow enforce` uses the same effective decision surface but returns `0`
   for allow and `2` for deny so shell automation can fail closed
 - `loom action execute` uses that same effective decision surface to materialize
-  a runtime execution receipt, a runtime-side audit artifact, and a parity
-  stream
+  a runtime execution receipt, a runtime-side audit artifact, a parity
+  stream, and a governed local worker dispatch when the decision is `allow`
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report
 - `loom parity report` surfaces the runtime-side parity report and, when
-  available, a live OpenClaw proof snapshot captured from the founder host
+  available, a per-action OpenClaw probe artifact and probe stream captured
+  from the founder host
 
 **What it does not do yet:**
 - It does not subscribe to live production traffic
@@ -199,11 +203,11 @@ state boundary. In the current scaffold, the user gets:
 
 They do **not** get:
 - a running runtime supervisor
-- worker orchestration
+- a long-running worker supervisor
 - multi-institution support
-- native sanction enforcement in a live worker runtime
-- the kernel's canonical audit log
-- per-action live OpenClaw parity
+- native sanction enforcement in a hosted worker runtime
+- the hosted kernel's canonical audit log
+- per-action live OpenClaw parity against a real OpenClaw action execution stream
 
 Those remain future runtime work, not current scaffold truth.
 

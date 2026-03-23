@@ -1,6 +1,6 @@
 Meridian Kernel // PUBLIC PROOF BUNDLE
 ======================================
-generated_at:    2026-03-23T15:09:58+00:00
+generated_at:    2026-03-23T15:21:35+00:00
 bundle_version:  3
 reference_scope: oss_kernel_reference
 phase:           oss reference proofs + optional live host receipts

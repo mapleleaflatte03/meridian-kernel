@@ -364,7 +364,7 @@ Meridian is runtime-neutral in design. Today, one runtime path is built in and o
 |---------|----------|----------------|
 | `local_kernel` | custom | Compliant (7/7) — built-in reference |
 | `openclaw_compatible` | custom | Reference adapter (7/7 via tested kernel-side library) |
-| `meridian_loom` | custom, MCP, A2A | Planned (0/7) — [spec + public experimental scaffold](docs/LOOM_SPEC.md), including 7-surface shadow rehearsal, fail-closed `loom action execute`, runtime-side audit artifacts, and a parity stream with optional live OpenClaw proof snapshots |
+| `meridian_loom` | custom, MCP, A2A | Planned (0/7) — [spec + public experimental scaffold](docs/LOOM_SPEC.md), including 7-surface shadow rehearsal, fail-closed `loom action execute`, governed local worker dispatch on allow-path, kernel-CLI-backed runtime audit artifacts, and a parity stream with per-action OpenClaw probe artifacts |
 | `mcp_generic` | MCP | Planned (2/7) — no adapter yet |
 | `a2a_generic` | A2A | Planned (1/7) — no adapter yet |
 | `openfang_compatible` | custom | Planned (0/7) — no adapter yet |

@@ -164,6 +164,24 @@ def main():
     l.add_argument('--outcome', default='success')
     l.add_argument('--actor_type', default='agent')
     l.add_argument('--policy_ref', default='')
+    l.add_argument('--session_id', default=None)
+
+    runtime = sub.add_parser('log-runtime')
+    runtime.add_argument('--org_id', required=True)
+    runtime.add_argument('--agent_id', default='')
+    runtime.add_argument('--action', required=True)
+    runtime.add_argument('--resource', default='')
+    runtime.add_argument('--outcome', required=True)
+    runtime.add_argument('--input_hash', required=True)
+    runtime.add_argument('--estimated_cost_usd', type=float, required=True)
+    runtime.add_argument('--effective_source', required=True)
+    runtime.add_argument('--effective_stage', required=True)
+    runtime.add_argument('--reference_stage', required=True)
+    runtime.add_argument('--runtime_outcome', required=True)
+    runtime.add_argument('--worker_status', default='')
+    runtime.add_argument('--worker_kind', default='')
+    runtime.add_argument('--parity_status', default='')
+    runtime.add_argument('--session_id', default=None)
 
     q = sub.add_parser('query')
     q.add_argument('--org_id', default=None)
@@ -185,7 +203,33 @@ def main():
     if args.command == 'log':
         eid = log_event(args.org_id, args.agent_id, args.action,
                         args.resource, args.outcome, args.actor_type,
-                        policy_ref=args.policy_ref)
+                        policy_ref=args.policy_ref,
+                        session_id=args.session_id)
+        print(f'Logged: {eid}')
+    elif args.command == 'log-runtime':
+        eid = log_event(
+            args.org_id,
+            args.agent_id,
+            args.action,
+            resource=args.resource,
+            outcome=args.outcome,
+            actor_type='agent',
+            details={
+                'source': 'loom_runtime_execute',
+                'input_hash': args.input_hash,
+                'estimated_cost_usd': args.estimated_cost_usd,
+                'effective_source': args.effective_source,
+                'effective_stage': args.effective_stage,
+                'reference_stage': args.reference_stage,
+                'runtime_outcome': args.runtime_outcome,
+                'worker_status': args.worker_status,
+                'worker_kind': args.worker_kind,
+                'parity_status': args.parity_status,
+                'experimental': True,
+            },
+            policy_ref='experimental_runtime_rehearsal',
+            session_id=args.session_id,
+        )
         print(f'Logged: {eid}')
     elif args.command == 'query':
         events = query_events(args.org_id, args.agent_id, args.action,

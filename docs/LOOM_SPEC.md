@@ -41,17 +41,21 @@ to validate the CLI shape, setup flow, local state layout, and rehearsal path.
 That scaffold now includes rehearsal surfaces for all seven contract areas.
 Several important gaps have moved forward, but not to full runtime proof:
 - `audit_emission` now writes a runtime-side artifact under
-  `.loom/audit/runtime_events.jsonl`, using the kernel serializer when
-  available and a local fallback otherwise. This is still not the kernel's
-  canonical audit log
+  `.loom/audit/runtime_events.jsonl`, using the kernel-owned `audit.py
+  log-runtime` CLI path when available and a local fallback otherwise. This is
+  still not the hosted kernel's global audit log
 - `sanction_controls`, `approval_hook`, and `budget_gate` are still sourced
   from read-only kernel reference gates, but `loom action execute` now enforces
   the current effective allow/deny outcome fail-closed instead of stopping at a
   shell-only preflight path
+- when that effective decision is `allow`, `loom action execute` now dispatches
+  an experimental local worker through a governed supervisor path and writes
+  request/result/log artifacts under `.loom/runtime/jobs/<input_hash>/`
 - the parity surface now emits `.loom/parity/stream.jsonl` and
-  `.loom/parity/latest.json`, and can capture a live OpenClaw proof snapshot on
-  the founder host. This is stronger than the old file-only compare, but it is
-  still not per-action live runtime parity
+  `.loom/parity/latest.json`, and can capture per-action live OpenClaw probe
+  artifacts under `.loom/parity/openclaw/<input_hash>.json` plus
+  `.loom/parity/openclaw_live_stream.jsonl`. This is stronger than the old
+  file-only compare, but it is still not hosted per-action runtime parity
 - `loom shadow decide` / `loom shadow enforce` now union that read-only gate
   result with a local sanction preview derived from the resolved identity
   snapshot. If the snapshot contains `execute` or `remediation_only`, the
@@ -193,9 +197,10 @@ The supervisor never assumes all execution logic is Rust.
   current effective gate outcome
 - Experimental fail-closed command (`loom shadow enforce`) for shell automation
 - Experimental fail-closed runtime rehearsal command (`loom action execute`)
+- Experimental governed local worker supervisor on allow-path
 - Runtime-side audit artifact under `.loom/audit/runtime_events.jsonl`
 - Parity stream and latest parity report under `.loom/parity/`
-- Optional founder-host OpenClaw live proof snapshot captured into the parity surface
+- Optional per-action founder-host OpenClaw live probe artifact captured into the parity surface
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces
 - Local sanction preview derived from resolved identity restrictions, still
   rehearsal-only and not native runtime enforcement

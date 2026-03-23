@@ -54,6 +54,10 @@ Several important gaps have moved forward, but not to full runtime proof:
 - `loom action enqueue` and `loom supervisor run` now materialize and process
   queued actions under `.loom/runtime/queue/`, exercising the same decision and
   worker dispatch path through a local queue supervisor
+- `loom job list` / `loom job inspect` now surface persisted runtime-owned job
+  state from `.loom/runtime/jobs/<input_hash>/job.json`, so the operator can
+  inspect queue, decision, execution, parity, and audit paths without manual
+  file spelunking
 - `loom supervisor watch` now runs that same local queue supervisor in a bounded
   polling loop and writes `.loom/runtime/supervisor/status.json` plus
   `.loom/runtime/supervisor/heartbeat.jsonl`. This makes local supervisor state

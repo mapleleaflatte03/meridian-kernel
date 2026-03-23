@@ -43,6 +43,8 @@ loom contract show     Show current registry-declared compliance state
 loom agent resolve     Resolve governed agent identity against the kernel registry
 loom envelope build    Construct a normalized action envelope
 loom capsule inspect   Inspect the local capsule boundary
+loom job list          Show persisted runtime-owned job state
+loom job inspect       Inspect a specific job lifecycle snapshot
 loom action enqueue    Materialize a queued governed action artifact
 loom action execute    Rehearse fail-closed execution and write runtime/parity artifacts
 loom supervisor run    Process queued actions through the local queue supervisor
@@ -61,8 +63,8 @@ loom parity report     Show the runtime-side parity stream and latest parity rep
 
 Current human-mode output uses the same `Meridian Loom // ...` header grammar
 across init, doctor, health, status, config, contract, identity, envelope,
-capsule, shadow, runtime, parity, and help surfaces so the operator shell reads
-as one system instead of a pile of unrelated subcommands.
+capsule, job, shadow, runtime, parity, and help surfaces so the operator shell
+reads as one system instead of a pile of unrelated subcommands.
 `loom supervisor watch` extends that grammar into a bounded loop surface with
 heartbeat/status artifacts instead of introducing a separate ad hoc operator style.
 `loom supervisor daemon start/status/stop` extend that same grammar into a local
@@ -113,6 +115,8 @@ identical results to the primary runtime.
 - `loom action execute` uses that same effective decision surface to materialize
   a runtime execution receipt, a runtime-side audit artifact, a parity
   stream, and a governed local worker dispatch when the decision is `allow`
+- `loom job list` and `loom job inspect` now surface persisted runtime-owned
+  job state from `.loom/runtime/jobs/<input_hash>/job.json`
 - `loom action enqueue` and `loom supervisor run` now exercise the same allow/
   deny boundary through a local queue supervisor, moving queued artifacts from
   `.loom/runtime/queue/pending/` into `.loom/runtime/queue/processed/`
@@ -219,6 +223,7 @@ state boundary. In the current scaffold, the user gets:
 - registry-backed contract inspection
 - agent identity resolution against the kernel registry
 - action envelope construction
+- a runtime-owned job ledger with `loom job list` / `loom job inspect`
 - experimental shadow preflight, decision capture, comparison, fail-closed
   runtime rehearsal, queue-backed supervisor rehearsal, runtime-side audit
   artifacts, and parity reporting

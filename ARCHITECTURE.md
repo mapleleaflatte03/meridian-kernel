@@ -407,7 +407,7 @@ Currently registered runtimes:
 |---------|------|----------------|
 | `local_kernel` | local | Compliant (7/7) |
 | `openclaw_compatible` | hosted | Reference adapter (7/7 via tested kernel-side library) |
-| `meridian_loom` | hosted | Planned (0/7, spec + public experimental scaffold with 7-surface rehearsal, fail-closed `loom action execute`, governed local worker dispatch on allow-path, `action enqueue` + `supervisor run` queue rehearsal, bounded `supervisor watch` heartbeat/status artifacts, local daemon lifecycle rehearsal, kernel-owned runtime audit artifacts, and a parity stream with per-action OpenClaw probe artifacts — [LOOM_SPEC](docs/LOOM_SPEC.md)) |
+| `meridian_loom` | hosted | Planned (0/7, spec + public experimental scaffold with 7-surface rehearsal, fail-closed `loom action execute`, governed local worker dispatch on allow-path, `action enqueue` + `supervisor run` queue rehearsal, runtime-owned `job list` / `job inspect` surfaces, bounded `supervisor watch` heartbeat/status artifacts, local daemon lifecycle rehearsal, kernel-owned runtime audit artifacts, and a parity stream with per-action OpenClaw probe artifacts — [LOOM_SPEC](docs/LOOM_SPEC.md)) |
 | `mcp_generic` | mcp_app | Planned (2/7, no adapter yet) |
 | `a2a_generic` | a2a_agent | Planned (1/7, no adapter yet) |
 | `openfang_compatible` | hosted | Planned (0/7, no adapter yet) |

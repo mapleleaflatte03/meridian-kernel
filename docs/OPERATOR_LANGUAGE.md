@@ -482,10 +482,10 @@ must convey the same information as a color terminal.
 Meridian Loom is the planned Meridian-native execution runtime (see
 `docs/LOOM_SPEC.md`). Current status: PLANNED in the registry, with a public
 experimental scaffold in a separate repo. The scaffold already exposes `loom
-doctor`, `loom status`, `loom contract show`, `loom shadow decide`, `loom
-shadow enforce`, `loom action execute`, and `loom parity report` as rehearsal
-surfaces. This section defines the target command surface and the operator
-language those current surfaces should grow into.
+doctor`, `loom status`, `loom contract show`, `loom job list`, `loom job inspect`,
+`loom shadow decide`, `loom shadow enforce`, `loom action execute`, and
+`loom parity report` as rehearsal surfaces. This section defines the target
+command surface and the operator language those current surfaces should grow into.
 
 All Loom commands are prefixed `loom`, not `meridian`. Loom is the runtime.
 Meridian is the governance kernel. The namespaces are separate.
@@ -502,6 +502,10 @@ Meridian Loom // CONTRACT
 Meridian Loom // AGENT IDENTITY
 Meridian Loom // ACTION ENVELOPE
 Meridian Loom // CAPSULE INSPECT
+Meridian Loom // JOB LIST
+Meridian Loom // JOB INSPECT
+Meridian Loom // SUPERVISOR STATUS
+Meridian Loom // SUPERVISOR DAEMON
 Meridian Loom // SHADOW PREFLIGHT
 Meridian Loom // SHADOW DECISION
 Meridian Loom // RUNTIME EXECUTE

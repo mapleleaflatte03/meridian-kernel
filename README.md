@@ -1,6 +1,32 @@
 <p align="center">
-  <img src="docs/assets/meridian_lockup_flat.svg" alt="Meridian Constitutional Kernel" width="420">
+  <img src="docs/assets/meridian_lockup_flat.svg" alt="Meridian Constitutional Kernel" width="720">
 </p>
+
+<p align="center">
+  Runtime-neutral governance primitives, public proof, and contract surfaces for managed digital labor.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/kernel-python%20stdlib-0c1117?style=flat-square" alt="Python standard library only">
+  <img src="https://img.shields.io/badge/proof-public%20bundle%20ready-0f766e?style=flat-square" alt="Public proof bundle ready">
+  <img src="https://img.shields.io/badge/runtime-neutral-governance%20layer-1f6feb?style=flat-square" alt="Runtime neutral governance layer">
+  <img src="https://img.shields.io/github/actions/workflow/status/mapleleaflatte03/meridian-kernel/test.yml?branch=main&style=flat-square" alt="Kernel CI">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-475569?style=flat-square" alt="Apache 2.0 license">
+</p>
+
+<p align="center">
+  <a href="docs/PROOF_MATRIX.md">Proof Matrix</a> ·
+  <a href="docs/RUNTIME_CONTRACT.md">Runtime Contract</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/LOOM_SPEC.md">Loom Spec</a> ·
+  <a href="https://app.welliam.codes">Live Host</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/meridian_kernel_surfaces.svg" alt="Meridian Kernel surface overview" width="960">
+</p>
+
+> Meridian Kernel is the governance layer above runtimes: real primitives, real proof, and an honest runtime boundary. It does not pretend to be the runner.
 
 # Meridian Constitutional Kernel
 

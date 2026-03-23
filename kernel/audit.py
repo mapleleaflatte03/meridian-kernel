@@ -24,6 +24,13 @@ AUDIT_FILE = os.environ.get(
     'MERIDIAN_AUDIT_FILE',
     os.path.join(PLATFORM_DIR, 'audit_log.jsonl'),
 )
+RUNTIME_AUDIT_FILE = os.environ.get(
+    'MERIDIAN_RUNTIME_AUDIT_FILE',
+    os.environ.get(
+        'MERIDIAN_AUDIT_FILE',
+        os.path.join(PLATFORM_DIR, 'runtime_audit', 'loom_runtime_events.jsonl'),
+    ),
+)
 
 # Max audit log size before rotation (10MB)
 MAX_LOG_SIZE = 10 * 1024 * 1024
@@ -35,12 +42,13 @@ def _now():
 
 def log_event(org_id, agent_id, action, resource='', outcome='success',
               actor_type='agent', details=None, policy_ref='',
-              session_id=None):
+              session_id=None, audit_file=None):
     """Append an audit event to the log.
 
     When session_id is provided, it is recorded as a top-level field
     so that the audit trail traces which session authorized the action.
     """
+    audit_file = audit_file or AUDIT_FILE
     event = {
         'id': f'evt_{uuid.uuid4().hex[:10]}',
         'timestamp': _now(),
@@ -57,11 +65,15 @@ def log_event(org_id, agent_id, action, resource='', outcome='success',
         event['session_id'] = session_id
 
     # Rotate if file is too large
-    if os.path.exists(AUDIT_FILE) and os.path.getsize(AUDIT_FILE) > MAX_LOG_SIZE:
-        archive = AUDIT_FILE + f'.{datetime.date.today().isoformat()}'
-        os.rename(AUDIT_FILE, archive)
+    if os.path.exists(audit_file) and os.path.getsize(audit_file) > MAX_LOG_SIZE:
+        archive = audit_file + f'.{datetime.date.today().isoformat()}'
+        os.rename(audit_file, archive)
 
-    with open(AUDIT_FILE, 'a') as f:
+    parent_dir = os.path.dirname(audit_file)
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+
+    with open(audit_file, 'a') as f:
         f.write(json.dumps(event) + '\n')
 
     return event['id']
@@ -229,6 +241,7 @@ def main():
             },
             policy_ref='experimental_runtime_rehearsal',
             session_id=args.session_id,
+            audit_file=RUNTIME_AUDIT_FILE,
         )
         print(f'Logged: {eid}')
     elif args.command == 'query':

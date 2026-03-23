@@ -40,10 +40,10 @@ This document began as a pure spec. An experimental public scaffold now exists
 to validate the CLI shape, setup flow, local state layout, and rehearsal path.
 That scaffold now includes rehearsal surfaces for all seven contract areas.
 Several important gaps have moved forward, but not to full runtime proof:
-- `audit_emission` now writes a runtime-side artifact under
-  `.loom/audit/runtime_events.jsonl`, using the kernel-owned `audit.py
-  log-runtime` CLI path when available and a local fallback otherwise. This is
-  still not the hosted kernel's global audit log
+- `audit_emission` now writes runtime-side artifacts through the kernel-owned
+  `audit.py log-runtime` CLI path into `kernel/runtime_audit/loom_runtime_events.jsonl`
+  when a kernel is present, with a local fallback otherwise. This is still not
+  the hosted kernel's global audit trail
 - `sanction_controls`, `approval_hook`, and `budget_gate` are still sourced
   from read-only kernel reference gates, but `loom action execute` now enforces
   the current effective allow/deny outcome fail-closed instead of stopping at a
@@ -51,6 +51,9 @@ Several important gaps have moved forward, but not to full runtime proof:
 - when that effective decision is `allow`, `loom action execute` now dispatches
   an experimental local worker through a governed supervisor path and writes
   request/result/log artifacts under `.loom/runtime/jobs/<input_hash>/`
+- `loom action enqueue` and `loom supervisor run` now materialize and process
+  queued actions under `.loom/runtime/queue/`, exercising the same decision and
+  worker dispatch path through a local queue supervisor
 - the parity surface now emits `.loom/parity/stream.jsonl` and
   `.loom/parity/latest.json`, and can capture per-action live OpenClaw probe
   artifacts under `.loom/parity/openclaw/<input_hash>.json` plus
@@ -198,7 +201,7 @@ The supervisor never assumes all execution logic is Rust.
 - Experimental fail-closed command (`loom shadow enforce`) for shell automation
 - Experimental fail-closed runtime rehearsal command (`loom action execute`)
 - Experimental governed local worker supervisor on allow-path
-- Runtime-side audit artifact under `.loom/audit/runtime_events.jsonl`
+- Runtime-side canonical artifact under `kernel/runtime_audit/loom_runtime_events.jsonl`
 - Parity stream and latest parity report under `.loom/parity/`
 - Optional per-action founder-host OpenClaw live probe artifact captured into the parity surface
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces

@@ -43,7 +43,9 @@ loom contract show     Show current registry-declared compliance state
 loom agent resolve     Resolve governed agent identity against the kernel registry
 loom envelope build    Construct a normalized action envelope
 loom capsule inspect   Inspect the local capsule boundary
+loom action enqueue    Materialize a queued governed action artifact
 loom action execute    Rehearse fail-closed execution and write runtime/parity artifacts
+loom supervisor run    Process queued actions through the local queue supervisor
 loom shadow preflight  Capture 7-surface experimental preflight events
 loom shadow decide     Materialize the current allow/deny gate outcome
 loom shadow enforce    Return fail-closed exit codes from the same gate outcome
@@ -102,6 +104,9 @@ identical results to the primary runtime.
 - `loom action execute` uses that same effective decision surface to materialize
   a runtime execution receipt, a runtime-side audit artifact, a parity
   stream, and a governed local worker dispatch when the decision is `allow`
+- `loom action enqueue` and `loom supervisor run` now exercise the same allow/
+  deny boundary through a local queue supervisor, moving queued artifacts from
+  `.loom/runtime/queue/pending/` into `.loom/runtime/queue/processed/`
 - `loom shadow compare` compares Loom's captured events against a
   kernel-reference event log, not a live OpenClaw runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report
@@ -199,11 +204,13 @@ state boundary. In the current scaffold, the user gets:
 - agent identity resolution against the kernel registry
 - action envelope construction
 - experimental shadow preflight, decision capture, comparison, fail-closed
-  runtime rehearsal, runtime-side audit artifacts, and parity reporting
+  runtime rehearsal, queue-backed supervisor rehearsal, runtime-side audit
+  artifacts, and parity reporting
 
 They do **not** get:
 - a running runtime supervisor
 - a long-running worker supervisor
+- a daemonized or hosted supervisor loop
 - multi-institution support
 - native sanction enforcement in a hosted worker runtime
 - the hosted kernel's canonical audit log

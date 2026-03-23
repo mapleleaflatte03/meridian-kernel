@@ -99,6 +99,51 @@ class AuditEnvOverrideTests(unittest.TestCase):
             self.assertEqual(event['details']['worker_kind'], 'python_reference_worker')
             self.assertEqual(event['details']['parity_status'], 'match')
 
+    def test_log_runtime_cli_defaults_to_kernel_runtime_audit_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            kernel_dir = root / 'kernel'
+            kernel_dir.mkdir()
+            audit_copy = kernel_dir / 'audit.py'
+            audit_copy.write_text(AUDIT_PATH.read_text())
+            expected = kernel_dir / 'runtime_audit' / 'loom_runtime_events.jsonl'
+            env = os.environ.copy()
+            env.pop('MERIDIAN_AUDIT_FILE', None)
+            env.pop('MERIDIAN_RUNTIME_AUDIT_FILE', None)
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(audit_copy),
+                    'log-runtime',
+                    '--org_id', 'org_demo',
+                    '--agent_id', 'agent_atlas',
+                    '--action', 'research',
+                    '--resource', 'web_search',
+                    '--outcome', 'success',
+                    '--input_hash', 'def456',
+                    '--estimated_cost_usd', '0.05',
+                    '--effective_source', 'reference_gate',
+                    '--effective_stage', 'ok',
+                    '--reference_stage', 'ok',
+                    '--runtime_outcome', 'worker_executed',
+                    '--worker_status', 'completed',
+                    '--worker_kind', 'python_reference_worker',
+                    '--parity_status', 'match',
+                ],
+                cwd=root,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertTrue(expected.exists())
+            rows = expected.read_text().strip().splitlines()
+            self.assertEqual(len(rows), 1)
+            event = json.loads(rows[0])
+            self.assertEqual(event['org_id'], 'org_demo')
+            self.assertEqual(event['details']['source'], 'loom_runtime_execute')
+
 
 if __name__ == '__main__':
     unittest.main()

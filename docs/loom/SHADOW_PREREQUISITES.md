@@ -65,7 +65,7 @@ run.
 - [x] Experimental fail-closed runtime rehearsal surface exists
   - `loom action execute` returns the same fail-closed decision and writes
     `.loom/runtime/last_execution.json`
-  - runtime-side audit artifacts now land in `.loom/audit/runtime_events.jsonl`
+  - runtime-side audit artifacts now land in `kernel/runtime_audit/loom_runtime_events.jsonl` when a kernel audit path is present
   - parity artifacts now land in `.loom/parity/`
   - still rehearsal-only, not a governed worker runtime
 - [x] Experimental local sanction preview exists

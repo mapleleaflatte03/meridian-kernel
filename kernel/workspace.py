@@ -3766,19 +3766,47 @@ def _requested_org_override(parsed_url, headers):
     return requested.pop()
 
 
-def _enforce_request_context(parsed_url, headers, bound_org_id):
+def _request_routing_snapshot(parsed_url, headers, bound_org_id):
     requested_org_id = _requested_org_override(parsed_url, headers)
-    if requested_org_id and requested_org_id != bound_org_id:
-        raise ValueError(
-            f"Workspace is bound to institution '{bound_org_id}'. "
-            f"Request-level override '{requested_org_id}' is not allowed."
-        )
+    if not requested_org_id:
+        return {
+            'mode': 'process_bound',
+            'bound_org_id': bound_org_id,
+            'effective_org_id': bound_org_id,
+            'request_override': 'exact-match-only',
+            'requested_org_id': '',
+            'route_state': 'bound',
+            'route_reason': 'no_request_override',
+        }
+    if requested_org_id == bound_org_id:
+        return {
+            'mode': 'process_bound',
+            'bound_org_id': bound_org_id,
+            'effective_org_id': bound_org_id,
+            'request_override': 'exact-match-only',
+            'requested_org_id': requested_org_id,
+            'route_state': 'matched',
+            'route_reason': 'request_org_matches_bound_institution',
+        }
     return {
         'mode': 'process_bound',
         'bound_org_id': bound_org_id,
+        'effective_org_id': bound_org_id,
         'request_override': 'exact-match-only',
         'requested_org_id': requested_org_id,
+        'route_state': 'rejected',
+        'route_reason': 'request_override_mismatch',
     }
+
+
+def _enforce_request_context(parsed_url, headers, bound_org_id):
+    request_context = _request_routing_snapshot(parsed_url, headers, bound_org_id)
+    if request_context['route_state'] == 'rejected':
+        raise ValueError(
+            f"Workspace is bound to institution '{bound_org_id}'. "
+            f"Request-level override '{request_context['requested_org_id']}' is not allowed."
+        )
+    return request_context
 
 
 def _resolve_auth_context(bound_org_id):
@@ -4664,7 +4692,8 @@ def _scoped_registry(org_id):
 
 # -- API data builders --------------------------------------------------------
 
-def api_status(org_id=None, context_source='founding_default', institution_context=None):
+def api_status(org_id=None, context_source='founding_default', institution_context=None,
+               request_routing=None):
     if institution_context is not None:
         inst_ctx = institution_context
     elif org_id is None:
@@ -4719,12 +4748,24 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
     active_delegations = [d for d in queue['delegations'].values()
                           if d.get('expires_at', '') > _now()]
 
+    if request_routing is None:
+        request_routing = {
+            'mode': 'process_bound',
+            'bound_org_id': org_id,
+            'effective_org_id': org_id,
+            'request_override': 'exact-match-only',
+            'requested_org_id': '',
+            'route_state': 'bound',
+            'route_reason': 'no_request_override',
+        }
+
     result = {
         'context': {
             'mode': 'process_bound',
             'bound_org_id': org_id,
             'source': context_source,
             'request_override': 'exact-match-only',
+            'request_routing': request_routing,
             'auth': auth_context,
             'permissions': _permission_snapshot(auth_context),
         },
@@ -5257,11 +5298,12 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         if path == '/' or path == '/workspace':
             return self._html(DASHBOARD_HTML)
         elif path == '/api/status':
-            return self._json(api_status(institution_context=inst_ctx))
+            return self._json(api_status(institution_context=inst_ctx, request_routing=request_context))
         elif path == '/api/context':
             host_identity, admission_registry = _runtime_host_state(org_id)
             response = {
                 **request_context,
+                'request_routing': request_context,
                 'auth': auth_context,
                 'permissions': _permission_snapshot(auth_context),
                 'institution': inst_ctx.to_dict(),

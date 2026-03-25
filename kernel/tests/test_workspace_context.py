@@ -164,6 +164,9 @@ class WorkspaceContextTests(unittest.TestCase):
         )
         self.assertEqual(context['requested_org_id'], 'org_a')
         self.assertEqual(context['bound_org_id'], 'org_a')
+        self.assertEqual(context['effective_org_id'], 'org_a')
+        self.assertEqual(context['route_state'], 'matched')
+        self.assertEqual(context['route_reason'], 'request_org_matches_bound_institution')
 
     def test_auth_context_reports_credential_binding(self):
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', None)
@@ -388,6 +391,8 @@ class WorkspaceContextTests(unittest.TestCase):
         ctx = self.workspace._resolve_workspace_context()
         status = self.workspace.api_status(institution_context=ctx)
         self.assertEqual(status['runtime_core']['institution_context']['org_id'], 'org_a')
+        self.assertEqual(status['context']['request_routing']['effective_org_id'], 'org_a')
+        self.assertEqual(status['context']['request_routing']['route_state'], 'bound')
         self.assertTrue(status['runtime_core']['service_registry']['workspace']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['service_registry']['federation_gateway']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['service_registry']['federation_gateway']['requires_warrant'])

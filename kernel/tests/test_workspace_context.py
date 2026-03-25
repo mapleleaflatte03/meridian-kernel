@@ -578,6 +578,68 @@ class WorkspaceContextTests(unittest.TestCase):
             )
             self.assertEqual(captured['data']['runtime_usage']['unregistered_bindings'], [])
 
+
+    def test_payout_execute_dry_run_skips_warrant_finalization(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/payouts/execute'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._read_body = lambda: {
+            'proposal_id': 'pay_demo',
+            'warrant_id': 'war_preview_1',
+            'dry_run': True,
+            'settlement_adapter': 'internal_ledger',
+            'tx_hash': '0xpreview',
+        }
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        preview = {
+            'dry_run': True,
+            'status': 'dispute_window',
+            'proposal_id': 'pay_demo',
+            'settlement_adapter': 'internal_ledger',
+            'execution_plan': {
+                'amount_usd': 2.0,
+                'recipient_wallet_id': 'wallet_exec',
+                'tx_ref': 'ptx_preview_demo',
+            },
+        }
+        warrant = {'warrant_id': 'war_preview_1', 'execution_state': 'ready'}
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner', 'actor_id': 'user_owner'}),              mock.patch.object(self.workspace, '_enforce_mutation_authorization', return_value='owner'),              mock.patch.object(self.workspace, '_runtime_host_state', return_value=(self.workspace.load_host_identity('missing'), {'source': 'file', 'institutions': {}, 'admitted_org_ids': []})),              mock.patch.object(self.workspace, 'get_payout_proposal', return_value={'proposal_id': 'pay_demo', 'status': 'dispute_window', 'linked_commitment_id': ''}),              mock.patch.object(self.workspace, 'validate_warrant_for_execution', return_value=warrant),              mock.patch.object(self.workspace, 'execute_payout_proposal', return_value=preview),              mock.patch.object(self.workspace, 'mark_warrant_executed', side_effect=self.fail),              mock.patch.object(self.workspace, 'payout_proposal_summary', return_value={'total': 1}),              mock.patch.object(self.workspace, 'log_event'):
+            handler.do_POST()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['message'], 'Payout execution previewed: pay_demo')
+        self.assertTrue(captured['data']['proposal']['dry_run'])
+        self.assertEqual(captured['data']['proposal']['execution_plan']['tx_ref'], 'ptx_preview_demo')
+        self.assertEqual(captured['data']['warrant'], warrant)
+        self.assertEqual(captured['data']['summary']['total'], 1)
+
     def test_federation_snapshot_surfaces_trusted_peers(self):
         from runtime_host import default_host_identity
         import tempfile

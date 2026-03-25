@@ -915,6 +915,124 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertIn('verifier attestation', result['error'])
         self.assertTrue(result['execution_ready'])
 
+    def test_execute_payout_proposal_dry_run_returns_preview_without_mutating_state(self):
+        ledger_path = self.capsule_dir / 'ledger.json'
+        ledger = json.loads(ledger_path.read_text())
+        ledger['treasury']['cash_usd'] = 120.0
+        ledger['treasury']['reserve_floor_usd'] = 50.0
+        ledger['treasury']['expenses_recorded_usd'] = 0.0
+        ledger_path.write_text(json.dumps(ledger, indent=2))
+
+        (self.capsule_dir / 'wallets.json').write_text(json.dumps({
+            'wallets': {
+                'wallet_exec': {
+                    'id': 'wallet_exec',
+                    'verification_level': 3,
+                    'verification_label': 'self_custody_verified',
+                    'payout_eligible': True,
+                    'status': 'active',
+                }
+            },
+            'verification_levels': {},
+        }, indent=2))
+        (self.capsule_dir / 'contributors.json').write_text(json.dumps({
+            'contributors': {
+                'contrib_exec': {
+                    'id': 'contrib_exec',
+                    'name': 'Contributor Exec',
+                    'payout_wallet_id': 'wallet_exec',
+                }
+            },
+            'contribution_types': ['code'],
+            'registration_requirements': {},
+        }, indent=2))
+        settlement_adapters_path = self.capsule_dir / 'settlement_adapters.json'
+        settlement_adapters_path.write_text(json.dumps({
+            'default_payout_adapter': 'base_usdc_x402',
+            'adapters': {
+                'base_usdc_x402': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                    'verification_ready': True,
+                },
+            },
+        }, indent=2))
+
+        proposal = treasury.create_payout_proposal(
+            'contrib_exec',
+            2.0,
+            'code',
+            proposed_by='user:proposer',
+            org_id=self.org_id,
+            evidence={'description': 'dry run preview'},
+            settlement_adapter='base_usdc_x402',
+        )
+        proposal = treasury.submit_payout_proposal(
+            proposal['proposal_id'],
+            'user:proposer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.review_payout_proposal(
+            proposal['proposal_id'],
+            'user:reviewer',
+            org_id=self.org_id,
+        )
+        proposal = treasury.approve_payout_proposal(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+        )
+        proposal = treasury.open_payout_dispute_window(
+            proposal['proposal_id'],
+            'user:owner',
+            org_id=self.org_id,
+            dispute_window_hours=0,
+        )
+        ledger_before = json.loads(ledger_path.read_text())
+        tx_path = self.capsule_dir / 'transactions.jsonl'
+        tx_lines_before = [line for line in tx_path.read_text().splitlines() if line.strip()]
+
+        with mock.patch.object(
+            treasury,
+            '_current_phase',
+            lambda org_id=None: (5, {'name': 'Contributor Payouts'}),
+        ):
+            preview = treasury.execute_payout_proposal(
+                proposal['proposal_id'],
+                'user:owner',
+                org_id=self.org_id,
+                warrant_id='war_preview_adapter',
+                settlement_adapter='base_usdc_x402',
+                tx_hash='0xbasepreview',
+                settlement_proof={
+                    'reference': 'base://receipt/preview',
+                    'verification_attestation': {
+                        'type': 'x402_settlement_verifier',
+                        'reference': 'attest://base/preview',
+                    },
+                },
+                host_supported_adapters=['base_usdc_x402'],
+                dry_run=True,
+            )
+
+        self.assertTrue(preview['dry_run'])
+        self.assertEqual(preview['status'], 'dispute_window')
+        self.assertEqual(preview['settlement_adapter'], 'base_usdc_x402')
+        self.assertEqual(preview['execution_plan']['amount_usd'], 2.0)
+        self.assertTrue(preview['execution_plan']['tx_ref'].startswith('ptx_preview_'))
+        self.assertEqual(preview['execution_plan']['cash_after'], 118.0)
+        self.assertEqual(preview['execution_plan']['settlement_adapter_contract']['execution_mode'], 'external_chain')
+        self.assertEqual(preview['execution_plan']['settlement_adapter_contract_digest'], treasury.settlement_adapter_contract_digest(preview['execution_plan']['settlement_adapter_contract_snapshot']))
+
+        ledger_after = json.loads(ledger_path.read_text())
+        tx_lines_after = [line for line in tx_path.read_text().splitlines() if line.strip()]
+        self.assertEqual(ledger_after['treasury']['cash_usd'], ledger_before['treasury']['cash_usd'])
+        self.assertEqual(ledger_after['treasury']['expenses_recorded_usd'], ledger_before['treasury']['expenses_recorded_usd'])
+        self.assertEqual(tx_lines_after, tx_lines_before)
+        proposal_after = treasury.get_payout_proposal(proposal['proposal_id'], org_id=self.org_id)
+        self.assertEqual(proposal_after['status'], 'dispute_window')
+        self.assertNotIn('executed_at', preview)
+
     def test_missing_org_fails_cleanly(self):
         with self.assertRaises(SystemExit) as ctx:
             treasury.load_wallets(f'org_missing_{uuid.uuid4().hex[:8]}')

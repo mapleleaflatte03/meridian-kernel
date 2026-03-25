@@ -6298,7 +6298,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     request_payload['linked_commitment_id'] = linked_commitment_id
                 if 'settlement_proof' in body:
                     request_payload['settlement_proof'] = body.get('settlement_proof')
-                validate_warrant_for_execution(
+                warrant = validate_warrant_for_execution(
                     warrant_id,
                     org_id=org_id,
                     action_class='payout_execution',
@@ -6307,6 +6307,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     session_id=_sid or '',
                     request_payload=request_payload,
                 )
+                dry_run = bool(body.get('dry_run'))
                 proposal = execute_payout_proposal(
                     proposal_id,
                     by,
@@ -6318,7 +6319,30 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     allow_early=bool(body.get('allow_early')),
                     settlement_proof=body.get('settlement_proof'),
                     host_supported_adapters=getattr(host_identity, 'settlement_adapters', []),
+                    dry_run=dry_run,
                 )
+                if dry_run:
+                    log_event(
+                        org_id,
+                        by,
+                        'payout_execution_previewed',
+                        outcome='success',
+                        resource=proposal_id,
+                        details={
+                            'amount_usd': proposal['execution_plan']['amount_usd'],
+                            'recipient_wallet_id': proposal['execution_plan']['recipient_wallet_id'],
+                            'warrant_id': warrant_id,
+                            'tx_ref': proposal['execution_plan']['tx_ref'],
+                            'linked_commitment_id': linked_commitment_id,
+                        },
+                        session_id=_sid,
+                    )
+                    return self._json({
+                        'message': f'Payout execution previewed: {proposal_id}',
+                        'proposal': proposal,
+                        'warrant': warrant,
+                        'summary': payout_proposal_summary(org_id),
+                    })
                 warrant = mark_warrant_executed(
                     warrant_id,
                     org_id=org_id,

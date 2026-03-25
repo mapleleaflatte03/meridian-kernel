@@ -1828,7 +1828,7 @@ def cancel_payout_proposal(proposal_id, actor_id, *, org_id=None, note='', owner
 def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id='',
                             settlement_adapter='', tx_hash='', note='',
                             allow_early=False, settlement_proof=None,
-                            host_supported_adapters=None):
+                            host_supported_adapters=None, dry_run=False):
     actor_id = (actor_id or '').strip()
     if not actor_id:
         raise ValueError('actor_id is required')
@@ -1872,11 +1872,62 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
     ledger = load_ledger(org_id)
     treasury = ledger.setdefault('treasury', {})
     amount = round(float(record.get('amount_usd') or 0.0), 4)
-    treasury['cash_usd'] = round(float(treasury.get('cash_usd', 0.0)) - amount, 4)
-    treasury['expenses_recorded_usd'] = round(
-        float(treasury.get('expenses_recorded_usd', 0.0)) + amount,
-        4,
-    )
+    cash_before = round(float(treasury.get('cash_usd', 0.0)) or 0.0, 4)
+    expenses_before = round(float(treasury.get('expenses_recorded_usd', 0.0)) or 0.0, 4)
+    projected_cash = round(cash_before - amount, 4)
+    projected_expenses = round(expenses_before + amount, 4)
+    tx_ref = f'ptx_preview_{uuid.uuid4().hex[:12]}' if dry_run else f'ptx_{uuid.uuid4().hex[:12]}'
+    execution_refs = {
+        'tx_ref': tx_ref,
+        'settlement_adapter': settlement_adapter,
+        'settlement_adapter_contract': contract,
+        'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
+        'tx_hash': normalized_proof.get('tx_hash', ''),
+        'currency': record.get('currency', 'USDC'),
+        'proof_type': adapter.get('proof_type', ''),
+        'verification_state': normalized_proof.get('verification_state', ''),
+        'finality_state': normalized_proof.get('finality_state', ''),
+        'reversal_or_dispute_capability': normalized_proof.get(
+            'reversal_or_dispute_capability',
+            '',
+        ),
+        'proof': normalized_proof.get('proof', {}),
+        'linked_commitment_id': linked_commitment_id,
+    }
+    if dry_run:
+        return {
+            'dry_run': True,
+            'proposal_id': proposal_id,
+            'status': record.get('status', ''),
+            'warrant_id': (warrant_id or '').strip(),
+            'settlement_adapter': settlement_adapter,
+            'tx_hash': normalized_proof.get('tx_hash', ''),
+            'amount_usd': amount,
+            'recipient_wallet_id': record.get('recipient_wallet_id', ''),
+            'contract': contract,
+            'normalized_proof': normalized_proof,
+            'execution_plan': {
+                'tx_ref': tx_ref,
+                'proposal_id': proposal_id,
+                'warrant_id': (warrant_id or '').strip(),
+                'linked_commitment_id': linked_commitment_id,
+                'settlement_adapter': settlement_adapter,
+                'amount_usd': amount,
+                'currency': record.get('currency', 'USDC'),
+                'cash_before': cash_before,
+                'cash_after': projected_cash,
+                'expenses_before': expenses_before,
+                'expenses_after': projected_expenses,
+                'recipient_wallet_id': record.get('recipient_wallet_id', ''),
+                'settlement_adapter_contract': contract,
+                'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+                'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
+                'execution_refs': execution_refs,
+            },
+        }
+    treasury['cash_usd'] = projected_cash
+    treasury['expenses_recorded_usd'] = projected_expenses
     ledger['updatedAt'] = _now()
     ledger_path = capsule_path(org_id, 'ledger.json')
     if org_id and not os.path.isdir(os.path.dirname(ledger_path)):
@@ -1885,7 +1936,6 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
     with open(ledger_path, 'w') as f:
         json.dump(ledger, f, indent=2)
 
-    tx_ref = f'ptx_{uuid.uuid4().hex[:12]}'
     tx_row = _append_transaction(org_id, {
         'tx_ref': tx_ref,
         'type': 'payout_execution',
@@ -1918,24 +1968,7 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
     record['settlement_adapter_contract_snapshot'] = contract.get('contract_snapshot', {})
     record['settlement_adapter_contract_digest'] = contract.get('contract_digest', '')
     record['tx_hash'] = normalized_proof.get('tx_hash', '')
-    record['execution_refs'] = {
-        'tx_ref': tx_row['tx_ref'],
-        'settlement_adapter': settlement_adapter,
-        'settlement_adapter_contract': contract,
-        'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
-        'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
-        'tx_hash': normalized_proof.get('tx_hash', ''),
-        'currency': record.get('currency', 'USDC'),
-        'proof_type': adapter.get('proof_type', ''),
-        'verification_state': normalized_proof.get('verification_state', ''),
-        'finality_state': normalized_proof.get('finality_state', ''),
-        'reversal_or_dispute_capability': normalized_proof.get(
-            'reversal_or_dispute_capability',
-            '',
-        ),
-        'proof': normalized_proof.get('proof', {}),
-        'linked_commitment_id': linked_commitment_id,
-    }
+    record['execution_refs'] = dict(execution_refs)
     if note:
         record['execution_note'] = note
     linked_commitment = None

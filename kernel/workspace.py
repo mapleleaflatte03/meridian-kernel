@@ -887,19 +887,93 @@ def _receiver_execution_warrant_payload(claims, payload=None):
     }
 
 
+def _execution_request_runtime_object(claims, receipt, payload=None):
+    claim_data = _federation_claims_dict(claims)
+    receipt_data = dict(receipt or {})
+    request_payload = payload if isinstance(payload, dict) else {}
+    evidence_refs = [f"federation_envelope:{claim_data.get('envelope_id', '')}"]
+    receipt_id = (receipt_data.get('receipt_id') or '').strip()
+    if receipt_id:
+        evidence_refs.append(f'federation_receipt:{receipt_id}')
+    payload_hash = (claim_data.get('payload_hash') or '').strip()
+    if payload_hash:
+        evidence_refs.append(f'payload_hash:{payload_hash}')
+    return {
+        'request_id': claim_data.get('envelope_id', ''),
+        'request_type': claim_data.get('message_type', 'execution_request') or 'execution_request',
+        'claims': {
+            'envelope_id': claim_data.get('envelope_id', ''),
+            'source_host_id': claim_data.get('source_host_id', ''),
+            'source_institution_id': claim_data.get('source_institution_id', ''),
+            'target_host_id': claim_data.get('target_host_id', ''),
+            'target_institution_id': claim_data.get('target_institution_id', ''),
+            'actor_type': claim_data.get('actor_type', ''),
+            'actor_id': claim_data.get('actor_id', ''),
+            'session_id': claim_data.get('session_id', ''),
+            'boundary_name': claim_data.get('boundary_name', ''),
+            'identity_model': claim_data.get('identity_model', ''),
+            'message_type': claim_data.get('message_type', ''),
+            'sender_warrant_id': claim_data.get('warrant_id', ''),
+            'commitment_id': claim_data.get('commitment_id', ''),
+            'payload_hash': claim_data.get('payload_hash', ''),
+        },
+        'receipt': {
+            'receipt_id': receipt_data.get('receipt_id', ''),
+            'accepted_at': receipt_data.get('accepted_at', ''),
+            'receiver_host_id': receipt_data.get('receiver_host_id', ''),
+            'receiver_institution_id': receipt_data.get('receiver_institution_id', ''),
+        },
+        'payload': request_payload,
+        'payload_hash': claim_data.get('payload_hash', ''),
+        'evidence_refs': evidence_refs,
+    }
+
+
+def _execution_gap_runtime_object(request, *, status, metadata=None):
+    request = dict(request or {})
+    return {
+        'request_id': (request.get('request_id') or '').strip(),
+        'request_type': (request.get('request_type') or '').strip(),
+        'status': (status or '').strip(),
+        'metadata': dict(metadata or {}),
+        'evidence_refs': list(request.get('evidence_refs') or []),
+    }
+
+
 def _receiver_execution_warrant_payload_from_job(job):
     record = dict(job or {})
+    request = dict(record.get('request') or {})
+    claims = dict(request.get('claims') or {})
+    if not claims:
+        claims = {
+            'source_host_id': (record.get('source_host_id') or '').strip(),
+            'source_institution_id': (record.get('source_institution_id') or '').strip(),
+            'target_host_id': (record.get('target_host_id') or '').strip(),
+            'target_institution_id': (record.get('target_institution_id') or '').strip(),
+            'message_type': (record.get('message_type') or '').strip(),
+            'boundary_name': (record.get('boundary_name') or '').strip(),
+            'identity_model': (record.get('identity_model') or '').strip(),
+            'sender_warrant_id': (record.get('sender_warrant_id') or '').strip(),
+            'commitment_id': (record.get('commitment_id') or '').strip(),
+            'payload_hash': (record.get('payload_hash') or '').strip(),
+        }
+    payload = request.get('payload') if isinstance(request.get('payload'), dict) else {}
+    if not payload:
+        payload = record.get('payload') if isinstance(record.get('payload'), dict) else {}
     return {
-        'source_host_id': (record.get('source_host_id') or '').strip(),
-        'source_institution_id': (record.get('source_institution_id') or '').strip(),
-        'target_host_id': (record.get('target_host_id') or '').strip(),
-        'target_institution_id': (record.get('target_institution_id') or '').strip(),
-        'message_type': (record.get('message_type') or '').strip(),
-        'boundary_name': (record.get('boundary_name') or '').strip(),
-        'identity_model': (record.get('identity_model') or '').strip(),
-        'sender_warrant_id': (record.get('sender_warrant_id') or '').strip(),
-        'commitment_id': (record.get('commitment_id') or '').strip(),
-        'payload': record.get('payload') if isinstance(record.get('payload'), dict) else {},
+        'request_id': (request.get('request_id') or record.get('envelope_id') or '').strip(),
+        'request_type': (request.get('request_type') or record.get('message_type') or 'execution_request').strip(),
+        'source_host_id': (claims.get('source_host_id') or '').strip(),
+        'source_institution_id': (claims.get('source_institution_id') or '').strip(),
+        'target_host_id': (claims.get('target_host_id') or '').strip(),
+        'target_institution_id': (claims.get('target_institution_id') or '').strip(),
+        'message_type': (claims.get('message_type') or '').strip(),
+        'boundary_name': (claims.get('boundary_name') or '').strip(),
+        'identity_model': (claims.get('identity_model') or '').strip(),
+        'sender_warrant_id': (claims.get('sender_warrant_id') or record.get('sender_warrant_id') or '').strip(),
+        'commitment_id': (claims.get('commitment_id') or '').strip(),
+        'payload': payload,
+        'evidence_refs': list(request.get('evidence_refs') or []),
     }
 
 
@@ -953,6 +1027,7 @@ def _queue_received_execution_request(bound_org_id, claims, receipt, *, payload=
         target_host_id=claims.source_host_id,
     )
     if blocking_case:
+        request_object = _execution_request_runtime_object(claims, receipt, payload)
         blocked_job = upsert_execution_job(bound_org_id, {
             'envelope_id': claims.envelope_id,
             'source_host_id': claims.source_host_id,
@@ -971,6 +1046,12 @@ def _queue_received_execution_request(bound_org_id, claims, receipt, *, payload=
             'commitment_id': claims.commitment_id,
             'payload': payload,
             'payload_hash': claims.payload_hash,
+            'request': request_object,
+            'gap': _execution_gap_runtime_object(request_object, status='blocked', metadata={
+                'case_id': blocking_case.get('case_id', ''),
+                'case_status': blocking_case.get('status', ''),
+                'claim_type': blocking_case.get('claim_type', ''),
+            }),
             'state': 'blocked',
             'received_at': (receipt or {}).get('accepted_at', '') or _now(),
             'note': 'Receiver-side case blocks incoming execution request',
@@ -982,18 +1063,16 @@ def _queue_received_execution_request(bound_org_id, claims, receipt, *, payload=
         })
         return _execution_job_view(bound_org_id, blocked_job), None, blocking_case
 
+    request_object = _execution_request_runtime_object(claims, receipt, payload)
     receiver_warrant = issue_warrant(
         bound_org_id,
         'federated_execution',
         'federation_gateway',
         actor_id,
         session_id='',
-        request_payload=_receiver_execution_warrant_payload(claims, payload),
+        request_payload=request_object,
         risk_class='high',
-        evidence_refs=[
-            f"federation_envelope:{claims.envelope_id}",
-            f"federation_receipt:{(receipt or {}).get('receipt_id', '')}",
-        ],
+        evidence_refs=request_object['evidence_refs'],
         auto_issue=False,
         note='Receiver-side local review for incoming execution_request',
     )
@@ -1015,6 +1094,10 @@ def _queue_received_execution_request(bound_org_id, claims, receipt, *, payload=
         'commitment_id': claims.commitment_id,
         'payload': payload,
         'payload_hash': claims.payload_hash,
+        'request': request_object,
+        'gap': _execution_gap_runtime_object(request_object, status='pending_local_warrant', metadata={
+            'source_boundary_name': claims.boundary_name,
+        }),
         'state': 'pending_local_warrant',
         'received_at': (receipt or {}).get('accepted_at', '') or _now(),
         'note': 'Receiver-side execution request queued for local warrant review',

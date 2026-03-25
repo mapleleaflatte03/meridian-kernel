@@ -80,6 +80,25 @@ class FederatedExecutionJobTests(unittest.TestCase):
         self.assertEqual(summary['pending_local_warrant'], 1)
         self.assertEqual(summary['message_type_counts'], {'execution_request': 1})
 
+    def test_upsert_persists_request_and_gap_objects(self):
+        created = jobs.upsert_execution_job(self.org_id, self._job('fed_job_request'))
+        self.assertEqual(created['request']['request_id'], 'fed_job_request')
+        self.assertEqual(created['request']['request_type'], 'execution_request')
+        self.assertEqual(created['request']['claims']['envelope_id'], 'fed_job_request')
+        self.assertEqual(created['request']['claims']['message_type'], 'execution_request')
+        self.assertEqual(created['request']['payload'], {'task': 'fed_job_request'})
+        self.assertEqual(created['gap']['request_id'], 'fed_job_request')
+        self.assertEqual(created['gap']['request_type'], 'execution_request')
+        self.assertEqual(created['gap']['status'], 'pending_local_warrant')
+        self.assertEqual(created['gap']['metadata'], {'demo': True})
+        self.assertEqual(created['gap']['evidence_refs'][0], 'federation_envelope:fed_job_request')
+        self.assertTrue(created['gap']['evidence_refs'][1].startswith('payload_hash:'))
+
+        fetched = jobs.get_execution_job('fed_job_request', self.org_id)
+        self.assertEqual(fetched['request']['request_id'], 'fed_job_request')
+        self.assertEqual(fetched['gap']['status'], 'pending_local_warrant')
+        self.assertEqual(fetched['gap']['metadata'], {'demo': True})
+
     def test_upsert_is_idempotent_by_envelope_id_and_tracks_state(self):
         jobs.upsert_execution_job(self.org_id, self._job('fed_job_2'))
         updated = jobs.upsert_execution_job(

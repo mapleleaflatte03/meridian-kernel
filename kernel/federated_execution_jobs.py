@@ -110,6 +110,76 @@ def _normalize_state(state, *, existing_state=''):
     return existing_state or 'pending_local_warrant'
 
 
+def _execution_request_evidence_refs(record):
+    record = dict(record or {})
+    refs = []
+    envelope_id = (record.get('envelope_id') or '').strip()
+    if envelope_id:
+        refs.append(f'federation_envelope:{envelope_id}')
+    receipt_id = (record.get('receipt_id') or '').strip()
+    if receipt_id:
+        refs.append(f'federation_receipt:{receipt_id}')
+    payload_hash = (record.get('payload_hash') or '').strip()
+    if payload_hash:
+        refs.append(f'payload_hash:{payload_hash}')
+    return refs
+
+
+def _execution_request_snapshot(record):
+    record = dict(record or {})
+    request = dict(record.get('request') or {})
+    claims = dict(request.get('claims') or {})
+    receipt = dict(request.get('receipt') or {})
+    request['request_id'] = (request.get('request_id') or record.get('envelope_id') or record.get('job_id') or '').strip()
+    request['request_type'] = (request.get('request_type') or record.get('message_type') or 'execution_request').strip()
+    claims.update({
+        'envelope_id': (record.get('envelope_id') or '').strip(),
+        'source_host_id': (record.get('source_host_id') or '').strip(),
+        'source_institution_id': (record.get('source_institution_id') or '').strip(),
+        'target_host_id': (record.get('target_host_id') or '').strip(),
+        'target_institution_id': (record.get('target_institution_id') or '').strip(),
+        'actor_type': (record.get('actor_type') or '').strip(),
+        'actor_id': (record.get('actor_id') or '').strip(),
+        'session_id': (record.get('session_id') or '').strip(),
+        'boundary_name': (record.get('boundary_name') or '').strip(),
+        'identity_model': (record.get('identity_model') or '').strip(),
+        'message_type': (record.get('message_type') or '').strip(),
+        'sender_warrant_id': (record.get('sender_warrant_id') or '').strip(),
+        'local_warrant_id': (record.get('local_warrant_id') or '').strip(),
+        'commitment_id': (record.get('commitment_id') or '').strip(),
+        'payload_hash': (record.get('payload_hash') or '').strip(),
+        'received_at': (record.get('received_at') or '').strip(),
+    })
+    receipt.update({
+        'receipt_id': (record.get('receipt_id') or '').strip(),
+        'accepted_at': (record.get('received_at') or '').strip(),
+        'receiver_host_id': (record.get('target_host_id') or '').strip(),
+        'receiver_institution_id': (record.get('target_institution_id') or '').strip(),
+        'message_type': (record.get('message_type') or '').strip(),
+        'boundary_name': (record.get('boundary_name') or '').strip(),
+        'identity_model': (record.get('identity_model') or '').strip(),
+    })
+    request['claims'] = claims
+    request['receipt'] = receipt
+    request['payload'] = record.get('payload') if 'payload' in record else request.get('payload')
+    if not (request.get('payload_hash') or '').strip():
+        request['payload_hash'] = (record.get('payload_hash') or '').strip()
+    request['evidence_refs'] = list(request.get('evidence_refs') or _execution_request_evidence_refs(record))
+    return request
+
+
+def _execution_gap_snapshot(record, request=None):
+    record = dict(record or {})
+    request = dict(request or record.get('request') or {})
+    gap = dict(record.get('gap') or {})
+    gap['request_id'] = (gap.get('request_id') or request.get('request_id') or record.get('envelope_id') or '').strip()
+    gap['request_type'] = (gap.get('request_type') or request.get('request_type') or record.get('message_type') or 'execution_request').strip()
+    gap['status'] = (record.get('state') or gap.get('status') or '').strip()
+    gap['metadata'] = dict(record.get('metadata') or gap.get('metadata') or {})
+    gap['evidence_refs'] = list(gap.get('evidence_refs') or request.get('evidence_refs') or _execution_request_evidence_refs(record))
+    return gap
+
+
 def _normalize_store(data, org_id):
     store = _empty_store(org_id)
     if not isinstance(data, dict):
@@ -132,6 +202,11 @@ def _normalize_store(data, org_id):
                 record = dict(item)
                 record['job_id'] = record.get('job_id') or job_id
                 jobs[record['job_id']] = record
+    for job_id, record in list(jobs.items()):
+        record = dict(record or {})
+        record['request'] = _execution_request_snapshot(record)
+        record['gap'] = _execution_gap_snapshot(record, record['request'])
+        jobs[job_id] = record
     store['jobs'] = jobs
     if 'states' not in store or not store['states']:
         store['states'] = list(JOB_STATES)
@@ -265,6 +340,8 @@ def _normalize_job(job, org_id, existing=None):
         record['executed_at'] = record['updated_at']
     if record['state'] != 'executed' and 'executed_at' not in job:
         record['executed_at'] = record.get('executed_at', '')
+    record['request'] = _execution_request_snapshot(record)
+    record['gap'] = _execution_gap_snapshot(record, record['request'])
     return record
 
 

@@ -665,6 +665,52 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(snapshot['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
         self.assertEqual(snapshot['jobs'][0]['local_warrant']['execution_state'], 'ready')
 
+    def test_receiver_execution_warrant_payload_prefers_persisted_request_object(self):
+        payload = self.workspace._receiver_execution_warrant_payload_from_job({
+            'envelope_id': 'fed_exec_demo',
+            'source_host_id': 'host_stale',
+            'source_institution_id': 'org_stale',
+            'target_host_id': 'host_other',
+            'target_institution_id': 'org_other',
+            'message_type': 'execution_request',
+            'boundary_name': 'federation_gateway',
+            'identity_model': 'signed_host_service',
+            'sender_warrant_id': 'war_stale',
+            'commitment_id': 'cmt_stale',
+            'payload': {'task': 'stale'},
+            'request': {
+                'request_id': 'fed_exec_demo',
+                'request_type': 'execution_request',
+                'claims': {
+                    'source_host_id': 'host_alpha',
+                    'source_institution_id': 'org_alpha',
+                    'target_host_id': 'host_beta',
+                    'target_institution_id': 'org_a',
+                    'message_type': 'execution_request',
+                    'boundary_name': 'federation_gateway',
+                    'identity_model': 'signed_host_service',
+                    'sender_warrant_id': 'war_sender_demo',
+                    'commitment_id': 'cmt_demo',
+                },
+                'receipt': {
+                    'receipt_id': 'fedrcpt_demo',
+                    'accepted_at': '2026-03-22T00:00:00Z',
+                },
+                'payload': {'task': 'demo'},
+                'evidence_refs': [
+                    'federation_envelope:fed_exec_demo',
+                    'federation_receipt:fedrcpt_demo',
+                ],
+            },
+        })
+        self.assertEqual(payload['request_id'], 'fed_exec_demo')
+        self.assertEqual(payload['request_type'], 'execution_request')
+        self.assertEqual(payload['source_host_id'], 'host_alpha')
+        self.assertEqual(payload['source_institution_id'], 'org_alpha')
+        self.assertEqual(payload['sender_warrant_id'], 'war_sender_demo')
+        self.assertEqual(payload['payload'], {'task': 'demo'})
+        self.assertEqual(payload['evidence_refs'], ['federation_envelope:fed_exec_demo', 'federation_receipt:fedrcpt_demo'])
+
     def test_execute_federated_execution_job_records_settlement_notice_once(self):
         job = {
             'job_id': 'fej_demo',

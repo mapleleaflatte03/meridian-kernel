@@ -187,6 +187,30 @@ def _peer_view(raw_peer):
     return data, (data.get('trust_state') or '').strip(), receive_url
 
 
+def _peer_route_view(peer_data, trust_state, receive_url, *, target_org_id='',
+                     federation_enabled=False):
+    admitted_org_ids = list(peer_data.get('admitted_org_ids', []) or [])
+    blocked_reasons = []
+    if not federation_enabled:
+        blocked_reasons.append('host_federation_disabled')
+    if trust_state != 'trusted':
+        blocked_reasons.append(f'peer_trust_state_{trust_state or "unknown"}')
+    if not receive_url:
+        blocked_reasons.append('peer_endpoint_missing')
+    if admitted_org_ids and target_org_id and target_org_id not in admitted_org_ids:
+        blocked_reasons.append('target_org_not_admitted')
+    return {
+        'peer_host_id': peer_data.get('host_id', ''),
+        'peer_label': peer_data.get('label', ''),
+        'target_institution_id': target_org_id,
+        'trust_state': trust_state,
+        'receive_url': receive_url,
+        'admitted_org_ids': admitted_org_ids,
+        'delivery_ready': not blocked_reasons,
+        'blocked_reasons': blocked_reasons,
+    }
+
+
 class ReplayStore:
     """Replay protection store for federation envelope nonces."""
 
@@ -981,6 +1005,16 @@ class FederationAuthority:
             for peer_data, trust_state, _receive_url in peer_views
             if trust_state == 'trusted'
         ]
+        peer_routes = [
+            _peer_route_view(
+                peer_data,
+                trust_state,
+                receive_url,
+                target_org_id=bound_org_id,
+                federation_enabled=enabled,
+            )
+            for peer_data, trust_state, receive_url in peer_views
+        ]
         return {
             'enabled': enabled,
             'disabled_reason': '' if enabled else reason,
@@ -999,6 +1033,22 @@ class FederationAuthority:
             'trusted_peer_ids': list(self.peer_registry.get('trusted_peer_ids', [])),
             'peers': all_peers,
             'trusted_peers': trusted_peers,
+            'peer_delivery_routes': peer_routes,
+            'routing_summary': {
+                'target_institution_id': bound_org_id,
+                'delivery_ready_count': sum(1 for route in peer_routes if route['delivery_ready']),
+                'delivery_blocked_count': sum(1 for route in peer_routes if not route['delivery_ready']),
+                'delivery_ready_peer_ids': [
+                    route['peer_host_id']
+                    for route in peer_routes
+                    if route['delivery_ready']
+                ],
+                'blocked_peer_ids': [
+                    route['peer_host_id']
+                    for route in peer_routes
+                    if not route['delivery_ready']
+                ],
+            },
             'admitted_org_ids': list((admission_registry or {}).get('admitted_org_ids', [])),
             'replay_protection': self.replay_store.snapshot(),
             'signing': {

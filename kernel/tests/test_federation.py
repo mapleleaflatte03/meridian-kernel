@@ -6389,7 +6389,14 @@ class FederationTests(unittest.TestCase):
                 admitted_org_ids=['org_beta'],
             )
             authority = FederationAuthority(host, signing_secret='alpha-secret', peer_registry=registry)
-            self.assertTrue(authority.snapshot(bound_org_id='org_alpha')['send_enabled'])
+            snapshot = authority.snapshot(bound_org_id='org_alpha')
+            self.assertTrue(snapshot['send_enabled'])
+            self.assertEqual(snapshot['routing_summary']['target_institution_id'], 'org_alpha')
+            self.assertEqual(snapshot['routing_summary']['delivery_ready_count'], 0)
+            self.assertEqual(snapshot['routing_summary']['blocked_peer_ids'], ['host_beta'])
+            self.assertEqual(snapshot['peer_delivery_routes'][0]['peer_host_id'], 'host_beta')
+            self.assertFalse(snapshot['peer_delivery_routes'][0]['delivery_ready'])
+            self.assertIn('target_org_not_admitted', snapshot['peer_delivery_routes'][0]['blocked_reasons'])
 
             suspended = set_peer_trust_state(
                 peers_path,
@@ -6405,6 +6412,8 @@ class FederationTests(unittest.TestCase):
             self.assertEqual(suspended_snapshot['trusted_peer_ids'], [])
             self.assertEqual(suspended_snapshot['all_peer_count'], 1)
             self.assertFalse(suspended_snapshot['send_enabled'])
+            self.assertEqual(suspended_snapshot['routing_summary']['blocked_peer_ids'], ['host_beta'])
+            self.assertIn('peer_trust_state_suspended', suspended_snapshot['peer_delivery_routes'][0]['blocked_reasons'])
             self.assertEqual(suspended['peers']['host_beta'].witness_archive_user, 'gamma-user')
             self.assertEqual(suspended['peers']['host_beta'].witness_archive_pass, 'gamma-pass')
 

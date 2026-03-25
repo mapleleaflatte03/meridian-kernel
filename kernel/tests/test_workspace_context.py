@@ -879,6 +879,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertIn('federation_gateway', manifest['service_registry'])
         self.assertEqual(manifest['federation']['boundary_name'], 'federation_gateway')
         self.assertTrue(manifest['service_registry']['federation_gateway']['requires_warrant'])
+        self.assertEqual(manifest['federation']['routing_summary']['target_institution_id'], ctx.org_id)
+        self.assertEqual(manifest['federation']['routing_summary']['delivery_ready_count'], 0)
 
     def test_federation_receipt_is_bound_to_receiver_host_and_org(self):
         from federation import FederationEnvelopeClaims

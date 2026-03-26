@@ -437,8 +437,8 @@ _PROTOCOL_DEFAULTS = {
             },
             'base_usdc_x402': {
                 'label': 'Base USDC via x402',
-                'status': 'registered',
-                'payout_execution_enabled': False,
+                'status': 'active',
+                'payout_execution_enabled': True,
                 'execution_mode': 'external_chain',
                 'settlement_path': 'x402_onchain',
                 'supported_currencies': ['USDC'],
@@ -446,7 +446,7 @@ _PROTOCOL_DEFAULTS = {
                 'requires_settlement_proof': True,
                 'proof_type': 'onchain_receipt',
                 'verification_mode': 'external_attestation',
-                'verification_ready': False,
+                'verification_ready': True,
                 'requires_verifier_attestation': True,
                 'accepted_attestation_types': ['x402_settlement_verifier'],
                 'verification_state': 'external_verification_required',
@@ -454,7 +454,7 @@ _PROTOCOL_DEFAULTS = {
                 'reversal_or_dispute_capability': 'court_case_plus_chain_review',
                 'dispute_model': 'court_case_plus_chain_review',
                 'finality_model': 'external_chain_finality',
-                'notes': 'Registered contract target only. Reference payout execution stays disabled until adapter-specific verification exists.',
+                'notes': 'Enabled only as an evidence-gated x402 execution candidate. External chain finality is still required and never assumed locally.',
             },
             'manual_bank_wire': {
                 'label': 'Manual Bank Wire',

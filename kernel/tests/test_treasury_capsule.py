@@ -829,7 +829,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(result['normalized_proof']['execution_mode'], 'host_ledger')
         self.assertEqual(result['normalized_proof']['settlement_path'], 'journal_append')
 
-    def test_preflight_settlement_adapter_reports_disabled_adapter(self):
+    def test_preflight_settlement_adapter_requires_host_support_for_x402_execution(self):
         result = treasury.preflight_settlement_adapter(
             'base_usdc_x402',
             org_id=self.org_id,
@@ -842,12 +842,12 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['preflight_ok'])
         self.assertFalse(result['can_execute_now'])
         self.assertEqual(result['error_type'], 'permission_error')
-        self.assertIn('not enabled', result['error'])
+        self.assertIn('not supported on this host', result['error'])
         self.assertFalse(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'external_chain')
         self.assertEqual(result['contract']['settlement_path'], 'x402_onchain')
         self.assertEqual(result['contract']['verification_mode'], 'external_attestation')
-        self.assertFalse(result['contract']['verification_ready'])
+        self.assertTrue(result['contract']['verification_ready'])
         self.assertTrue(result['contract']['requires_verifier_attestation'])
         self.assertEqual(
             result['contract']['accepted_attestation_types'],
@@ -855,12 +855,11 @@ class TreasuryCapsuleTests(unittest.TestCase):
         )
         self.assertEqual(result['contract']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['contract']['finality_model'], 'external_chain_finality')
-        self.assertIn('payout_execution_disabled', result['execution_blockers'])
-        self.assertIn('verification_not_ready', result['execution_blockers'])
+        self.assertIn('host_not_supported', result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'external_chain')
         self.assertEqual(result['requirements']['settlement_path'], 'x402_onchain')
         self.assertEqual(result['requirements']['verification_mode'], 'external_attestation')
-        self.assertFalse(result['requirements']['verification_ready'])
+        self.assertTrue(result['requirements']['verification_ready'])
         self.assertTrue(result['requirements']['requires_verifier_attestation'])
         self.assertEqual(
             result['requirements']['accepted_attestation_types'],
@@ -868,6 +867,39 @@ class TreasuryCapsuleTests(unittest.TestCase):
         )
         self.assertEqual(result['requirements']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['requirements']['finality_model'], 'external_chain_finality')
+
+    def test_preflight_settlement_adapter_accepts_x402_with_host_support_and_verifier_attestation(self):
+        result = treasury.preflight_settlement_adapter(
+            'base_usdc_x402',
+            org_id=self.org_id,
+            currency='USDC',
+            tx_hash='0xdeadbeef',
+            settlement_proof={
+                'reference': 'demo-proof',
+                'verification_attestation': {
+                    'type': 'x402_settlement_verifier',
+                    'reference': 'attest://base/demo',
+                },
+            },
+            host_supported_adapters=['base_usdc_x402'],
+        )
+        self.assertTrue(result['known'])
+        self.assertTrue(result['preflight_ok'])
+        self.assertTrue(result['can_execute_now'])
+        self.assertTrue(result['execution_enabled'])
+        self.assertTrue(result['host_supported'])
+        self.assertTrue(result['execution_ready'])
+        self.assertEqual(result['contract']['execution_mode'], 'external_chain')
+        self.assertEqual(result['contract']['settlement_path'], 'x402_onchain')
+        self.assertEqual(result['contract']['verification_mode'], 'external_attestation')
+        self.assertTrue(result['contract']['verification_ready'])
+        self.assertTrue(result['contract']['requires_verifier_attestation'])
+        self.assertEqual(result['contract']['accepted_attestation_types'], ['x402_settlement_verifier'])
+        self.assertFalse(result['execution_blockers'])
+        self.assertEqual(result['requirements']['verification_ready'], True)
+        self.assertEqual(result['normalized_proof']['execution_mode'], 'external_chain')
+        self.assertEqual(result['normalized_proof']['settlement_path'], 'x402_onchain')
+        self.assertEqual(result['normalized_proof']['verification_attestation_types'], ['x402_settlement_verifier'])
 
     def test_preflight_settlement_adapter_requires_host_support_for_manual_wire_execution(self):
         result = treasury.preflight_settlement_adapter(
@@ -947,6 +979,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
                 'base_usdc_x402': {
                     'status': 'active',
                     'payout_execution_enabled': True,
+                    'verification_ready': False,
                 },
             },
         }, indent=2))

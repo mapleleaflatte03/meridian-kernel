@@ -65,6 +65,7 @@ Endpoints:
   POST /api/cases/open            -> Open an inter-institution case
   POST /api/cases/stay            -> Stay an inter-institution case
   POST /api/cases/resolve         -> Resolve an inter-institution case
+  POST /api/federation/handoff-dispatch-queue/run -> Materialize a local receiver-side execution job from a dispatch record
   POST /api/federation/execution-jobs/execute -> Execute a ready receiver-side federated execution job
   POST /api/treasury/contribute   -> Record owner capital contribution
   POST /api/treasury/reserve-floor -> Update reserve floor policy
@@ -128,6 +129,7 @@ import hmac
 import json
 import os
 import sys
+from types import SimpleNamespace
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -297,7 +299,9 @@ from federation_handoff_queue import (
     upsert_handoff_preview,
 )
 from federation_handoff_dispatch_queue import (
+    get_handoff_dispatch_record,
     handoff_dispatch_queue_snapshot as _handoff_dispatch_queue_snapshot,
+    mark_handoff_dispatch_record_dispatched,
     promote_acknowledged_handoff_preview_to_dispatch_record,
 )
 from payout_plan_preview_queue import (
@@ -386,6 +390,7 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/cases/resolve': 'admin',
     '/api/federation/execution-jobs/execute': 'admin',
     '/api/federation/handoff-preview-queue/acknowledge': 'admin',
+    '/api/federation/handoff-dispatch-queue/run': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/treasury/settlement-adapters/preflight': 'member',
@@ -4122,6 +4127,131 @@ def _acknowledge_and_dispatch_remote_handoff_preview(bound_org_id, handoff_id, *
     return result
 
 
+
+def _local_dispatch_target_satisfiable(bound_org_id, dispatch_record, *, host_identity=None):
+    record = dict(dispatch_record or {})
+    preview = dict(record.get('preview_snapshot') or {})
+    draft = dict(record.get('draft_execution_request') or {})
+    preview_draft = dict(preview.get('draft_execution_request') or {})
+    local_host_id = getattr(host_identity, 'host_id', '') if host_identity else ''
+    target_institution_id = (
+        draft.get('target_institution_id')
+        or preview_draft.get('target_institution_id')
+        or record.get('requested_org_id')
+        or ''
+    ).strip()
+    target_host_id = (
+        draft.get('target_host_id')
+        or preview_draft.get('target_host_id')
+        or record.get('target_host_id')
+        or ''
+    ).strip()
+    blockers = []
+    if target_institution_id != (bound_org_id or '').strip():
+        blockers.append('target_institution_mismatch')
+    if target_host_id and local_host_id and target_host_id != local_host_id:
+        blockers.append('target_host_mismatch')
+    if not record.get('dispatch_ready'):
+        blockers.append('dispatch_not_ready')
+    if record.get('settlement_claimed') or preview.get('settlement_claimed'):
+        blockers.append('settlement_claimed')
+    if record.get('external_settlement_observed') or preview.get('external_settlement_observed'):
+        blockers.append('external_settlement_observed')
+    return {
+        'satisfiable': not blockers,
+        'blockers': blockers,
+        'target_institution_id': target_institution_id,
+        'target_host_id': target_host_id or local_host_id,
+    }
+
+
+def _run_local_federation_dispatch(bound_org_id, dispatch_id, *, actor_id, note='', session_id=None):
+    dispatch_id = (dispatch_id or '').strip()
+    actor_id = (actor_id or '').strip()
+    if not dispatch_id:
+        raise ValueError('dispatch_id is required')
+    if not actor_id:
+        raise ValueError('actor_id is required')
+
+    dispatch_record = get_handoff_dispatch_record(dispatch_id, bound_org_id)
+    if not dispatch_record:
+        raise LookupError(f'Federation handoff dispatch record not found: {dispatch_id}')
+    host_identity, admission_registry = _runtime_host_state(bound_org_id)
+    locality = _local_dispatch_target_satisfiable(bound_org_id, dispatch_record, host_identity=host_identity)
+    if not locality['satisfiable']:
+        raise PermissionError(
+            f"Federation handoff dispatch '{dispatch_id}' is not locally satisfiable: "
+            f"{', '.join(locality['blockers'])}"
+        )
+
+    preview_snapshot = dict(dispatch_record.get('preview_snapshot') or {})
+    draft = dict(dispatch_record.get('draft_execution_request') or {})
+    preview_draft = dict(preview_snapshot.get('draft_execution_request') or {})
+    source_host_id = (draft.get('source_host_id') or preview_draft.get('source_host_id') or '').strip()
+    source_institution_id = (draft.get('source_institution_id') or preview_draft.get('source_institution_id') or '').strip()
+    target_host_id = locality['target_host_id'] or getattr(host_identity, 'host_id', '') or ''
+    target_institution_id = locality['target_institution_id'] or (bound_org_id or '').strip()
+    envelope_id = dispatch_id
+    request_payload = dict(draft.get('payload') or preview_draft.get('payload') or {})
+    claims = SimpleNamespace(
+        envelope_id=envelope_id,
+        source_host_id=source_host_id,
+        source_institution_id=source_institution_id,
+        target_host_id=target_host_id,
+        target_institution_id=target_institution_id,
+        actor_type='service',
+        actor_id=source_host_id and f'peer:{source_host_id}' or actor_id,
+        session_id=session_id or '',
+        boundary_name=(draft.get('boundary_name') or preview_draft.get('boundary_name') or 'federation_gateway'),
+        identity_model=(draft.get('identity_model') or preview_draft.get('identity_model') or 'signed_host_service'),
+        message_type=(draft.get('message_type') or preview_draft.get('message_type') or 'execution_request'),
+        warrant_id=(draft.get('warrant_id') or preview_draft.get('warrant_id') or ''),
+        commitment_id=(draft.get('commitment_id') or preview_draft.get('commitment_id') or ''),
+        payload_hash=(draft.get('payload_hash') or preview_draft.get('payload_hash') or ''),
+    )
+    receipt = {
+        'receipt_id': 'fedrcpt_' + hashlib.sha256(
+            ':'.join((dispatch_id, target_host_id, target_institution_id)).encode('utf-8')
+        ).hexdigest()[:12],
+        'envelope_id': envelope_id,
+        'accepted_at': _now(),
+        'receiver_host_id': target_host_id,
+        'receiver_institution_id': target_institution_id,
+    }
+    execution_job, receiver_warrant, blocking_case = _queue_received_execution_request(
+        bound_org_id,
+        claims,
+        receipt,
+        payload=request_payload,
+    )
+    dispatch_state = 'dispatched'
+    dispatch_note = note or (
+        'Local dispatch runner promoted dispatch record to receiver-side execution job'
+        if not blocking_case else
+        'Local dispatch runner materialized a blocked receiver-side execution job'
+    )
+    updated_dispatch = mark_handoff_dispatch_record_dispatched(
+        bound_org_id,
+        dispatch_id,
+        dispatched_by=actor_id,
+        note=dispatch_note,
+        dispatch_runner='local_receiver_execution_runner',
+        execution_job_id=(execution_job.get('job_id') or '').strip(),
+        execution_job_state=(execution_job.get('state') or '').strip(),
+        execution_job_snapshot=execution_job,
+    )
+    return {
+        'dispatch_record': updated_dispatch,
+        'execution_job': _execution_job_view(bound_org_id, execution_job),
+        'receiver_warrant': receiver_warrant,
+        'blocking_case': blocking_case,
+        'dispatch_runner': 'local_receiver_execution_runner',
+        'dispatch_state': dispatch_state,
+        'dispatch_blockers': list(locality['blockers']),
+        'execution_job_created': True,
+    }
+
+
 def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
                                       host_identity=None, admission_registry=None,
                                       peer_registry=None, org_registry=None):
@@ -7754,6 +7884,35 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 }
                 if promotion.get('dispatch_record_created'):
                     response['message'] = 'Federation handoff preview acknowledged and promoted to dispatch'
+                return self._json(response)
+
+            elif path == '/api/federation/handoff-dispatch-queue/run':
+                dispatch_id = (body.get('dispatch_id') or body.get('handoff_id') or '').strip()
+                if not dispatch_id:
+                    return self._json({'error': 'dispatch_id is required'}, 400)
+                by_actor = (body.get('by') or by or '').strip()
+                if not by_actor:
+                    return self._json({'error': 'by is required'}, 400)
+                try:
+                    dispatch_runner = _run_local_federation_dispatch(
+                        org_id,
+                        dispatch_id,
+                        actor_id=by_actor,
+                        note=body.get('note', ''),
+                        session_id=_sid,
+                    )
+                except LookupError as e:
+                    return self._json({'error': str(e)}, 404)
+                except PermissionError as e:
+                    return self._json({'error': str(e)}, 403)
+                except ValueError as e:
+                    return self._json({'error': str(e)}, 400)
+                response = {
+                    'message': 'Federation handoff dispatch promoted to receiver-side execution job',
+                    **dispatch_runner,
+                }
+                if dispatch_runner.get('blocking_case'):
+                    response['message'] = 'Federation handoff dispatch promoted to blocked receiver-side execution job'
                 return self._json(response)
 
             elif path == '/api/federation/execution-jobs/execute':

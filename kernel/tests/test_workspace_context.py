@@ -399,6 +399,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(permissions['/api/federation/execution-jobs/execute']['required_role'], 'admin')
         self.assertTrue(permissions['/api/federation/handoff-preview-queue/acknowledge']['allowed'])
         self.assertEqual(permissions['/api/federation/handoff-preview-queue/acknowledge']['required_role'], 'admin')
+        self.assertTrue(permissions['/api/federation/handoff-dispatch-queue/run']['allowed'])
+        self.assertEqual(permissions['/api/federation/handoff-dispatch-queue/run']['required_role'], 'admin')
         self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
         self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
 

@@ -211,6 +211,12 @@ def _dispatch_digest(record):
         'acknowledged_by': (record.get('acknowledged_by') or '').strip(),
         'acknowledged_at': (record.get('acknowledged_at') or '').strip(),
         'acknowledged_note': (record.get('acknowledged_note') or '').strip(),
+        'dispatch_runner': (record.get('dispatch_runner') or '').strip(),
+        'dispatched_by': (record.get('dispatched_by') or '').strip(),
+        'dispatched_at': (record.get('dispatched_at') or '').strip(),
+        'dispatched_note': (record.get('dispatched_note') or '').strip(),
+        'execution_job_id': (record.get('execution_job_id') or '').strip(),
+        'execution_job_state': (record.get('execution_job_state') or '').strip(),
     }
     return _canonical_hash(digest_payload)
 
@@ -265,12 +271,24 @@ def _normalize_dispatch(dispatch, org_id, existing=None):
         record['preview_snapshot'] = dict(dispatch.get('preview_snapshot') or {})
     elif 'preview_snapshot' not in record:
         record['preview_snapshot'] = {}
+    if 'dispatch_runner' in dispatch or 'dispatch_runner' not in record:
+        record['dispatch_runner'] = (dispatch.get('dispatch_runner') or existing.get('dispatch_runner') or '').strip()
     if 'acknowledged_by' in dispatch or 'acknowledged_by' not in record:
         record['acknowledged_by'] = (dispatch.get('acknowledged_by') or existing.get('acknowledged_by') or '').strip()
     if 'acknowledged_at' in dispatch or 'acknowledged_at' not in record:
         record['acknowledged_at'] = (dispatch.get('acknowledged_at') or existing.get('acknowledged_at') or '').strip()
     if 'acknowledged_note' in dispatch or 'acknowledged_note' not in record:
         record['acknowledged_note'] = (dispatch.get('acknowledged_note') or existing.get('acknowledged_note') or '').strip()
+    if 'dispatched_by' in dispatch or 'dispatched_by' not in record:
+        record['dispatched_by'] = (dispatch.get('dispatched_by') or existing.get('dispatched_by') or '').strip()
+    if 'dispatched_at' in dispatch or 'dispatched_at' not in record:
+        record['dispatched_at'] = (dispatch.get('dispatched_at') or existing.get('dispatched_at') or '').strip()
+    if 'dispatched_note' in dispatch or 'dispatched_note' not in record:
+        record['dispatched_note'] = (dispatch.get('dispatched_note') or existing.get('dispatched_note') or '').strip()
+    if 'execution_job_id' in dispatch or 'execution_job_id' not in record:
+        record['execution_job_id'] = (dispatch.get('execution_job_id') or existing.get('execution_job_id') or '').strip()
+    if 'execution_job_state' in dispatch or 'execution_job_state' not in record:
+        record['execution_job_state'] = (dispatch.get('execution_job_state') or existing.get('execution_job_state') or '').strip()
     record['generated_at'] = (dispatch.get('generated_at') or existing.get('generated_at') or _now()).strip()
     record['queued_at'] = (dispatch.get('queued_at') or existing.get('queued_at') or record['generated_at']).strip()
     record['dispatched_at'] = (dispatch.get('dispatched_at') or existing.get('dispatched_at') or '').strip()
@@ -387,7 +405,17 @@ def promote_acknowledged_handoff_preview_to_dispatch_record(org_id, handoff_id, 
         return dispatch_record
 
 
-def mark_handoff_dispatch_record_dispatched(org_id, dispatch_id, *, dispatched_by, note=''):
+def mark_handoff_dispatch_record_dispatched(
+    org_id,
+    dispatch_id,
+    *,
+    dispatched_by,
+    note='',
+    dispatch_runner='',
+    execution_job_id='',
+    execution_job_state='',
+    execution_job_snapshot=None,
+):
     dispatch_id = (dispatch_id or '').strip()
     dispatched_by = (dispatched_by or '').strip()
     if not dispatch_id:
@@ -405,6 +433,11 @@ def mark_handoff_dispatch_record_dispatched(org_id, dispatch_id, *, dispatched_b
         record['dispatched_at'] = timestamp
         record['dispatched_by'] = dispatched_by
         record['dispatched_note'] = (note or '').strip()
+        record['dispatch_runner'] = (dispatch_runner or record.get('dispatch_runner') or '').strip()
+        record['execution_job_id'] = (execution_job_id or record.get('execution_job_id') or '').strip()
+        record['execution_job_state'] = (execution_job_state or record.get('execution_job_state') or '').strip()
+        if execution_job_snapshot is not None:
+            record['execution_job_snapshot'] = dict(execution_job_snapshot or {})
         record['updated_at'] = timestamp
         store['handoff_dispatch_records'][dispatch_id] = record
         _save_store(store, org_id)

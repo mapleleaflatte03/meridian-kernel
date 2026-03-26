@@ -1345,6 +1345,156 @@ class FederationTests(unittest.TestCase):
                 delivery['receipt']['receipt_id'],
             )
 
+    def test_workspace_handoff_dispatch_queue_delivers_remote_execution_request(self):
+        try:
+            port_alpha = _find_free_port()
+            port_beta = _find_free_port()
+        except PermissionError as exc:
+            self.skipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            alpha = _seed_workspace_root(
+                os.path.join(tmp, 'alpha'),
+                org_id='org_alpha',
+                user_id='user_owner_alpha',
+                host_id='host_alpha',
+                port=port_alpha,
+                signing_secret='alpha-secret',
+                peer_entries={
+                    'host_beta': {
+                        'label': 'Beta Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'beta-secret',
+                        'admitted_org_ids': ['org_beta'],
+                    },
+                },
+            )
+            beta = _seed_workspace_root(
+                os.path.join(tmp, 'beta'),
+                org_id='org_beta',
+                user_id='user_owner_beta',
+                host_id='host_beta',
+                port=port_beta,
+                signing_secret='beta-secret',
+                peer_entries={
+                    'host_alpha': {
+                        'label': 'Alpha Host',
+                        'transport': 'https',
+                        'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                        'trust_state': 'trusted',
+                        'shared_secret': 'alpha-secret',
+                        'admitted_org_ids': ['org_alpha'],
+                    },
+                },
+            )
+            with _run_workspace(beta), _run_workspace(alpha):
+                session = _issue_workspace_session(alpha)
+
+                federation_status, federation_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/federation',
+                    headers={'Authorization': f"Bearer {session['token']}"},
+                )
+                self.assertEqual(federation_status, 200, federation_body)
+                remote_handoff = next(
+                    item for item in federation_body['handoff_preview']['handoff_candidates']
+                    if item['requested_org_id'] == 'org_beta'
+                )
+                self.assertEqual(remote_handoff['route_kind'], 'remote')
+                self.assertTrue(remote_handoff['dispatch_ready'])
+                handoff_id = remote_handoff['handoff_id']
+
+                acknowledge_status, acknowledge_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/handoff-preview-queue/acknowledge',
+                    payload={'handoff_id': handoff_id, 'note': 'operator reviewed'},
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(acknowledge_status, 200, acknowledge_body)
+                dispatch_id = acknowledge_body['dispatch_record']['dispatch_id']
+                self.assertEqual(dispatch_id, handoff_id)
+                self.assertEqual(acknowledge_body['dispatch_record']['state'], 'dispatchable')
+
+                request_payload = {'task': 'remote handoff capsule'}
+                warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
+                dispatch_status, dispatch_body = _http_json(
+                    'POST',
+                    alpha['base_url'] + '/api/federation/handoff-dispatch-queue/run',
+                    payload={
+                        'dispatch_id': dispatch_id,
+                        'payload': request_payload,
+                        'warrant_id': warrant['warrant_id'],
+                        'note': 'send queued handoff to remote host',
+                    },
+                    headers={
+                        'Authorization': f"Bearer {session['token']}",
+                        'Content-Type': 'application/json',
+                    },
+                )
+                self.assertEqual(dispatch_status, 200, dispatch_body)
+                self.assertEqual(dispatch_body['dispatch_runner'], 'remote_http_federation_runner')
+                self.assertEqual(dispatch_body['dispatch_record']['state'], 'dispatched')
+                self.assertEqual(dispatch_body['dispatch_record']['dispatch_runner'], 'remote_http_federation_runner')
+                self.assertEqual(dispatch_body['delivery']['receipt']['receiver_host_id'], 'host_beta')
+                self.assertEqual(dispatch_body['delivery']['receipt']['receiver_institution_id'], 'org_beta')
+                self.assertEqual(dispatch_body['execution_job']['state'], 'pending_local_warrant')
+                self.assertEqual(dispatch_body['execution_job']['target_host_id'], 'host_beta')
+                self.assertEqual(dispatch_body['dispatch_record']['delivery_snapshot']['receipt']['receipt_id'], dispatch_body['delivery']['receipt']['receipt_id'])
+                self.assertEqual(dispatch_body['dispatch_record']['execution_job_id'], dispatch_body['execution_job']['job_id'])
+
+                queue_status, queue_body = _http_json(
+                    'GET',
+                    alpha['base_url'] + '/api/federation/handoff-dispatch-queue',
+                    headers={'Authorization': alpha['auth_header']},
+                )
+                self.assertEqual(queue_status, 200, queue_body)
+                record = next(
+                    item for item in queue_body['handoff_dispatch_records']
+                    if item['dispatch_id'] == dispatch_id
+                )
+                self.assertEqual(record['state'], 'dispatched')
+                self.assertEqual(record['dispatch_runner'], 'remote_http_federation_runner')
+                self.assertEqual(record['delivery_snapshot']['claims']['envelope_id'], dispatch_body['delivery']['claims']['envelope_id'])
+                self.assertEqual(record['execution_job_state'], 'pending_local_warrant')
+
+                jobs_status, jobs_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/execution-jobs',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(jobs_status, 200, jobs_body)
+                self.assertEqual(jobs_body['summary']['total'], 1)
+                self.assertEqual(jobs_body['summary']['pending_local_warrant'], 1)
+                self.assertEqual(jobs_body['jobs'][0]['envelope_id'], dispatch_body['delivery']['claims']['envelope_id'])
+                self.assertEqual(jobs_body['jobs'][0]['receipt_id'], dispatch_body['delivery']['receipt']['receipt_id'])
+                self.assertEqual(jobs_body['jobs'][0]['state'], 'pending_local_warrant')
+                self.assertEqual(jobs_body['jobs'][0]['local_warrant']['court_review_state'], 'pending_review')
+
+                inbox_status, inbox_body = _http_json(
+                    'GET',
+                    beta['base_url'] + '/api/federation/inbox',
+                    headers={'Authorization': beta['auth_header']},
+                )
+                self.assertEqual(inbox_status, 200, inbox_body)
+                self.assertEqual(inbox_body['summary']['message_type_counts'], {'execution_request': 1})
+                self.assertEqual(inbox_body['entries'][0]['envelope_id'], dispatch_body['delivery']['claims']['envelope_id'])
+
+            alpha_events = _read_jsonl(alpha['audit_log'])
+            beta_events = _read_jsonl(beta['audit_log'])
+            sent = [event for event in alpha_events if event.get('action') == 'federation_envelope_sent']
+            received = [event for event in beta_events if event.get('action') == 'federation_envelope_received']
+            created = [event for event in beta_events if event.get('action') == 'federation_execution_job_created']
+            self.assertTrue(sent)
+            self.assertTrue(received)
+            self.assertTrue(created)
+            self.assertEqual(sent[-1]['details']['receiver_host_id'], 'host_beta')
+            self.assertEqual(received[-1]['details']['source_host_id'], 'host_alpha')
+
     def test_workspace_federation_court_notice_round_trip_stays_sender_warrant(self):
         try:
             port_alpha = _find_free_port()

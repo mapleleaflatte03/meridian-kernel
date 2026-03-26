@@ -210,6 +210,139 @@ class FederationDispatchRunnerTests(unittest.TestCase):
                 note='should not run',
             )
 
+    def test_remote_dispatch_runner_delivers_to_peer_and_persists_receipt_evidence(self):
+        self.dispatch_queue.upsert_handoff_dispatch_record(
+            self.org_id,
+            self._dispatch_record('fhdp_remote_http_1', target_institution_id='org_remote', target_host_id='host_remote'),
+        )
+        calls = {}
+
+        def fake_deliver(bound_org_id, target_host_id, target_org_id, message_type, payload=None, **kwargs):
+            calls['count'] = calls.get('count', 0) + 1
+            calls['payload'] = dict(payload or {})
+            calls['kwargs'] = dict(kwargs)
+            return {
+                'claims': {
+                    'envelope_id': 'fed_exec_remote_1',
+                    'message_type': message_type,
+                    'source_host_id': 'host_local',
+                    'source_institution_id': bound_org_id,
+                    'target_host_id': target_host_id,
+                    'target_institution_id': target_org_id,
+                    'warrant_id': kwargs.get('warrant_id', ''),
+                },
+                'receipt': {
+                    'receipt_id': 'fedrcpt_remote_1',
+                    'accepted_at': '2026-03-22T00:00:01Z',
+                    'receiver_host_id': target_host_id,
+                    'receiver_institution_id': target_org_id,
+                },
+                'response': {
+                    'processing': {
+                        'applied': True,
+                        'reason': 'execution_job_created',
+                        'execution_job': {
+                            'job_id': 'fej_remote_1',
+                            'state': 'pending_local_warrant',
+                            'target_host_id': target_host_id,
+                            'target_institution_id': target_org_id,
+                        },
+                        'receiver_warrant': {
+                            'warrant_id': 'war_remote_receiver_1',
+                            'court_review_state': 'pending_review',
+                        },
+                    },
+                },
+            }, {'host_id': 'host_local', 'trusted_peer_ids': ['host_remote']}
+
+        self.workspace._deliver_federation_envelope = fake_deliver
+
+        result = self.workspace._run_remote_federation_dispatch(
+            self.org_id,
+            'fhdp_remote_http_1',
+            actor_id='user:owner',
+            note='dispatch over remote HTTP',
+            session_id='ses_remote',
+            payload={'task': 'remote-demo'},
+            warrant_id='war_sender_remote_1',
+        )
+
+        self.assertEqual(calls['count'], 1)
+        self.assertEqual(calls['payload'], {'task': 'remote-demo'})
+        self.assertEqual(calls['kwargs']['warrant_id'], 'war_sender_remote_1')
+        self.assertEqual(result['dispatch_runner'], 'remote_http_federation_runner')
+        self.assertEqual(result['dispatch_state'], 'dispatched')
+        self.assertTrue(result['delivery_received'])
+        self.assertTrue(result['execution_job_created'])
+        self.assertEqual(result['delivery']['receipt']['receipt_id'], 'fedrcpt_remote_1')
+        self.assertEqual(result['execution_job']['job_id'], 'fej_remote_1')
+        self.assertEqual(result['receiver_warrant']['warrant_id'], 'war_remote_receiver_1')
+
+        fetched_dispatch = self.dispatch_queue.get_handoff_dispatch_record('fhdp_remote_http_1', self.org_id)
+        self.assertEqual(fetched_dispatch['state'], 'dispatched')
+        self.assertEqual(fetched_dispatch['dispatch_runner'], 'remote_http_federation_runner')
+        self.assertEqual(fetched_dispatch['execution_job_id'], 'fej_remote_1')
+        self.assertEqual(fetched_dispatch['execution_job_state'], 'pending_local_warrant')
+        self.assertEqual(fetched_dispatch['dispatch_truth_source'], 'remote_federation_receipt_and_receiver_processing')
+        self.assertEqual(fetched_dispatch['delivery_snapshot']['receipt']['receipt_id'], 'fedrcpt_remote_1')
+        self.assertEqual(fetched_dispatch['delivery_snapshot']['claims']['envelope_id'], 'fed_exec_remote_1')
+
+    def test_remote_dispatch_runner_is_idempotent_after_delivery(self):
+        self.dispatch_queue.upsert_handoff_dispatch_record(
+            self.org_id,
+            self._dispatch_record('fhdp_remote_http_2', target_institution_id='org_remote', target_host_id='host_remote'),
+        )
+
+        first_calls = {'count': 0}
+
+        def fake_deliver(bound_org_id, target_host_id, target_org_id, message_type, payload=None, **kwargs):
+            first_calls['count'] += 1
+            return {
+                'claims': {
+                    'envelope_id': 'fed_exec_remote_2',
+                    'message_type': message_type,
+                    'target_host_id': target_host_id,
+                    'target_institution_id': target_org_id,
+                },
+                'receipt': {
+                    'receipt_id': 'fedrcpt_remote_2',
+                    'accepted_at': '2026-03-22T00:00:02Z',
+                    'receiver_host_id': target_host_id,
+                    'receiver_institution_id': target_org_id,
+                },
+                'response': {
+                    'processing': {
+                        'applied': True,
+                        'reason': 'execution_job_created',
+                        'execution_job': {
+                            'job_id': 'fej_remote_2',
+                            'state': 'pending_local_warrant',
+                        },
+                    },
+                },
+            }, {'host_id': 'host_local'}
+
+        self.workspace._deliver_federation_envelope = fake_deliver
+        first = self.workspace._run_remote_federation_dispatch(
+            self.org_id,
+            'fhdp_remote_http_2',
+            actor_id='user:owner',
+            payload={'task': 'remote-idempotent'},
+            warrant_id='war_sender_remote_2',
+        )
+        self.assertEqual(first_calls['count'], 1)
+
+        self.workspace._deliver_federation_envelope = lambda *args, **kwargs: self.fail('should not redeliver an already dispatched record')
+        replay = self.workspace._run_remote_federation_dispatch(
+            self.org_id,
+            'fhdp_remote_http_2',
+            actor_id='user:owner',
+        )
+
+        self.assertTrue(replay['already_dispatched'])
+        self.assertEqual(replay['delivery']['receipt']['receipt_id'], 'fedrcpt_remote_2')
+        self.assertEqual(replay['execution_job']['job_id'], 'fej_remote_2')
+
 
 if __name__ == '__main__':
     unittest.main()

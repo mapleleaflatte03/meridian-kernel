@@ -7,9 +7,9 @@ This store is intentionally narrow:
 - dispatch records are institution-scoped and file-backed
 - entries are keyed by dispatch_id for idempotent upsert
 - records preserve the acknowledged preview, draft execution request, and the
-  dispatch metadata a future runtime would need to send a federation envelope
-- no remote delivery is claimed here; the queue only records a dispatchable
-  local handoff record that can later be sent over the network by the runtime
+  dispatch metadata a future runtime needs to send a federation envelope
+- successful dispatches can persist delivery evidence and receiver-side
+  execution metadata without claiming external settlement beyond that receipt
 """
 from __future__ import annotations
 
@@ -217,6 +217,7 @@ def _dispatch_digest(record):
         'dispatched_note': (record.get('dispatched_note') or '').strip(),
         'execution_job_id': (record.get('execution_job_id') or '').strip(),
         'execution_job_state': (record.get('execution_job_state') or '').strip(),
+        'delivery_snapshot': dict(record.get('delivery_snapshot') or {}),
     }
     return _canonical_hash(digest_payload)
 
@@ -289,6 +290,10 @@ def _normalize_dispatch(dispatch, org_id, existing=None):
         record['execution_job_id'] = (dispatch.get('execution_job_id') or existing.get('execution_job_id') or '').strip()
     if 'execution_job_state' in dispatch or 'execution_job_state' not in record:
         record['execution_job_state'] = (dispatch.get('execution_job_state') or existing.get('execution_job_state') or '').strip()
+    if 'delivery_snapshot' in dispatch:
+        record['delivery_snapshot'] = dict(dispatch.get('delivery_snapshot') or {})
+    elif 'delivery_snapshot' not in record:
+        record['delivery_snapshot'] = {}
     record['generated_at'] = (dispatch.get('generated_at') or existing.get('generated_at') or _now()).strip()
     record['queued_at'] = (dispatch.get('queued_at') or existing.get('queued_at') or record['generated_at']).strip()
     record['dispatched_at'] = (dispatch.get('dispatched_at') or existing.get('dispatched_at') or '').strip()
@@ -415,6 +420,8 @@ def mark_handoff_dispatch_record_dispatched(
     execution_job_id='',
     execution_job_state='',
     execution_job_snapshot=None,
+    delivery_snapshot=None,
+    dispatch_truth_source='',
 ):
     dispatch_id = (dispatch_id or '').strip()
     dispatched_by = (dispatched_by or '').strip()
@@ -438,7 +445,12 @@ def mark_handoff_dispatch_record_dispatched(
         record['execution_job_state'] = (execution_job_state or record.get('execution_job_state') or '').strip()
         if execution_job_snapshot is not None:
             record['execution_job_snapshot'] = dict(execution_job_snapshot or {})
+        if delivery_snapshot is not None:
+            record['delivery_snapshot'] = dict(delivery_snapshot or {})
+        if dispatch_truth_source:
+            record['dispatch_truth_source'] = (dispatch_truth_source or '').strip()
         record['updated_at'] = timestamp
+        record['dispatch_digest'] = _dispatch_digest(record)
         store['handoff_dispatch_records'][dispatch_id] = record
         _save_store(store, org_id)
         return record

@@ -80,10 +80,13 @@ What is real today:
 - one receiver-side settlement application path: accepted `settlement_notice` envelopes can record a settlement ref, settle the linked commitment, and move the inbox entry from `received` to `processed`
 - one receiver-side execution review path: accepted `execution_request` envelopes can materialize a local federated execution job plus a pending local warrant instead of implying remote work is already authorized
 - one sender-side review feedback path: receiver-side warrant review for a federated `execution_request` can emit a signed `court_notice` back to the source host, so sender-side warrant state and commitment provenance reflect remote review before settlement
+- one routing-planner preview path: `/api/status` and `/api/federation` now surface local/remote/blocked routing decisions, and remote candidates can be persisted into `GET /api/federation/handoff-preview-queue` for inspection without claiming remote execution
 - one tested OpenClaw-compatible federation seam in OSS: the kernel-side `openclaw_compatible` adapter can wrap a federated `execution_request` story in tests by gating the action envelope before dispatch and emitting metering/audit proof after the federated receipt returns, without claiming a live OpenClaw deployment is already wired
 - one sender-side commitment outbox seam that Loom can now consume locally: successful `execution_request` deliveries can append sender-side `delivery_refs` with `payload_hash` and `adapter_envelope` to the linked commitment, making the kernel's own commitment truth rich enough for Loom to import into a local runtime queue
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, sender-side federation validation when `commitment_id` is supplied, and warrant-bound `commitment_proposal` / `commitment_acceptance` / `commitment_breach_notice` envelopes
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
+- one settlement readiness snapshot: `GET /api/treasury/settlement-adapters/readiness` reports host support and execution blockers truthfully, instead of implying external settlement is live
+- one payout dry-run preview path: `/api/payouts/execute?dry_run=true` can preview a payout execution, `GET /api/treasury/payout-plan-preview-queue` and `/inspect` expose the preview queue, and operator acknowledgment is recorded without claiming settlement
 - two institution-owned service surfaces: capsule-backed `subscriptions` and `accounting`, both exposed through the reference workspace as institution-bound session surfaces
 - one integrated 3-host federation proof in tests: proposal, acceptance, execution review, court notice, breach notice, and witness archival now compose into one end-to-end kernel story
 
@@ -91,6 +94,8 @@ What is not yet broadly proven:
 - live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
 - live multi-host federation between independent Meridian deployments
 - live multi-institution routing inside one deployed service boundary
+
+The new routing and settlement preview surfaces are intentionally narrower than live execution. They show planner truth, dry-run state, and operator acknowledgments; they do not claim remote work or non-`internal_ledger` settlement is live.
 
 The executable proof map now lives in [docs/PROOF_MATRIX.md](docs/PROOF_MATRIX.md).
 For the smallest high-signal rerun, generate the public proof bundle with

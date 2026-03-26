@@ -13,20 +13,25 @@ This file maps public claims to executable proof artifacts or live surfaces.
 
 | Claim | Proof Artifact | Maturity | Notes |
 | --- | --- | --- | --- |
-| Runtime-core and agent-runtime truth exists | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtimes`, `GET /api/admission`, `GET /api/federation` | PROVEN | Process-bound reference workspace, with agent `runtime_binding` surfaced and kept coherent with registry truth |
+| Runtime-core and agent-runtime truth exists | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtimes`, `GET /api/admission`, `GET /api/federation` | PROVEN | Process-bound reference workspace, with agent `runtime_binding` surfaced and kept coherent with registry truth; `/api/status` also surfaces `routing_planner` and `handoff_preview_queue` |
+| Routing planner and handoff preview queue exist | [`kernel/tests/test_workspace_context.py`](../kernel/tests/test_workspace_context.py) and [`kernel/tests/test_federation_handoff_queue.py`](../kernel/tests/test_federation_handoff_queue.py) | PROVEN | Classifies local/remote/blocked requests and persists dispatch-ready remote handoff previews without claiming remote execution |
 | Signed host-service federation exists | [`kernel/tests/test_federation.py`](../kernel/tests/test_federation.py) | PROVEN | Covers peer registry, replay protection, wrong-target rejection, settlement notice, case/court notice, witness archive |
 | 3-host federation story exists | [`kernel/tests/test_three_host_federation_proof.py`](../kernel/tests/test_three_host_federation_proof.py) | PROVEN | Alpha/Beta/Gamma story with proposal, acceptance, execution review, court notice, breach notice, and witness archive |
 | OpenClaw-compatible runtime seam exists | [`kernel/tests/test_openclaw_federation_proof.py`](../kernel/tests/test_openclaw_federation_proof.py) | PROVEN | Kernel-side reference adapter proof, not a live hosted OpenClaw deployment |
 | Warrant-bound payouts exist | [`kernel/tests/test_treasury_capsule.py`](../kernel/tests/test_treasury_capsule.py) | PROVEN | Includes reserve-floor gate, phase gate, settlement adapter preflight, verifier-ready contract checks |
+| Payout-plan dry-run preview queue exists | [`kernel/tests/test_payout_plan_preview_queue.py`](../kernel/tests/test_payout_plan_preview_queue.py) and [`kernel/tests/test_workspace_context.py`](../kernel/tests/test_workspace_context.py) | PROVEN | Inspectable dry-run queue with operator acknowledgment and read-only inspection; ack does not claim settlement |
 | Settlement notice fail-closed behavior exists | [`kernel/tests/test_workspace_context.py`](../kernel/tests/test_workspace_context.py) and [`kernel/tests/test_federation.py`](../kernel/tests/test_federation.py) | PROVEN | Invalid notices open cases and can suspend peers |
 
 ## Live Proofs
 
 | Claim | Live Surface | Maturity | Current Truth |
 | --- | --- | --- | --- |
-| Live workspace exposes runtime-core and agent-runtime truth | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtime-proof` | PROVEN | Founding-only, single-org, honest boundary classification; bindings are surfaced consistently and the live OpenClaw host returns a filtered runtime-proof receipt |
+| Live workspace exposes runtime-core and agent-runtime truth | `GET /api/context`, `GET /api/status`, `GET /api/agents`, `GET /api/runtime-proof` | PROVEN | Founding-only, single-org, honest boundary classification; bindings are surfaced consistently and `/api/status` includes routing planner and handoff preview truth |
+| Live routing preview surfaces are exposed | `GET /api/federation`, `GET /api/federation/handoff-preview-queue` | PROVEN | Local/remote/blocked decisions are preview-only; remote candidates are persisted for inspection, not executed by this surface |
 | Live treasury exposes settlement adapter contract | `GET /api/treasury/settlement-adapters` | PROVEN | `internal_ledger` ready; external adapters registered but not executable |
+| Live treasury exposes settlement readiness snapshot | `GET /api/treasury/settlement-adapters/readiness` | PROVEN | Host support and verifier blockers are reported truthfully before execution is attempted |
 | Live preflight exposes settlement verifier blockers | `POST /api/treasury/settlement-adapters/preflight` | PROVEN | External adapters fail closed until verifier is ready and host support exists |
+| Live treasury exposes payout-plan preview queue inspection | `GET /api/treasury/payout-plan-preview-queue`, `GET /api/treasury/payout-plan-preview-queue/inspect` | PROVEN | Dry-run preview records are inspectable; operator acknowledgment is recorded without claiming settlement |
 | Live service boundaries are explicitly classified | `GET /api/subscriptions`, `GET /api/accounting`, `GET /api/federation/manifest` | PROVEN | Canonical service module + compatibility role surfaced, no fake multi-host routing |
 | Live readiness stays truthful | [`company/meridian_platform/readiness.py`](../../company/meridian_platform/readiness.py) | PROVEN | Founder-backed phase 0, treasury-blocked, customer revenue 0 |
 

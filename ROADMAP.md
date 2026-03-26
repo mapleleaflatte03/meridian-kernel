@@ -54,6 +54,9 @@ demo, and example vertical.
 - [x] Constitutional runtime contract (`docs/RUNTIME_CONTRACT.md`) — seven requirements
 - [x] Contract compliance checker (`check_contract`, `check-all` CLI)
 - [x] Workspace API `/api/runtimes` endpoint
+- [x] Settlement adapter readiness snapshot (`/api/treasury/settlement-adapters/readiness`)
+- [x] Routing planner and handoff preview queue (`/api/status`, `/api/federation/handoff-preview-queue`)
+- [x] Payout dry-run preview queue (`/api/treasury/payout-plan-preview-queue`, `/inspect`, operator ack)
 - [ ] MCP adapter implementation (agent identity, action envelope, sanction controls)
 - [ ] A2A adapter implementation (action envelope mapping from A2A task schema)
 - [ ] OpenClaw adapter (cost attribution + budget gate hooks)

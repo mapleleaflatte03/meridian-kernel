@@ -19,7 +19,9 @@ Supporting modules:
 - `kernel/audit.py` — Structured JSONL audit logging
 - `kernel/metering.py` — Usage metering per organization and agent
 - `kernel/bootstrap.py` — Platform initialization and data backfill
-- `kernel/workspace.py` — Owner-facing governed workspace (HTML dashboard + JSON API)
+- `kernel/federation_handoff_queue.py` — Remote routing handoff preview queue
+- `kernel/payout_plan_preview_queue.py` — Payout dry-run preview queue and operator inspection state
+- `kernel/workspace.py` — Owner-facing governed workspace (HTML dashboard + JSON API, including routing and preview snapshots)
 
 ### Economy Layer (`economy/`)
 The lower layer that kernel primitives compose over:

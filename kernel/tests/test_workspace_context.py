@@ -70,6 +70,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_list_witness_observations = self.workspace.list_witness_observations
         self.orig_witness_archive_summary = self.workspace.witness_archive_summary
         self.orig_settlement_adapter_readiness_snapshot = self.workspace.settlement_adapter_readiness_snapshot
+        self.orig_payout_plan_preview_queue_snapshot = self.workspace._payout_plan_preview_queue_snapshot
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -117,6 +118,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.list_witness_observations = self.orig_list_witness_observations
         self.workspace.witness_archive_summary = self.orig_witness_archive_summary
         self.workspace.settlement_adapter_readiness_snapshot = self.orig_settlement_adapter_readiness_snapshot
+        self.workspace._payout_plan_preview_queue_snapshot = self.orig_payout_plan_preview_queue_snapshot
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -818,6 +820,51 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(captured['data']['proposal']['execution_plan']['tx_ref'], 'ptx_preview_demo')
         self.assertEqual(captured['data']['warrant'], warrant)
         self.assertEqual(captured['data']['summary']['total'], 1)
+
+    def test_treasury_payout_plan_preview_queue_endpoint_returns_snapshot(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/treasury/payout-plan-preview-queue'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        snapshot = {
+            'summary': {'total': 1, 'execution_ready': 1},
+            'payout_plan_previews': [
+                {'preview_id': 'ptx_preview_demo', 'proposal_id': 'pay_demo'}
+            ],
+        }
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}),              mock.patch.object(self.workspace, '_payout_plan_preview_queue_snapshot', return_value=snapshot):
+            handler.do_GET()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['summary']['total'], 1)
+        self.assertEqual(captured['data']['payout_plan_previews'][0]['preview_id'], 'ptx_preview_demo')
 
     def test_federation_snapshot_surfaces_trusted_peers(self):
         from runtime_host import default_host_identity

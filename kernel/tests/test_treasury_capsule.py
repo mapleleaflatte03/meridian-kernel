@@ -1073,6 +1073,20 @@ class TreasuryCapsuleTests(unittest.TestCase):
         proposal_after = treasury.get_payout_proposal(proposal['proposal_id'], org_id=self.org_id)
         self.assertEqual(proposal_after['status'], 'dispute_window')
         self.assertNotIn('executed_at', preview)
+        self.assertTrue(preview['plan_preview_queue_persisted'])
+        self.assertIsNotNone(preview['plan_preview_queue_record'])
+        self.assertEqual(preview['plan_preview_queue_record']['preview_id'], preview['execution_plan']['tx_ref'])
+        self.assertEqual(
+            preview['plan_preview_queue_record']['preview_truth_source'],
+            'payout_dry_run_and_adapter_contract_only',
+        )
+        queue_path = self.capsule_dir / 'payout_plan_preview_queue.json'
+        self.assertTrue(queue_path.exists())
+        queue_payload = json.loads(queue_path.read_text())
+        self.assertEqual(len(queue_payload['payout_plan_previews']), 1)
+        queue_summary = treasury.payout_plan_preview_queue_summary(self.org_id)
+        self.assertEqual(queue_summary['total'], 1)
+        self.assertEqual(queue_summary['execution_ready'], 1)
 
     def test_missing_org_fails_cleanly(self):
         with self.assertRaises(SystemExit) as ctx:

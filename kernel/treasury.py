@@ -76,6 +76,12 @@ except Exception:
 from metering import get_spend, summary as metering_summary
 from agent_registry import check_budget as _agent_check_budget
 import commitments
+from payout_plan_preview_queue import (
+    load_payout_plan_preview_queue,
+    payout_plan_preview_queue_snapshot,
+    payout_plan_preview_queue_summary,
+    upsert_payout_plan_preview,
+)
 
 try:
     from phase_machine import current_phase as _current_phase
@@ -1952,7 +1958,62 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
         'proof': normalized_proof.get('proof', {}),
         'linked_commitment_id': linked_commitment_id,
     }
+    execution_plan = {
+        'tx_ref': tx_ref,
+        'proposal_id': proposal_id,
+        'warrant_id': (warrant_id or '').strip(),
+        'linked_commitment_id': linked_commitment_id,
+        'settlement_adapter': settlement_adapter,
+        'amount_usd': amount,
+        'currency': record.get('currency', 'USDC'),
+        'cash_before': cash_before,
+        'cash_after': projected_cash,
+        'expenses_before': expenses_before,
+        'expenses_after': projected_expenses,
+        'recipient_wallet_id': record.get('recipient_wallet_id', ''),
+        'settlement_adapter_contract': contract,
+        'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
+        'execution_refs': execution_refs,
+    }
     if dry_run:
+        preview_timestamp = _now()
+        preview_record = {
+            'preview_id': tx_ref,
+            'proposal_id': proposal_id,
+            'status_at_preview': record.get('status', ''),
+            'warrant_id': (warrant_id or '').strip(),
+            'settlement_adapter': settlement_adapter,
+            'preview_state': 'previewed',
+            'dry_run': True,
+            'execution_ready': True,
+            'settlement_claimed': False,
+            'external_settlement_observed': False,
+            'preview_truth_source': 'payout_dry_run_and_adapter_contract_only',
+            'contract': contract,
+            'normalized_proof': normalized_proof,
+            'execution_plan': execution_plan,
+            'proposal_snapshot': {
+                'proposal_id': proposal_id,
+                'status': record.get('status', ''),
+                'amount_usd': amount,
+                'currency': record.get('currency', 'USDC'),
+                'contributor_id': record.get('contributor_id', ''),
+                'recipient_wallet_id': record.get('recipient_wallet_id', ''),
+                'linked_commitment_id': linked_commitment_id,
+            },
+            'tx_hash': normalized_proof.get('tx_hash', ''),
+            'generated_at': preview_timestamp,
+            'previewed_at': preview_timestamp,
+            'queued_at': preview_timestamp,
+            'note': note or '',
+        }
+        preview_queue_record = None
+        preview_queue_error = ''
+        try:
+            preview_queue_record = upsert_payout_plan_preview(org_id, preview_record)
+        except (SystemExit, ValueError, FileNotFoundError, OSError) as exc:
+            preview_queue_error = str(exc)
         return {
             'dry_run': True,
             'proposal_id': proposal_id,
@@ -1964,24 +2025,10 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
             'recipient_wallet_id': record.get('recipient_wallet_id', ''),
             'contract': contract,
             'normalized_proof': normalized_proof,
-            'execution_plan': {
-                'tx_ref': tx_ref,
-                'proposal_id': proposal_id,
-                'warrant_id': (warrant_id or '').strip(),
-                'linked_commitment_id': linked_commitment_id,
-                'settlement_adapter': settlement_adapter,
-                'amount_usd': amount,
-                'currency': record.get('currency', 'USDC'),
-                'cash_before': cash_before,
-                'cash_after': projected_cash,
-                'expenses_before': expenses_before,
-                'expenses_after': projected_expenses,
-                'recipient_wallet_id': record.get('recipient_wallet_id', ''),
-                'settlement_adapter_contract': contract,
-                'settlement_adapter_contract_snapshot': contract.get('contract_snapshot', {}),
-                'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
-                'execution_refs': execution_refs,
-            },
+            'execution_plan': execution_plan,
+            'plan_preview_queue_record': preview_queue_record,
+            'plan_preview_queue_persisted': preview_queue_record is not None,
+            'plan_preview_queue_error': preview_queue_error,
         }
     treasury['cash_usd'] = projected_cash
     treasury['expenses_recorded_usd'] = projected_expenses
@@ -2151,6 +2198,7 @@ def treasury_snapshot(org_id=None):
         'protocol': protocol,
         'settlement_adapter_summary': settlement_adapter_summary(org_id),
         'settlement_adapters': list_settlement_adapters(org_id),
+        'plan_preview_queue_summary': payout_plan_preview_queue_summary(org_id),
         'runtime_budget': budget_reservation_summary(org_id),
         'remediation': remediation,
         'snapshot_at': _now(),

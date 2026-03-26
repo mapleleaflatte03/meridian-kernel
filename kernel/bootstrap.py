@@ -29,6 +29,7 @@ from authority import _load_queue, _save_queue
 from court import _load_records, _save_records
 from treasury import (load_wallets, load_treasury_accounts, load_maintainers,
                       load_contributors, load_payout_proposals, load_funding_sources)
+from payout_plan_preview_queue import load_payout_plan_preview_queue
 
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
 LEDGER_FILE = os.path.join(WORKSPACE, 'economy', 'ledger.json')
@@ -324,6 +325,7 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
         ('contributors.json', load_contributors),
         ('payout_proposals.json', load_payout_proposals),
         ('funding_sources.json', load_funding_sources),
+        ('payout_plan_preview_queue.json', load_payout_plan_preview_queue),
     ]
     for filename, loader in protocol_loaders:
         protocol_path = capsule_path(founding_org_id, filename)

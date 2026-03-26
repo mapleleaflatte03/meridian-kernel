@@ -197,7 +197,8 @@ from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       cancel_payout_proposal, execute_payout_proposal,
                       promote_payout_plan_preview_to_approval_candidate,
                       inspect_payout_plan_approval_candidate_queue,
-                      payout_plan_approval_candidate_queue_snapshot)
+                      payout_plan_approval_candidate_queue_snapshot,
+                      payout_execution_queue_snapshot)
 from subscription_service import (
     add_subscription,
     active_delivery_targets,
@@ -5800,6 +5801,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(_payout_plan_preview_queue_inspection(org_id))
         elif path == '/api/treasury/payout-plan-approval-candidate-queue':
             return self._json(payout_plan_approval_candidate_queue_snapshot(org_id))
+        elif path == '/api/treasury/payout-execution-queue':
+            return self._json(payout_execution_queue_snapshot(org_id))
         elif path == '/api/treasury/payout-plan-approval-candidate-queue/inspect':
             return self._json(inspect_payout_plan_approval_candidate_queue(org_id))
         elif path == '/api/payouts':

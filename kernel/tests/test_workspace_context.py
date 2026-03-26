@@ -965,6 +965,51 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(captured['data']['summary']['total'], 1)
         self.assertEqual(captured['data']['payout_plan_approval_candidates'][0]['candidate_id'], 'ptx_preview_demo')
 
+    def test_treasury_payout_execution_queue_endpoint_returns_snapshot(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/treasury/payout-execution-queue'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        snapshot = {
+            'summary': {'total': 1, 'dispatchable': 1},
+            'payout_execution_records': [
+                {'execution_id': 'ptx_exec_demo', 'proposal_id': 'pay_demo', 'state': 'dispatchable'}
+            ],
+        }
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}),              mock.patch.object(self.workspace, 'payout_execution_queue_snapshot', return_value=snapshot):
+            handler.do_GET()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['summary']['total'], 1)
+        self.assertEqual(captured['data']['payout_execution_records'][0]['execution_id'], 'ptx_exec_demo')
+
     def test_treasury_payout_plan_approval_candidate_queue_promote_endpoint_returns_candidate(self):
         class FakeContext:
             def __init__(self):

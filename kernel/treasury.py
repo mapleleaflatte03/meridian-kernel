@@ -94,6 +94,12 @@ from payout_plan_approval_candidate_queue import (
     promote_payout_plan_preview_to_approval_candidate as _promote_payout_plan_preview_to_approval_candidate,
     upsert_payout_plan_approval_candidate,
 )
+from payout_execution_queue import (
+    load_payout_execution_queue as _load_payout_execution_queue,
+    payout_execution_queue_snapshot as _payout_execution_queue_snapshot,
+    payout_execution_queue_summary as _payout_execution_queue_summary,
+    upsert_payout_execution_record,
+)
 
 try:
     from phase_machine import current_phase as _current_phase
@@ -1988,6 +1994,35 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
         'settlement_adapter_contract_digest': contract.get('contract_digest', ''),
         'execution_refs': execution_refs,
     }
+    execution_queue_base = {
+        'execution_id': tx_ref,
+        'proposal_id': proposal_id,
+        'warrant_id': (warrant_id or '').strip(),
+        'settlement_adapter': settlement_adapter,
+        'dispatch_ready': bool(contract.get('execution_ready')),
+        'dispatch_blockers': list(contract.get('execution_blockers') or []),
+        'execution_ready': bool(contract.get('execution_ready')),
+        'settlement_claimed': False,
+        'external_settlement_observed': False,
+        'proof_type': adapter.get('proof_type', ''),
+        'tx_hash': normalized_proof.get('tx_hash', ''),
+        'execution_refs': execution_refs,
+        'execution_plan': execution_plan,
+        'proposal_snapshot': {
+            'proposal_id': proposal_id,
+            'status': record.get('status', ''),
+            'amount_usd': amount,
+            'currency': record.get('currency', 'USDC'),
+            'contributor_id': record.get('contributor_id', ''),
+            'recipient_wallet_id': record.get('recipient_wallet_id', ''),
+            'linked_commitment_id': linked_commitment_id,
+        },
+        'adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'adapter_contract_digest': contract.get('contract_digest', ''),
+        'generated_at': record.get('updated_at', '') or _now(),
+        'queued_at': record.get('updated_at', '') or _now(),
+        'note': note or '',
+    }
     if dry_run:
         preview_timestamp = _now()
         preview_record = {
@@ -2026,6 +2061,21 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
             preview_queue_record = upsert_payout_plan_preview(org_id, preview_record)
         except (SystemExit, ValueError, FileNotFoundError, OSError) as exc:
             preview_queue_error = str(exc)
+        execution_queue_record = None
+        execution_queue_error = ''
+        try:
+            execution_queue_record = upsert_payout_execution_record(
+                org_id,
+                dict(execution_queue_base),
+                state='previewed',
+                generated_at=preview_timestamp,
+                queued_at=preview_timestamp,
+                dispatched_at='',
+                executed_at='',
+                execution_refs=execution_refs,
+            )
+        except (SystemExit, ValueError, FileNotFoundError, OSError) as exc:
+            execution_queue_error = str(exc)
         return {
             'dry_run': True,
             'proposal_id': proposal_id,
@@ -2041,6 +2091,9 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
             'plan_preview_queue_record': preview_queue_record,
             'plan_preview_queue_persisted': preview_queue_record is not None,
             'plan_preview_queue_error': preview_queue_error,
+            'execution_queue_record': execution_queue_record,
+            'execution_queue_persisted': execution_queue_record is not None,
+            'execution_queue_error': execution_queue_error,
         }
     treasury['cash_usd'] = projected_cash
     treasury['expenses_recorded_usd'] = projected_expenses
@@ -2085,6 +2138,21 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
     record['settlement_adapter_contract_digest'] = contract.get('contract_digest', '')
     record['tx_hash'] = normalized_proof.get('tx_hash', '')
     record['execution_refs'] = dict(execution_refs)
+    execution_queue_record = None
+    execution_queue_error = ''
+    try:
+        execution_queue_record = upsert_payout_execution_record(
+            org_id,
+            dict(execution_queue_base),
+            state='dispatchable',
+            dispatched_at=timestamp,
+            execution_refs=dict(execution_refs),
+        )
+    except (SystemExit, ValueError, FileNotFoundError, OSError) as exc:
+        execution_queue_error = str(exc)
+    record['execution_queue_record'] = execution_queue_record
+    record['execution_queue_persisted'] = execution_queue_record is not None
+    record['execution_queue_error'] = execution_queue_error
     if note:
         record['execution_note'] = note
     linked_commitment = None
@@ -2110,6 +2178,20 @@ def execute_payout_proposal(proposal_id, actor_id, *, org_id=None, warrant_id=''
             org_id=org_id,
         )
     _save_proposal_store(store, org_id)
+    try:
+        execution_queue_record = upsert_payout_execution_record(
+            org_id,
+            dict(execution_queue_base),
+            state='executed',
+            dispatched_at=timestamp,
+            executed_at=timestamp,
+            execution_refs=dict(execution_refs),
+        )
+    except (SystemExit, ValueError, FileNotFoundError, OSError) as exc:
+        execution_queue_error = str(exc)
+    record['execution_queue_record'] = execution_queue_record
+    record['execution_queue_persisted'] = execution_queue_record is not None
+    record['execution_queue_error'] = execution_queue_error
     if linked_commitment is not None:
         record['linked_commitment'] = linked_commitment
     return record
@@ -2179,6 +2261,18 @@ def inspect_payout_plan_approval_candidate_queue(org_id=None, *, state=None, lim
     return _inspect_payout_plan_approval_candidate_queue(org_id, state=state, limit=limit)
 
 
+def load_payout_execution_queue(org_id=None):
+    return _load_payout_execution_queue(org_id)
+
+
+def payout_execution_queue_summary(org_id=None):
+    return _payout_execution_queue_summary(org_id)
+
+
+def payout_execution_queue_snapshot(org_id=None, *, state=None, limit=50):
+    return _payout_execution_queue_snapshot(org_id, state=state, limit=limit)
+
+
 def treasury_snapshot(org_id=None):
     """Combined view: balance, revenue, spend, runway, reserve status."""
     ledger = load_ledger(org_id)
@@ -2245,6 +2339,7 @@ def treasury_snapshot(org_id=None):
         'settlement_adapters': list_settlement_adapters(org_id),
         'plan_preview_queue_summary': payout_plan_preview_queue_summary(org_id),
         'plan_approval_candidate_queue_summary': payout_plan_approval_candidate_queue_summary(org_id),
+        'execution_queue_summary': payout_execution_queue_summary(org_id),
         'runtime_budget': budget_reservation_summary(org_id),
         'remediation': remediation,
         'snapshot_at': _now(),

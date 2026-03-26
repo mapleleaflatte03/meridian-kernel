@@ -614,6 +614,14 @@ class TreasuryCapsuleTests(unittest.TestCase):
             executed['execution_refs']['proof']['verification_attestation']['type'],
             'x402_settlement_verifier',
         )
+        self.assertTrue(executed['execution_queue_persisted'])
+        self.assertIsNotNone(executed['execution_queue_record'])
+        self.assertEqual(executed['execution_queue_record']['state'], 'executed')
+        self.assertEqual(executed['execution_queue_record']['execution_id'], executed['execution_refs']['tx_ref'])
+        self.assertEqual(
+            executed['execution_queue_record']['adapter_contract_digest'],
+            executed['execution_refs']['settlement_adapter_contract_digest'],
+        )
 
         ledger = json.loads((self.capsule_dir / 'ledger.json').read_text())
         self.assertAlmostEqual(ledger['treasury']['cash_usd'], 118.0, places=2)
@@ -1080,6 +1088,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
             preview['plan_preview_queue_record']['preview_truth_source'],
             'payout_dry_run_and_adapter_contract_only',
         )
+        self.assertTrue(preview['execution_queue_persisted'])
+        self.assertIsNotNone(preview['execution_queue_record'])
+        self.assertEqual(preview['execution_queue_record']['state'], 'previewed')
+        self.assertFalse(preview['execution_queue_record']['settlement_claimed'])
         queue_path = self.capsule_dir / 'payout_plan_preview_queue.json'
         self.assertTrue(queue_path.exists())
         queue_payload = json.loads(queue_path.read_text())

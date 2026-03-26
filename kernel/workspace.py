@@ -516,6 +516,13 @@ def _federation_snapshot(bound_org_id, host_identity=None, admission_registry=No
     snapshot.update(_federation_management_state(host_identity))
     snapshot['inbox_summary'] = summarize_inbox_entries(bound_org_id)
     snapshot['execution_job_summary'] = execution_job_summary(bound_org_id)
+    snapshot['handoff_preview'] = _routing_handoff_preview_snapshot(
+        bound_org_id,
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+        peer_registry=peer_registry,
+        org_registry=load_orgs().get('organizations', {}),
+    )
     snapshot['witness_archive'] = _witness_archive_snapshot(
         bound_org_id,
         host_identity=host_identity,
@@ -4051,6 +4058,105 @@ def _routing_planner_snapshot(bound_org_id, *, requested_org_ids=None, host_iden
             'blocked': len([item for item in decisions if item['route_kind'] == 'blocked']),
         },
         'decisions': decisions,
+    }
+
+
+def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
+                                      host_identity=None, admission_registry=None,
+                                      peer_registry=None, org_registry=None):
+    org_registry = dict(org_registry or {})
+    peer_registry = dict(peer_registry or {})
+    if host_identity is None or admission_registry is None:
+        host_identity, admission_registry = _runtime_host_state(bound_org_id)
+    routing_planner = _routing_planner_snapshot(
+        bound_org_id,
+        requested_org_ids=requested_org_ids,
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+        peer_registry=peer_registry,
+        org_registry=org_registry,
+    )
+    handoff_candidates = []
+    for decision in routing_planner['decisions']:
+        requested_org_id = decision.get('requested_org_id', '')
+        route_kind = decision.get('route_kind', '')
+        route_reason = decision.get('route_reason', '')
+        handoff_state = 'blocked'
+        dispatch_ready = False
+        dispatch_blockers = [route_reason] if route_reason else []
+        if route_kind == 'local':
+            handoff_state = 'local_bound'
+            dispatch_blockers = ['request_targets_bound_institution']
+        elif route_kind == 'remote':
+            handoff_state = 'previewed'
+            dispatch_ready = True
+            dispatch_blockers = []
+        preview = {
+            'requested_org_id': requested_org_id,
+            'route_kind': route_kind,
+            'route_state': decision.get('route_state', ''),
+            'route_reason': route_reason,
+            'handoff_state': handoff_state,
+            'dispatch_ready': dispatch_ready,
+            'dispatch_blockers': dispatch_blockers,
+            'preview_truth_source': 'planner_only' if route_kind != 'remote' else 'planner_and_peer_registry_only',
+            'dispatch_paths': {
+                'send': '/api/federation/send',
+                'receive': '/api/federation/receive',
+                'receiver_jobs': '/api/federation/execution-jobs',
+                'receiver_execute': '/api/federation/execution-jobs/execute',
+            },
+            'draft_execution_request': {
+                'message_type': 'execution_request',
+                'boundary_name': 'federation_gateway',
+                'identity_model': 'signed_host_service',
+                'source_host_id': getattr(host_identity, 'host_id', ''),
+                'source_institution_id': bound_org_id,
+                'target_host_id': decision.get('target_host_id', ''),
+                'target_institution_id': requested_org_id,
+                'payload_hash': '',
+                'warrant_id': '',
+                'commitment_id': '',
+            },
+        }
+        if route_kind == 'remote':
+            preview['handoff_id'] = 'fhdp_' + hashlib.sha256(
+                ':'.join((
+                    bound_org_id,
+                    requested_org_id,
+                    decision.get('target_host_id', ''),
+                    decision.get('target_endpoint_url', ''),
+                    route_reason,
+                )).encode('utf-8')
+            ).hexdigest()[:12]
+            preview['target_host_id'] = decision.get('target_host_id', '')
+            preview['target_endpoint_url'] = decision.get('target_endpoint_url', '')
+            preview['peer_host_id'] = decision.get('peer_host_id', '')
+            preview['peer_label'] = decision.get('peer_label', '')
+            preview['peer_trust_state'] = decision.get('peer_trust_state', '')
+            preview['remote_execution_claimed'] = False
+        else:
+            preview['target_host_id'] = decision.get('target_host_id', '')
+            preview['target_endpoint_url'] = decision.get('target_endpoint_url', '')
+            preview['peer_host_id'] = decision.get('peer_host_id', '')
+            preview['peer_label'] = decision.get('peer_label', '')
+            preview['peer_trust_state'] = decision.get('peer_trust_state', '')
+            preview['remote_execution_claimed'] = False
+        handoff_candidates.append(preview)
+
+    return {
+        'bound_org_id': bound_org_id,
+        'host_id': getattr(host_identity, 'host_id', '') if host_identity else '',
+        'generated_at': _now(),
+        'routing_planner': routing_planner,
+        'summary': {
+            'total': len(handoff_candidates),
+            'local': len([item for item in handoff_candidates if item['route_kind'] == 'local']),
+            'remote': len([item for item in handoff_candidates if item['route_kind'] == 'remote']),
+            'blocked': len([item for item in handoff_candidates if item['route_kind'] == 'blocked']),
+            'remote_previewed': len([item for item in handoff_candidates if item['handoff_state'] == 'previewed']),
+        },
+        'handoff_candidates': handoff_candidates,
     }
 
 

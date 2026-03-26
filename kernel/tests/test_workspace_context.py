@@ -220,6 +220,74 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(decisions['org_unknown']['route_kind'], 'blocked')
         self.assertEqual(decisions['org_unknown']['route_reason'], 'unknown_requested_institution')
 
+    def test_routing_handoff_preview_bridges_remote_planner_entries(self):
+        host = self.workspace.load_host_identity('missing')
+        host.federation_enabled = True
+        planner = {
+            'bound_org_id': 'org_local',
+            'host_id': host.host_id,
+            'host_federation_enabled': True,
+            'requested_org_ids': ['org_local', 'org_remote', 'org_blocked'],
+            'summary': {'total': 3, 'local': 1, 'remote': 1, 'blocked': 1},
+            'decisions': [
+                {
+                    'requested_org_id': 'org_local',
+                    'route_state': 'local',
+                    'route_kind': 'local',
+                    'route_reason': 'request_targets_bound_institution',
+                    'target_host_id': '',
+                    'target_endpoint_url': '',
+                    'peer_host_id': '',
+                    'peer_label': '',
+                    'peer_trust_state': '',
+                },
+                {
+                    'requested_org_id': 'org_remote',
+                    'route_state': 'remote',
+                    'route_kind': 'remote',
+                    'route_reason': 'trusted_peer_can_serve_requested_institution',
+                    'target_host_id': 'host_beta',
+                    'target_endpoint_url': 'http://127.0.0.1:19001',
+                    'peer_host_id': 'host_beta',
+                    'peer_label': 'Beta Host',
+                    'peer_trust_state': 'trusted',
+                },
+                {
+                    'requested_org_id': 'org_blocked',
+                    'route_state': 'blocked',
+                    'route_kind': 'blocked',
+                    'route_reason': 'unknown_requested_institution',
+                    'target_host_id': '',
+                    'target_endpoint_url': '',
+                    'peer_host_id': '',
+                    'peer_label': '',
+                    'peer_trust_state': '',
+                },
+            ],
+        }
+        self.workspace._routing_planner_snapshot = lambda *args, **kwargs: planner
+
+        preview = self.workspace._routing_handoff_preview_snapshot(
+            'org_local',
+            host_identity=host,
+            admission_registry={'admitted_org_ids': ['org_local']},
+            peer_registry={'peers': {}},
+            org_registry={'org_local': {}, 'org_remote': {}, 'org_blocked': {}},
+        )
+
+        self.assertEqual(preview['summary'], {'total': 3, 'local': 1, 'remote': 1, 'blocked': 1, 'remote_previewed': 1})
+        remote = next(item for item in preview['handoff_candidates'] if item['requested_org_id'] == 'org_remote')
+        self.assertEqual(remote['handoff_state'], 'previewed')
+        self.assertTrue(remote['dispatch_ready'])
+        self.assertFalse(remote['remote_execution_claimed'])
+        self.assertEqual(remote['dispatch_paths']['send'], '/api/federation/send')
+        self.assertEqual(remote['draft_execution_request']['target_host_id'], 'host_beta')
+        self.assertEqual(remote['draft_execution_request']['target_institution_id'], 'org_remote')
+        self.assertTrue(remote['handoff_id'].startswith('fhdp_'))
+        blocked = next(item for item in preview['handoff_candidates'] if item['requested_org_id'] == 'org_blocked')
+        self.assertEqual(blocked['handoff_state'], 'blocked')
+        self.assertFalse(blocked['dispatch_ready'])
+
     def test_auth_context_prefers_explicit_user_id(self):
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_meridian_owner')
         self.workspace.load_orgs = lambda: {
@@ -778,6 +846,9 @@ class WorkspaceContextTests(unittest.TestCase):
                 admission_registry={'admitted_org_ids': ['org_a', 'org_b']},
             )
             self.assertTrue(snap['enabled'])
+            self.assertIn('handoff_preview', snap)
+            self.assertIn('routing_planner', snap['handoff_preview'])
+            self.assertIn('handoff_candidates', snap['handoff_preview'])
             self.assertTrue(snap['send_enabled'])
             self.assertEqual(snap['peer_count'], 1)
             self.assertEqual(snap['all_peer_count'], 1)

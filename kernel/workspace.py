@@ -32,6 +32,8 @@ Endpoints:
   GET  /api/federation/execution-jobs -> Receiver-side federated execution jobs
   GET  /api/treasury/payout-plan-preview-queue -> Persisted payout-plan preview queue
   GET  /api/treasury/payout-plan-preview-queue/inspect -> Read-only payout-plan preview queue inspection pass
+  GET  /api/treasury/payout-plan-approval-candidate-queue -> Persisted payout-plan approval-candidate queue
+  GET  /api/treasury/payout-plan-approval-candidate-queue/inspect -> Read-only payout-plan approval-candidate queue inspection pass
   GET  /api/federation/manifest   -> Public host federation manifest
   GET  /api/federation/witness/archive -> Witness-host archival evidence state
   GET  /api/runtimes              -> Runtime registry and contract status
@@ -186,14 +188,16 @@ from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       list_settlement_adapters, settlement_adapter_summary,
                       settlement_adapter_readiness_snapshot,
                       preflight_settlement_adapter,
-                      settlement_adapter_contract_snapshot,
-                      settlement_adapter_contract_digest,
+                      settlement_adapter_contract_snapshot, settlement_adapter_contract_digest,
                       get_payout_proposal,
                       list_payout_proposals, payout_proposal_summary,
                       create_payout_proposal, submit_payout_proposal,
                       review_payout_proposal, approve_payout_proposal,
                       open_payout_dispute_window, reject_payout_proposal,
-                      cancel_payout_proposal, execute_payout_proposal)
+                      cancel_payout_proposal, execute_payout_proposal,
+                      promote_payout_plan_preview_to_approval_candidate,
+                      inspect_payout_plan_approval_candidate_queue,
+                      payout_plan_approval_candidate_queue_snapshot)
 from subscription_service import (
     add_subscription,
     active_delivery_targets,
@@ -5794,6 +5798,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(_payout_plan_preview_queue_snapshot(org_id))
         elif path == '/api/treasury/payout-plan-preview-queue/inspect':
             return self._json(_payout_plan_preview_queue_inspection(org_id))
+        elif path == '/api/treasury/payout-plan-approval-candidate-queue':
+            return self._json(payout_plan_approval_candidate_queue_snapshot(org_id))
+        elif path == '/api/treasury/payout-plan-approval-candidate-queue/inspect':
+            return self._json(inspect_payout_plan_approval_candidate_queue(org_id))
         elif path == '/api/payouts':
             host_identity, _admission_registry = _runtime_host_state(org_id)
             return self._json(_payout_snapshot(
@@ -6685,6 +6693,34 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     'summary': payout_proposal_summary(org_id),
                 })
 
+            elif path == '/api/treasury/payout-plan-approval-candidate-queue/promote':
+                preview_id = (body.get('preview_id') or '').strip()
+                if not preview_id:
+                    return self._json({'error': 'preview_id is required'}, 400)
+                candidate = promote_payout_plan_preview_to_approval_candidate(
+                    preview_id,
+                    by,
+                    org_id=org_id,
+                    promotion_note=body.get('note', ''),
+                )
+                log_event(
+                    org_id,
+                    by,
+                    'payout_plan_preview_promoted_to_approval_candidate',
+                    outcome='success',
+                    resource=preview_id,
+                    details={
+                        'proposal_id': candidate.get('proposal_id', ''),
+                        'candidate_id': candidate.get('candidate_id', ''),
+                        'promoted_at': candidate.get('promoted_at', ''),
+                    },
+                    session_id=_sid,
+                )
+                return self._json({
+                    'message': f'Payout-plan approval candidate promoted: {preview_id}',
+                    'candidate': candidate,
+                    'summary': payout_plan_approval_candidate_queue_snapshot(org_id)['summary'],
+                })
             elif path == '/api/payouts/execute':
                 proposal_id = (body.get('proposal_id') or '').strip()
                 warrant_id = (body.get('warrant_id') or '').strip()

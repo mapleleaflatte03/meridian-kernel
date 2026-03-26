@@ -84,6 +84,16 @@ from payout_plan_preview_queue import (
     payout_plan_preview_queue_summary,
     upsert_payout_plan_preview,
 )
+from payout_plan_approval_candidate_queue import (
+    get_payout_plan_approval_candidate as _get_payout_plan_approval_candidate,
+    inspect_payout_plan_approval_candidate_queue as _inspect_payout_plan_approval_candidate_queue,
+    list_payout_plan_approval_candidates as _list_payout_plan_approval_candidates,
+    load_payout_plan_approval_candidate_queue as _load_payout_plan_approval_candidate_queue,
+    payout_plan_approval_candidate_queue_snapshot,
+    payout_plan_approval_candidate_queue_summary,
+    promote_payout_plan_preview_to_approval_candidate as _promote_payout_plan_preview_to_approval_candidate,
+    upsert_payout_plan_approval_candidate,
+)
 
 try:
     from phase_machine import current_phase as _current_phase
@@ -2144,6 +2154,31 @@ def inspect_payout_plan_preview_queue(org_id=None, *, state=None, limit=50):
     return _inspect_payout_plan_preview_queue(org_id, state=state, limit=limit)
 
 
+def promote_payout_plan_preview_to_approval_candidate(preview_id, promoted_by, *, org_id=None, promotion_note=''):
+    return _promote_payout_plan_preview_to_approval_candidate(
+        org_id,
+        preview_id,
+        promoted_by=promoted_by,
+        promotion_note=promotion_note,
+    )
+
+
+def load_payout_plan_approval_candidate_queue(org_id=None):
+    return _load_payout_plan_approval_candidate_queue(org_id)
+
+
+def get_payout_plan_approval_candidate(candidate_id, org_id=None):
+    return _get_payout_plan_approval_candidate(candidate_id, org_id)
+
+
+def list_payout_plan_approval_candidates(org_id=None, *, state=None):
+    return _list_payout_plan_approval_candidates(org_id, state=state)
+
+
+def inspect_payout_plan_approval_candidate_queue(org_id=None, *, state=None, limit=50):
+    return _inspect_payout_plan_approval_candidate_queue(org_id, state=state, limit=limit)
+
+
 def treasury_snapshot(org_id=None):
     """Combined view: balance, revenue, spend, runway, reserve status."""
     ledger = load_ledger(org_id)
@@ -2209,6 +2244,7 @@ def treasury_snapshot(org_id=None):
         'settlement_adapter_summary': settlement_adapter_summary(org_id),
         'settlement_adapters': list_settlement_adapters(org_id),
         'plan_preview_queue_summary': payout_plan_preview_queue_summary(org_id),
+        'plan_approval_candidate_queue_summary': payout_plan_approval_candidate_queue_summary(org_id),
         'runtime_budget': budget_reservation_summary(org_id),
         'remediation': remediation,
         'snapshot_at': _now(),

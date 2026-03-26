@@ -918,6 +918,101 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(captured['data']['inspection_summary']['total'], 1)
         self.assertEqual(captured['data']['payout_plan_previews'][0]['inspection_state'], 'ready_for_ack')
 
+    def test_treasury_payout_plan_approval_candidate_queue_endpoint_returns_snapshot(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/treasury/payout-plan-approval-candidate-queue'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        snapshot = {
+            'summary': {'total': 1, 'ready_for_approval': 1},
+            'payout_plan_approval_candidates': [
+                {'candidate_id': 'ptx_preview_demo', 'source_preview_id': 'ptx_preview_demo'}
+            ],
+        }
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()), \
+             mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}), \
+             mock.patch.object(self.workspace, 'payout_plan_approval_candidate_queue_snapshot', return_value=snapshot):
+            handler.do_GET()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['summary']['total'], 1)
+        self.assertEqual(captured['data']['payout_plan_approval_candidates'][0]['candidate_id'], 'ptx_preview_demo')
+
+    def test_treasury_payout_plan_approval_candidate_queue_promote_endpoint_returns_candidate(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/treasury/payout-plan-approval-candidate-queue/promote'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._read_body = lambda: {'preview_id': 'ptx_preview_demo', 'note': 'ready for approval review'}
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        candidate = {'candidate_id': 'ptx_preview_demo', 'proposal_id': 'pay_demo', 'promoted_at': '2026-03-22T00:00:00Z'}
+        snapshot = {'summary': {'total': 1, 'ready_for_approval': 1}}
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()), \
+             mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner', 'actor_id': 'user_owner'}), \
+             mock.patch.object(self.workspace, '_enforce_mutation_authorization', return_value='owner'), \
+             mock.patch.object(self.workspace, 'promote_payout_plan_preview_to_approval_candidate', return_value=candidate), \
+             mock.patch.object(self.workspace, 'payout_plan_approval_candidate_queue_snapshot', return_value=snapshot), \
+             mock.patch.object(self.workspace, 'log_event'):
+            handler.do_POST()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['message'], 'Payout-plan approval candidate promoted: ptx_preview_demo')
+        self.assertEqual(captured['data']['candidate']['candidate_id'], 'ptx_preview_demo')
+        self.assertEqual(captured['data']['summary']['total'], 1)
+
     def test_federation_snapshot_surfaces_trusted_peers(self):
         from runtime_host import default_host_identity
         import tempfile

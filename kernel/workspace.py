@@ -18,6 +18,7 @@ Endpoints:
   GET  /api/treasury/contributors -> Contributor registry
   GET  /api/treasury/proposals    -> Payout proposals
   GET  /api/treasury/settlement-adapters -> Settlement adapter registry
+  GET  /api/treasury/settlement-adapters/readiness -> Settlement adapter readiness snapshot
   GET  /api/treasury/funding-sources -> Funding source records
   GET  /api/subscriptions         -> Institution-owned subscription service state
   GET  /api/subscriptions/delivery-targets -> Institution delivery-target calculation
@@ -180,6 +181,7 @@ from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       load_wallets, load_treasury_accounts, load_maintainers,
                       load_contributors, load_payout_proposals, load_funding_sources,
                       list_settlement_adapters, settlement_adapter_summary,
+                      settlement_adapter_readiness_snapshot,
                       preflight_settlement_adapter,
                       settlement_adapter_contract_snapshot,
                       settlement_adapter_contract_digest,
@@ -3809,6 +3811,249 @@ def _enforce_request_context(parsed_url, headers, bound_org_id):
     return request_context
 
 
+def _unique_nonempty_org_ids(*groups):
+    seen = set()
+    ordered = []
+    for group in groups:
+        for item in group or []:
+            org_id = (item or '').strip()
+            if org_id and org_id not in seen:
+                seen.add(org_id)
+                ordered.append(org_id)
+    return ordered
+
+
+def _org_routing_decision(requested_org_id, *, bound_org_id, host_identity=None,
+                          admission_registry=None, peer_registry=None, org_registry=None):
+    requested_org_id = (requested_org_id or '').strip()
+    bound_org_id = (bound_org_id or '').strip()
+    admitted_org_ids = _unique_nonempty_org_ids((admission_registry or {}).get('admitted_org_ids', []))
+    org_registry = dict(org_registry or {})
+    peer_registry = dict(peer_registry or {})
+    host_federation_enabled = bool(getattr(host_identity, 'federation_enabled', False))
+    host_id = getattr(host_identity, 'host_id', '') if host_identity else ''
+
+    if not requested_org_id:
+        return {
+            'requested_org_id': '',
+            'route_state': 'blocked',
+            'route_kind': 'blocked',
+            'route_reason': 'missing_requested_org_id',
+            'bound_org_id': bound_org_id,
+            'target_org_id': '',
+            'target_host_id': '',
+            'target_endpoint_url': '',
+            'peer_host_id': '',
+            'peer_trust_state': '',
+            'peer_label': '',
+            'known_locally': False,
+            'known_remotely': False,
+            'admitted_locally': False,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    if requested_org_id == bound_org_id:
+        admitted_locally = requested_org_id in admitted_org_ids
+        return {
+            'requested_org_id': requested_org_id,
+            'route_state': 'local',
+            'route_kind': 'local',
+            'route_reason': (
+                'request_targets_bound_institution'
+                if admitted_locally else
+                'bound_institution_not_admitted'
+            ),
+            'bound_org_id': bound_org_id,
+            'target_org_id': requested_org_id,
+            'target_host_id': host_id,
+            'target_endpoint_url': '',
+            'peer_host_id': '',
+            'peer_trust_state': '',
+            'peer_label': '',
+            'known_locally': True,
+            'known_remotely': False,
+            'admitted_locally': admitted_locally,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    if requested_org_id in admitted_org_ids:
+        return {
+            'requested_org_id': requested_org_id,
+            'route_state': 'blocked',
+            'route_kind': 'blocked',
+            'route_reason': 'request_targets_another_local_institution_no_cross_org_dispatch',
+            'bound_org_id': bound_org_id,
+            'target_org_id': requested_org_id,
+            'target_host_id': host_id,
+            'target_endpoint_url': '',
+            'peer_host_id': '',
+            'peer_trust_state': '',
+            'peer_label': '',
+            'known_locally': True,
+            'known_remotely': False,
+            'admitted_locally': True,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    peer_matches = []
+    for peer_host_id, peer in sorted((peer_registry.get('peers') or {}).items()):
+        admitted = _unique_nonempty_org_ids(getattr(peer, 'admitted_org_ids', []))
+        if requested_org_id in admitted:
+            peer_matches.append(peer)
+
+    if not peer_matches:
+        return {
+            'requested_org_id': requested_org_id,
+            'route_state': 'blocked',
+            'route_kind': 'blocked',
+            'route_reason': (
+                'unknown_requested_institution'
+                if requested_org_id not in org_registry else
+                'no_trusted_peer_can_serve_requested_institution'
+            ),
+            'bound_org_id': bound_org_id,
+            'target_org_id': requested_org_id,
+            'target_host_id': '',
+            'target_endpoint_url': '',
+            'peer_host_id': '',
+            'peer_trust_state': '',
+            'peer_label': '',
+            'known_locally': requested_org_id in org_registry,
+            'known_remotely': False,
+            'admitted_locally': False,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    if not host_federation_enabled:
+        peer = peer_matches[0]
+        return {
+            'requested_org_id': requested_org_id,
+            'route_state': 'blocked',
+            'route_kind': 'blocked',
+            'route_reason': 'federation_disabled_on_host',
+            'bound_org_id': bound_org_id,
+            'target_org_id': requested_org_id,
+            'target_host_id': '',
+            'target_endpoint_url': '',
+            'peer_host_id': peer.host_id,
+            'peer_trust_state': peer.trust_state,
+            'peer_label': peer.label,
+            'known_locally': requested_org_id in org_registry or requested_org_id in admitted_org_ids,
+            'known_remotely': True,
+            'admitted_locally': False,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    trusted_matches = [peer for peer in peer_matches if getattr(peer, 'trust_state', '') == 'trusted']
+    if not trusted_matches:
+        peer = peer_matches[0]
+        return {
+            'requested_org_id': requested_org_id,
+            'route_state': 'blocked',
+            'route_kind': 'blocked',
+            'route_reason': 'matching_peer_not_trusted',
+            'bound_org_id': bound_org_id,
+            'target_org_id': requested_org_id,
+            'target_host_id': '',
+            'target_endpoint_url': '',
+            'peer_host_id': peer.host_id,
+            'peer_trust_state': peer.trust_state,
+            'peer_label': peer.label,
+            'known_locally': requested_org_id in org_registry or requested_org_id in admitted_org_ids,
+            'known_remotely': True,
+            'admitted_locally': False,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    peer = next((item for item in trusted_matches if getattr(item, 'endpoint_url', '').strip()), None)
+    if not peer:
+        peer = trusted_matches[0]
+        return {
+            'requested_org_id': requested_org_id,
+            'route_state': 'blocked',
+            'route_kind': 'blocked',
+            'route_reason': 'matching_peer_missing_endpoint',
+            'bound_org_id': bound_org_id,
+            'target_org_id': requested_org_id,
+            'target_host_id': '',
+            'target_endpoint_url': '',
+            'peer_host_id': peer.host_id,
+            'peer_trust_state': peer.trust_state,
+            'peer_label': peer.label,
+            'known_locally': requested_org_id in org_registry or requested_org_id in admitted_org_ids,
+            'known_remotely': True,
+            'admitted_locally': False,
+            'host_federation_enabled': host_federation_enabled,
+            'host_id': host_id,
+        }
+
+    return {
+        'requested_org_id': requested_org_id,
+        'route_state': 'remote',
+        'route_kind': 'remote',
+        'route_reason': 'trusted_peer_can_serve_requested_institution',
+        'bound_org_id': bound_org_id,
+        'target_org_id': requested_org_id,
+        'target_host_id': peer.host_id,
+        'target_endpoint_url': peer.endpoint_url,
+        'peer_host_id': peer.host_id,
+        'peer_trust_state': peer.trust_state,
+        'peer_label': peer.label,
+        'known_locally': requested_org_id in org_registry or requested_org_id in admitted_org_ids,
+        'known_remotely': True,
+        'admitted_locally': False,
+        'host_federation_enabled': host_federation_enabled,
+        'host_id': host_id,
+    }
+
+
+def _routing_planner_snapshot(bound_org_id, *, requested_org_ids=None, host_identity=None,
+                              admission_registry=None, peer_registry=None, org_registry=None):
+    org_registry = dict(org_registry or {})
+    peer_registry = dict(peer_registry or {})
+    admitted_org_ids = _unique_nonempty_org_ids((admission_registry or {}).get('admitted_org_ids', []))
+    peer_admitted_org_ids = []
+    for peer in (peer_registry.get('peers') or {}).values():
+        peer_admitted_org_ids.extend(_unique_nonempty_org_ids(getattr(peer, 'admitted_org_ids', [])))
+    candidates = _unique_nonempty_org_ids(
+        requested_org_ids or [],
+        [bound_org_id],
+        admitted_org_ids,
+        peer_admitted_org_ids,
+        org_registry.keys(),
+    )
+    decisions = [
+        _org_routing_decision(
+            requested_org_id,
+            bound_org_id=bound_org_id,
+            host_identity=host_identity,
+            admission_registry=admission_registry,
+            peer_registry=peer_registry,
+            org_registry=org_registry,
+        )
+        for requested_org_id in candidates
+    ]
+    return {
+        'bound_org_id': bound_org_id,
+        'host_id': getattr(host_identity, 'host_id', '') if host_identity else '',
+        'host_federation_enabled': bool(getattr(host_identity, 'federation_enabled', False)),
+        'requested_org_ids': candidates,
+        'summary': {
+            'total': len(decisions),
+            'local': len([item for item in decisions if item['route_kind'] == 'local']),
+            'remote': len([item for item in decisions if item['route_kind'] == 'remote']),
+            'blocked': len([item for item in decisions if item['route_kind'] == 'blocked']),
+        },
+        'decisions': decisions,
+    }
+
+
 def _resolve_auth_context(bound_org_id):
     user, password, credential_org_id, credential_user_id = _load_workspace_credentials()
     auth_enabled = bool(user and password)
@@ -3994,6 +4239,13 @@ def _payout_snapshot(org_id, *, host_supported_adapters=None):
         ),
         'settlement_adapters': list_settlement_adapters(org_id),
     }
+
+
+def _settlement_adapter_readiness_snapshot(org_id, *, host_supported_adapters=None):
+    return settlement_adapter_readiness_snapshot(
+        org_id,
+        host_supported_adapters=host_supported_adapters,
+    )
 
 
 def _case_management_state():
@@ -4713,6 +4965,26 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
     records = _load_records(org_id)
     lead_id, lead_auth = get_sprint_lead(org_id)
     auth_context = _resolve_auth_context(org_id)
+    try:
+        peer_registry = load_peer_registry(FEDERATION_PEERS_FILE, host_identity=host_identity)
+    except RuntimeError as exc:
+        peer_registry = {
+            'source': 'error',
+            'host_id': getattr(host_identity, 'host_id', '') or '',
+            'peers': {},
+            'trusted_peer_ids': [],
+            'error': str(exc),
+        }
+    routing_planner = _routing_planner_snapshot(
+        org_id,
+        requested_org_ids=[(request_routing or {}).get('requested_org_id', '')],
+        host_identity=host_identity,
+        admission_registry=admission_registry,
+        peer_registry=peer_registry,
+        org_registry=load_orgs().get('organizations', {}),
+    )
+    if peer_registry.get('error'):
+        routing_planner['peer_registry_error'] = peer_registry['error']
 
     agents = []
     remediations = []
@@ -4769,6 +5041,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             'auth': auth_context,
             'permissions': _permission_snapshot(auth_context),
         },
+        'routing_planner': routing_planner,
         'runtime_core': runtime_core_snapshot(
             inst_ctx,
             additional_institutions_allowed=True,
@@ -5369,6 +5642,12 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 ),
                 'adapters': list_settlement_adapters(org_id),
             })
+        elif path == '/api/treasury/settlement-adapters/readiness':
+            host_identity, _admission_registry = _runtime_host_state(org_id)
+            return self._json(_settlement_adapter_readiness_snapshot(
+                org_id,
+                host_supported_adapters=getattr(host_identity, 'settlement_adapters', []),
+            ))
         elif path == '/api/treasury/funding-sources':
             return self._json(load_funding_sources(org_id))
         elif path == '/api/payouts':

@@ -743,6 +743,47 @@ class TreasuryCapsuleTests(unittest.TestCase):
             1,
         )
 
+    def test_settlement_adapter_readiness_snapshot_explains_host_blockers(self):
+        settlement_adapters_path = self.capsule_dir / 'settlement_adapters.json'
+        settlement_adapters_path.write_text(json.dumps({
+            'default_payout_adapter': 'base_usdc_x402',
+            'adapters': {
+                'internal_ledger': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                },
+                'base_usdc_x402': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                    'verification_ready': False,
+                },
+            },
+        }, indent=2))
+
+        snapshot = treasury.settlement_adapter_readiness_snapshot(
+            self.org_id,
+            host_supported_adapters=['internal_ledger'],
+        )
+
+        self.assertEqual(snapshot['default_payout_adapter'], 'base_usdc_x402')
+        self.assertEqual(snapshot['host_supported_adapters'], ['internal_ledger'])
+        self.assertEqual(snapshot['summary']['default_payout_adapter'], 'base_usdc_x402')
+        self.assertEqual(snapshot['ready_adapter_ids'], ['internal_ledger'])
+        self.assertIn('base_usdc_x402', snapshot['blocked_adapter_ids'])
+
+        ready = next(item for item in snapshot['adapters'] if item['adapter_id'] == 'internal_ledger')
+        blocked = next(item for item in snapshot['adapters'] if item['adapter_id'] == 'base_usdc_x402')
+        self.assertTrue(ready['execution_ready'])
+        self.assertEqual(ready['execution_blocker_messages'], ['Adapter is ready for execution on this host.'])
+        self.assertFalse(blocked['execution_ready'])
+        self.assertIn('host_not_supported', blocked['execution_blockers'])
+        self.assertIn('verification_not_ready', blocked['execution_blockers'])
+        self.assertIn('The current host does not advertise this adapter.', blocked['execution_blocker_messages'])
+        self.assertEqual(
+            blocked['contract_digest'],
+            treasury.settlement_adapter_contract_digest(blocked['contract_snapshot']),
+        )
+
     def test_preflight_settlement_adapter_accepts_internal_ledger(self):
         result = treasury.preflight_settlement_adapter(
             'internal_ledger',

@@ -38,6 +38,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_runtime_host_state = self.workspace._runtime_host_state
         self.orig_federation_authority = self.workspace._federation_authority
         self.orig_refresh_peer_registry_entry = self.workspace.refresh_peer_registry_entry
+        self.orig_load_peer_registry = self.workspace.load_peer_registry
         self.orig_log_event = self.workspace.log_event
         self.orig_list_warrants = self.workspace.list_warrants
         self.orig_get_warrant = self.workspace.get_warrant
@@ -68,6 +69,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.orig_upsert_execution_job = self.workspace.upsert_execution_job
         self.orig_list_witness_observations = self.workspace.list_witness_observations
         self.orig_witness_archive_summary = self.workspace.witness_archive_summary
+        self.orig_settlement_adapter_readiness_snapshot = self.workspace.settlement_adapter_readiness_snapshot
 
     def tearDown(self):
         self.workspace.WORKSPACE_ORG_ID = self.orig_workspace_org_id
@@ -83,6 +85,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace._runtime_host_state = self.orig_runtime_host_state
         self.workspace._federation_authority = self.orig_federation_authority
         self.workspace.refresh_peer_registry_entry = self.orig_refresh_peer_registry_entry
+        self.workspace.load_peer_registry = self.orig_load_peer_registry
         self.workspace.log_event = self.orig_log_event
         self.workspace.list_warrants = self.orig_list_warrants
         self.workspace.get_warrant = self.orig_get_warrant
@@ -113,6 +116,7 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.upsert_execution_job = self.orig_upsert_execution_job
         self.workspace.list_witness_observations = self.orig_list_witness_observations
         self.workspace.witness_archive_summary = self.orig_witness_archive_summary
+        self.workspace.settlement_adapter_readiness_snapshot = self.orig_settlement_adapter_readiness_snapshot
 
     def test_configured_org_binds_process_context(self):
         self.workspace._load_workspace_credentials = lambda: (None, None, None, None)
@@ -174,6 +178,47 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(auth['mode'], 'credential_bound')
         self.assertEqual(auth['org_id'], 'org_a')
         self.assertEqual(auth['actor_id'], 'workspace_user:owner')
+
+    def test_routing_planner_classifies_local_remote_and_blocked_orgs(self):
+        host = self.workspace.load_host_identity('missing')
+        host.federation_enabled = True
+        peer_registry = {
+            'peers': {
+                'host_beta': self.workspace.FederationPeer(
+                    host_id='host_beta',
+                    label='Beta Host',
+                    trust_state='trusted',
+                    endpoint_url='http://127.0.0.1:19001',
+                    admitted_org_ids=['org_remote'],
+                ),
+                'host_gamma': self.workspace.FederationPeer(
+                    host_id='host_gamma',
+                    label='Gamma Host',
+                    trust_state='suspended',
+                    endpoint_url='http://127.0.0.1:19002',
+                    admitted_org_ids=['org_suspended'],
+                ),
+            },
+        }
+        snapshot = self.workspace._routing_planner_snapshot(
+            'org_local',
+            requested_org_ids=['org_local', 'org_remote', 'org_suspended', 'org_unknown'],
+            host_identity=host,
+            admission_registry={'admitted_org_ids': ['org_local']},
+            peer_registry=peer_registry,
+            org_registry={'org_local': {}, 'org_remote': {}, 'org_suspended': {}},
+        )
+        decisions = {item['requested_org_id']: item for item in snapshot['decisions']}
+        self.assertEqual(snapshot['summary'], {'total': 4, 'local': 1, 'remote': 1, 'blocked': 2})
+        self.assertEqual(decisions['org_local']['route_kind'], 'local')
+        self.assertEqual(decisions['org_local']['route_reason'], 'request_targets_bound_institution')
+        self.assertEqual(decisions['org_remote']['route_kind'], 'remote')
+        self.assertEqual(decisions['org_remote']['target_host_id'], 'host_beta')
+        self.assertEqual(decisions['org_remote']['target_endpoint_url'], 'http://127.0.0.1:19001')
+        self.assertEqual(decisions['org_suspended']['route_kind'], 'blocked')
+        self.assertEqual(decisions['org_suspended']['route_reason'], 'matching_peer_not_trusted')
+        self.assertEqual(decisions['org_unknown']['route_kind'], 'blocked')
+        self.assertEqual(decisions['org_unknown']['route_reason'], 'unknown_requested_institution')
 
     def test_auth_context_prefers_explicit_user_id(self):
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_meridian_owner')
@@ -273,6 +318,25 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(snapshot['settlement_adapter_summary']['host_supported_adapters'], ['internal_ledger'])
         self.assertEqual(len(snapshot['settlement_adapters']), 2)
 
+    def test_settlement_adapter_readiness_snapshot_delegates_host_support(self):
+        self.workspace.settlement_adapter_readiness_snapshot = lambda org_id=None, host_supported_adapters=None: {
+            'bound_org_id': org_id,
+            'host_supported_adapters': list(host_supported_adapters or []),
+            'summary': {'ready': 1},
+            'ready_adapter_ids': ['internal_ledger'],
+            'blocked_adapter_ids': ['base_usdc_x402'],
+            'adapters': [{'adapter_id': 'internal_ledger'}],
+        }
+        snapshot = self.workspace._settlement_adapter_readiness_snapshot(
+            'org_a',
+            host_supported_adapters=['internal_ledger'],
+        )
+        self.assertEqual(snapshot['bound_org_id'], 'org_a')
+        self.assertEqual(snapshot['host_supported_adapters'], ['internal_ledger'])
+        self.assertEqual(snapshot['ready_adapter_ids'], ['internal_ledger'])
+        self.assertEqual(snapshot['blocked_adapter_ids'], ['base_usdc_x402'])
+        self.assertEqual(snapshot['summary'], {'ready': 1})
+
     def test_api_status_exposes_runtime_core(self):
         from runtime_host import default_host_identity
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_owner')
@@ -282,6 +346,24 @@ class WorkspaceContextTests(unittest.TestCase):
                     'id': 'org_a',
                     'slug': 'a',
                     'name': 'A',
+                    'owner_id': 'user_owner',
+                    'members': [{'user_id': 'user_owner', 'role': 'owner'}],
+                    'lifecycle_state': 'active',
+                    'policy_defaults': {},
+                },
+                'org_b': {
+                    'id': 'org_b',
+                    'slug': 'b',
+                    'name': 'B',
+                    'owner_id': 'user_owner',
+                    'members': [{'user_id': 'user_owner', 'role': 'owner'}],
+                    'lifecycle_state': 'active',
+                    'policy_defaults': {},
+                },
+                'org_c': {
+                    'id': 'org_c',
+                    'slug': 'c',
+                    'name': 'C',
                     'owner_id': 'user_owner',
                     'members': [{'user_id': 'user_owner', 'role': 'owner'}],
                     'lifecycle_state': 'active',
@@ -376,6 +458,20 @@ class WorkspaceContextTests(unittest.TestCase):
             },
             'admitted_org_ids': ['org_a', 'org_b'],
         }
+        self.workspace.load_peer_registry = lambda *args, **kwargs: {
+            'source': 'file',
+            'host_id': 'host_alpha',
+            'peers': {
+                'host_beta': self.workspace.FederationPeer(
+                    host_id='host_beta',
+                    label='Beta Host',
+                    trust_state='trusted',
+                    endpoint_url='http://127.0.0.1:19014',
+                    admitted_org_ids=['org_c'],
+                ),
+            },
+            'trusted_peer_ids': ['host_beta'],
+        }
         self.workspace.load_subscriptions = lambda org_id=None: {
             'subscribers': {'111': []},
             'delivery_log': [],
@@ -435,6 +531,12 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertIn('federation', status['runtime_core'])
         self.assertTrue(status['runtime_core']['service_registry']['subscriptions']['supports_institution_routing'])
         self.assertTrue(status['runtime_core']['service_registry']['accounting']['supports_institution_routing'])
+        self.assertEqual(status['routing_planner']['summary'], {'total': 3, 'local': 1, 'remote': 1, 'blocked': 1})
+        decisions = {item['requested_org_id']: item for item in status['routing_planner']['decisions']}
+        self.assertEqual(decisions['org_a']['route_kind'], 'local')
+        self.assertEqual(decisions['org_b']['route_kind'], 'blocked')
+        self.assertEqual(decisions['org_c']['route_kind'], 'remote')
+        self.assertEqual(decisions['org_c']['target_host_id'], 'host_beta')
         self.assertEqual(status['agents'][0]['runtime_binding']['runtime_id'], 'local_kernel')
         self.assertEqual(status['agents'][0]['runtime_binding']['bound_org_id'], 'org_a')
         self.assertEqual(status['agents'][0]['runtime_binding']['context_source'], 'agent_registry')

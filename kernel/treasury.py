@@ -44,6 +44,7 @@ ECONOMY_DIR = os.path.join(WORKSPACE, 'economy')
 LEGACY_TREASURY_DIR = os.path.join(WORKSPACE, 'treasury')
 
 _BASE_MAINNET_CHAIN_ID = 8453
+_BASE_SEPOLIA_CHAIN_ID = 84532
 _ERC20_TRANSFER_SELECTOR = 'a9059cbb'
 _ERC20_DECIMALS_SELECTOR = '313ce567'
 _ERC20_BALANCE_OF_SELECTOR = '70a08231'
@@ -950,6 +951,21 @@ def _load_registry_file(filename, org_id=None):
         return json.load(f)
 
 
+def _write_json_file(path, payload):
+    with open(path, 'w') as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+
+
+def _save_legacy_registry_mirror(filename, payload, canonical_path):
+    if not _is_economy_capsule(canonical_path):
+        return
+    legacy_path = os.path.join(LEGACY_TREASURY_DIR, filename)
+    if os.path.abspath(legacy_path) == os.path.abspath(canonical_path):
+        return
+    os.makedirs(os.path.dirname(legacy_path), exist_ok=True)
+    _write_json_file(legacy_path, payload)
+
+
 def _save_registry_file(filename, payload, org_id=None):
     """Persist a JSON registry file inside the institution capsule."""
     path = _ensure_protocol_registry(filename, org_id)
@@ -957,8 +973,8 @@ def _save_registry_file(filename, payload, org_id=None):
     if org_id and not os.path.isdir(parent):
         _missing_org_error(org_id)
     os.makedirs(parent, exist_ok=True)
-    with open(path, 'w') as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
+    _write_json_file(path, payload)
+    _save_legacy_registry_mirror(filename, payload, path)
 
 
 def load_wallets(org_id=None):
@@ -969,6 +985,125 @@ def load_wallets(org_id=None):
 def load_treasury_accounts(org_id=None):
     """Load treasury accounts from the institution capsule."""
     return _load_registry_file('treasury_accounts.json', org_id)
+
+
+def _wallet_store(org_id=None):
+    store = dict(load_wallets(org_id))
+    store.setdefault('wallets', {})
+    store.setdefault('verification_levels', _PROTOCOL_DEFAULTS['wallets.json']['verification_levels'])
+    return store
+
+
+def _save_wallet_store(store, org_id=None):
+    payload = dict(store or {})
+    payload['updatedAt'] = _now()
+    payload.setdefault('wallets', {})
+    payload.setdefault('verification_levels', _PROTOCOL_DEFAULTS['wallets.json']['verification_levels'])
+    _save_registry_file('wallets.json', payload, org_id)
+
+
+def _treasury_account_store(org_id=None):
+    store = dict(load_treasury_accounts(org_id))
+    store.setdefault('accounts', {})
+    store.setdefault('transfer_policy', _PROTOCOL_DEFAULTS['treasury_accounts.json']['transfer_policy'])
+    return store
+
+
+def _save_treasury_account_store(store, org_id=None):
+    payload = dict(store or {})
+    payload['updatedAt'] = _now()
+    payload.setdefault('accounts', {})
+    payload.setdefault('transfer_policy', _PROTOCOL_DEFAULTS['treasury_accounts.json']['transfer_policy'])
+    _save_registry_file('treasury_accounts.json', payload, org_id)
+
+
+def get_treasury_account(account_id, org_id=None):
+    account_id = str(account_id or '').strip()
+    if not account_id:
+        raise ValueError('account_id is required')
+    return _treasury_account_store(org_id).get('accounts', {}).get(account_id)
+
+
+def register_wallet(wallet_id, address, *, actor_id='', org_id=None, label='', chain='base',
+                    asset='USDC', verification_level=3, verification_label='',
+                    verification_details='', payout_eligible=None, status='active',
+                    notes=''):
+    wallet_id = str(wallet_id or '').strip()
+    if not wallet_id:
+        raise ValueError('wallet_id is required')
+    address = _normalize_chain_wallet_address(address, field_name='wallet address')
+    chain = str(chain or '').strip().lower()
+    if not chain:
+        raise ValueError('chain is required')
+    asset = str(asset or '').strip().upper()
+    if not asset:
+        raise ValueError('asset is required')
+    level = int(verification_level)
+    store = _wallet_store(org_id)
+    wallets = dict(store.get('wallets', {}))
+    if wallet_id in wallets:
+        raise ValueError(f'Wallet already exists: {wallet_id}')
+    level_contract = dict(store.get('verification_levels', {}).get(str(level), {}))
+    resolved_label = str(verification_label or level_contract.get('label') or '').strip()
+    if not resolved_label:
+        raise ValueError('verification_label is required when verification_level is not registered')
+    if payout_eligible is None:
+        payout_eligible = bool(level_contract.get('payout_eligible', level >= 3))
+    timestamp = _now()
+    wallet = {
+        'id': wallet_id,
+        'label': str(label or wallet_id).strip(),
+        'address': address,
+        'chain': chain,
+        'asset': asset,
+        'verification_level': level,
+        'verification_label': resolved_label,
+        'verification_details': str(verification_details or '').strip(),
+        'payout_eligible': bool(payout_eligible),
+        'status': str(status or 'active').strip() or 'active',
+        'added_at': timestamp,
+        'verified_at': timestamp if level >= 3 else None,
+        'notes': str(notes or '').strip(),
+    }
+    actor_id = str(actor_id or '').strip()
+    if actor_id:
+        wallet['registered_by'] = actor_id
+    wallets[wallet_id] = wallet
+    store['wallets'] = wallets
+    _save_wallet_store(store, org_id)
+    return wallet
+
+
+def register_treasury_account(account_id, *, wallet_id='', actor_id='', org_id=None, label='',
+                              purpose='', balance_usd=0.0, reserve_floor_usd=0.0,
+                              status='active', notes=''):
+    account_id = str(account_id or '').strip()
+    if not account_id:
+        raise ValueError('account_id is required')
+    wallet_id = str(wallet_id or '').strip()
+    if wallet_id and not get_wallet(wallet_id, org_id):
+        raise LookupError(f'Wallet not found for treasury account: {wallet_id}')
+    store = _treasury_account_store(org_id)
+    accounts = dict(store.get('accounts', {}))
+    if account_id in accounts:
+        raise ValueError(f'Treasury account already exists: {account_id}')
+    account = {
+        'id': account_id,
+        'label': str(label or account_id).strip(),
+        'purpose': str(purpose or '').strip(),
+        'balance_usd': round(float(balance_usd or 0.0), 4),
+        'reserve_floor_usd': round(float(reserve_floor_usd or 0.0), 4),
+        'wallet_id': wallet_id or None,
+        'status': str(status or 'active').strip() or 'active',
+        'notes': str(notes or '').strip(),
+    }
+    actor_id = str(actor_id or '').strip()
+    if actor_id:
+        account['registered_by'] = actor_id
+    accounts[account_id] = account
+    store['accounts'] = accounts
+    _save_treasury_account_store(store, org_id)
+    return account
 
 
 def load_maintainers(org_id=None):
@@ -2459,6 +2594,36 @@ def _load_eth_account_backend():
     return Account
 
 
+def _parse_int_like(value, *, field_name):
+    if value in ('', None):
+        raise ValueError(f'{field_name} is required')
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError(f'{field_name} is required')
+        return int(text, 16) if text.startswith('0x') else int(text, 10)
+    if isinstance(value, Decimal):
+        value = int(value)
+    return int(value)
+
+
+def _x402_network_classification(chain_id):
+    if int(chain_id) == _BASE_MAINNET_CHAIN_ID:
+        return 'base_mainnet'
+    if int(chain_id) == _BASE_SEPOLIA_CHAIN_ID:
+        return 'base_sepolia'
+    return 'dev_or_nonmainnet'
+
+
+def _checksum_signing_address(address):
+    normalized = _normalize_chain_wallet_address(address, field_name='transaction address')
+    try:
+        from eth_utils import to_checksum_address
+    except Exception:
+        return normalized
+    return to_checksum_address(normalized)
+
+
 def prepare_x402_unsigned_transfer_for_payout(proposal_id, actor_id, *, org_id=None,
                                               rpc_url='', token_contract_address='',
                                               sender_wallet_id='',
@@ -2870,7 +3035,7 @@ def sign_x402_transfer_for_payout(proposal_id, actor_id, *, org_id=None,
                 'nonce': int(result['rpc_observations']['nonce']),
                 'gasPrice': int(result['rpc_observations']['gas_price_wei']),
                 'gas': int(result['rpc_observations']['gas_limit']),
-                'to': result['unsigned_transaction']['to'],
+                'to': _checksum_signing_address(result['unsigned_transaction']['to']),
                 'value': 0,
                 'data': result['unsigned_transaction']['data'],
                 'chainId': int(result['token']['chain_id']),
@@ -2923,6 +3088,497 @@ def sign_x402_transfer_for_payout(proposal_id, actor_id, *, org_id=None,
     else:
         result['truth_boundary'] = (
             'Produced a deterministic dry-run artifact and, when allowed, a signed raw transaction for a non-mainnet path. No Base mainnet transfer was executed.'
+        )
+    return result
+
+
+def prepare_x402_unsigned_transfer_from_wallet(actor_id, *, org_id=None,
+                                               rpc_url='', token_contract_address='',
+                                               recipient_address='', amount_usdc=None,
+                                               sender_wallet_id='', source_account_id='',
+                                               nonce=None, gas_limit=None,
+                                               gas_price_wei=None, chain_id=None,
+                                               token_decimals=6,
+                                               host_supported_adapters=None,
+                                               timeout_seconds=10):
+    actor_id = str(actor_id or '').strip()
+    if not actor_id:
+        raise ValueError('actor_id is required')
+    if not str(sender_wallet_id or '').strip() and not str(source_account_id or '').strip():
+        raise ValueError('sender_wallet_id or source_account_id is required')
+    token_contract = _normalize_chain_wallet_address(
+        token_contract_address,
+        field_name='token_contract_address',
+    )
+    recipient_address = _normalize_chain_wallet_address(
+        recipient_address,
+        field_name='recipient_address',
+    )
+    nominal_amount = Decimal(str(amount_usdc or 0))
+    if nominal_amount <= 0:
+        raise ValueError('amount_usdc must be greater than 0')
+
+    adapter = _require_known_settlement_adapter('base_usdc_x402', org_id=org_id)
+    contract = _settlement_adapter_contract(
+        adapter,
+        host_supported_adapters=host_supported_adapters,
+    )
+    account, resolved_sender_wallet_id, sender_wallet = _resolve_x402_sender_wallet(
+        org_id=org_id,
+        sender_wallet_id=sender_wallet_id,
+        source_account_id=source_account_id or 'company_treasury',
+    )
+    _wallet_chain_asset_guard(
+        sender_wallet,
+        resolved_sender_wallet_id,
+        expected_chain='base',
+        expected_asset='USDC',
+        role_label='Sender',
+    )
+    sender_address = _normalize_chain_wallet_address(
+        sender_wallet.get('address'),
+        field_name=f'sender wallet {resolved_sender_wallet_id} address',
+    )
+    blockers = []
+    if not contract.get('payout_execution_enabled'):
+        _append_structured_blocker(
+            blockers,
+            'adapter_execution_disabled',
+            "Settlement adapter 'base_usdc_x402' is not enabled for payout execution",
+        )
+    if contract.get('host_supported') is False:
+        _append_structured_blocker(
+            blockers,
+            'host_not_supported',
+            "Settlement adapter 'base_usdc_x402' is not supported on this host",
+        )
+    if not contract.get('verification_ready'):
+        _append_structured_blocker(
+            blockers,
+            'verification_not_ready',
+            "Settlement adapter 'base_usdc_x402' verification path is not ready on this host",
+        )
+    sender_level = sender_wallet.get('verification_level')
+    if sender_level is None or int(sender_level) < 3:
+        _append_structured_blocker(
+            blockers,
+            'sender_wallet_not_self_custody_verified',
+            (
+                f"Sender wallet '{resolved_sender_wallet_id}' is Level "
+                f"{sender_level if sender_level is not None else 'unknown'} "
+                f"({sender_wallet.get('verification_label') or 'unknown'}); "
+                'actual broadcast requires Level 3+ custody verification or a multisig-controlled source wallet.'
+            ),
+        )
+
+    rpc_calls = []
+
+    def _rpc(method, params=None):
+        result = _json_rpc_request(
+            rpc_url,
+            method,
+            params=params,
+            timeout_seconds=timeout_seconds,
+        )
+        rpc_calls.append({'method': method, 'params': list(params or []), 'result': result})
+        return result
+
+    if rpc_url:
+        resolved_chain_id = _parse_rpc_quantity(_rpc('eth_chainId', []), field_name='eth_chainId')
+        decimals_hex = _rpc(
+            'eth_call',
+            [
+                {
+                    'to': token_contract,
+                    'data': '0x' + _ERC20_DECIMALS_SELECTOR,
+                },
+                'latest',
+            ],
+        )
+        resolved_token_decimals = _parse_rpc_quantity(decimals_hex, field_name='erc20 decimals')
+    else:
+        resolved_chain_id = _parse_int_like(chain_id, field_name='chain_id')
+        resolved_token_decimals = _parse_int_like(
+            6 if token_decimals in ('', None) else token_decimals,
+            field_name='token_decimals',
+        )
+        _append_structured_blocker(
+            blockers,
+            'live_chain_state_unverified',
+            'No live RPC state was queried; nonce, balances, and broadcast readiness remain operator-supplied and unverified.',
+        )
+
+    base_unit_multiplier = Decimal(10) ** resolved_token_decimals
+    amount_base_units_decimal = nominal_amount * base_unit_multiplier
+    if amount_base_units_decimal != amount_base_units_decimal.to_integral_value():
+        raise ValueError(
+            'Transfer amount cannot be represented exactly at the token decimal precision'
+        )
+    amount_base_units = int(amount_base_units_decimal)
+    calldata = _encode_erc20_transfer_calldata(recipient_address, amount_base_units)
+
+    if rpc_url:
+        resolved_nonce = (
+            _parse_rpc_quantity(str(nonce), field_name='nonce')
+            if nonce not in ('', None)
+            else _parse_rpc_quantity(
+                _rpc('eth_getTransactionCount', [sender_address, 'pending']),
+                field_name='eth_getTransactionCount',
+            )
+        )
+        resolved_gas_price = (
+            _parse_rpc_quantity(str(gas_price_wei), field_name='gas_price_wei')
+            if gas_price_wei not in ('', None)
+            else _parse_rpc_quantity(_rpc('eth_gasPrice', []), field_name='eth_gasPrice')
+        )
+        resolved_gas_limit = (
+            _parse_rpc_quantity(str(gas_limit), field_name='gas_limit')
+            if gas_limit not in ('', None)
+            else _parse_rpc_quantity(
+                _rpc(
+                    'eth_estimateGas',
+                    [
+                        {
+                            'from': sender_address,
+                            'to': token_contract,
+                            'value': '0x0',
+                            'data': calldata,
+                        }
+                    ],
+                ),
+                field_name='eth_estimateGas',
+            )
+        )
+        sender_native_balance = _parse_rpc_quantity(
+            _rpc('eth_getBalance', [sender_address, 'latest']),
+            field_name='eth_getBalance',
+        )
+        sender_token_balance = _parse_rpc_quantity(
+            _rpc(
+                'eth_call',
+                [
+                    {
+                        'to': token_contract,
+                        'data': _encode_erc20_balance_of_calldata(sender_address),
+                    },
+                    'latest',
+                ],
+            ),
+            field_name='sender balanceOf',
+        )
+        recipient_token_balance = _parse_rpc_quantity(
+            _rpc(
+                'eth_call',
+                [
+                    {
+                        'to': token_contract,
+                        'data': _encode_erc20_balance_of_calldata(recipient_address),
+                    },
+                    'latest',
+                ],
+            ),
+            field_name='recipient balanceOf',
+        )
+        rpc_transport = 'json_rpc_http'
+        rpc_url_redacted = _redact_rpc_url(rpc_url)
+    else:
+        resolved_nonce = _parse_int_like(nonce, field_name='nonce')
+        resolved_gas_limit = _parse_int_like(gas_limit, field_name='gas_limit')
+        resolved_gas_price = _parse_int_like(gas_price_wei, field_name='gas_price_wei')
+        sender_native_balance = None
+        sender_token_balance = None
+        recipient_token_balance = None
+        rpc_transport = 'offline_operator_supplied'
+        rpc_url_redacted = ''
+
+    estimated_fee_wei = resolved_gas_limit * resolved_gas_price
+    if sender_native_balance is not None and sender_native_balance < estimated_fee_wei:
+        _append_structured_blocker(
+            blockers,
+            'insufficient_native_balance_for_gas',
+            (
+                f'Sender native balance {sender_native_balance} wei is below the '
+                f'estimated gas requirement {estimated_fee_wei} wei.'
+            ),
+        )
+    if sender_token_balance is not None and sender_token_balance < amount_base_units:
+        _append_structured_blocker(
+            blockers,
+            'insufficient_usdc_balance',
+            (
+                f'Sender token balance {sender_token_balance} base units is below the '
+                f'required amount {amount_base_units}.'
+            ),
+        )
+    _append_structured_blocker(
+        blockers,
+        'post_broadcast_evidence_required',
+        'Any later payout settlement claim still requires tx_hash, settlement proof, and x402_settlement_verifier attestation.',
+    )
+
+    return {
+        'prepared_at': _now(),
+        'prepared_by': actor_id,
+        'org_id': org_id or _default_org_id(),
+        'settlement_adapter': 'base_usdc_x402',
+        'rpc_transport': rpc_transport,
+        'rpc_url_redacted': rpc_url_redacted,
+        'source_account_id': str(account.get('id') or source_account_id or '').strip(),
+        'source_account': {
+            'id': str(account.get('id') or source_account_id or '').strip(),
+            'label': account.get('label', ''),
+            'wallet_id': account.get('wallet_id'),
+            'status': account.get('status', ''),
+            'purpose': account.get('purpose', ''),
+        },
+        'sender_wallet_id': resolved_sender_wallet_id,
+        'sender_wallet': {
+            'id': resolved_sender_wallet_id,
+            'address': sender_address,
+            'chain': sender_wallet.get('chain'),
+            'asset': sender_wallet.get('asset'),
+            'verification_level': sender_wallet.get('verification_level'),
+            'verification_label': sender_wallet.get('verification_label'),
+            'status': sender_wallet.get('status'),
+        },
+        'recipient_wallet_id': '',
+        'recipient_wallet': {
+            'id': '',
+            'address': recipient_address,
+            'chain': 'base',
+            'asset': 'USDC',
+            'verification_level': None,
+            'verification_label': '',
+            'status': 'external_unverified',
+        },
+        'adapter_contract': contract,
+        'adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'adapter_contract_digest': contract.get('contract_digest', ''),
+        'token': {
+            'symbol': 'USDC',
+            'chain': 'base',
+            'chain_id': resolved_chain_id,
+            'network_classification': _x402_network_classification(resolved_chain_id),
+            'contract_address': token_contract,
+            'decimals': resolved_token_decimals,
+        },
+        'amount': {
+            'nominal_token_amount': str(nominal_amount.normalize()),
+            'token_decimals': resolved_token_decimals,
+            'base_units': str(amount_base_units),
+            'accounting_assumption': 'Kernel treats this hot-wallet x402 demo as an explicit USDC token amount supplied by the operator.',
+        },
+        'transfer_request': {
+            'recipient_address': recipient_address,
+            'amount_usdc': str(nominal_amount.normalize()),
+        },
+        'rpc_observations': {
+            'chain_id': resolved_chain_id,
+            'nonce': resolved_nonce,
+            'gas_price_wei': str(resolved_gas_price),
+            'gas_limit': resolved_gas_limit,
+            'estimated_fee_wei': str(estimated_fee_wei),
+            'sender_native_balance_wei': None if sender_native_balance is None else str(sender_native_balance),
+            'sender_token_balance_base_units': None if sender_token_balance is None else str(sender_token_balance),
+            'recipient_token_balance_base_units': None if recipient_token_balance is None else str(recipient_token_balance),
+            'calls': rpc_calls,
+            'live_state_verified': bool(rpc_url),
+        },
+        'unsigned_transaction_prepared': True,
+        'unsigned_transaction': {
+            'chainId': resolved_chain_id,
+            'from': sender_address,
+            'to': token_contract,
+            'nonce': _format_rpc_quantity(resolved_nonce, field_name='nonce'),
+            'gas': _format_rpc_quantity(resolved_gas_limit, field_name='gas'),
+            'gasPrice': _format_rpc_quantity(resolved_gas_price, field_name='gasPrice'),
+            'value': '0x0',
+            'data': calldata,
+        },
+        'actual_transfer_blockers': blockers,
+        'operator_actions_remaining': [
+            'Review the unsigned transaction fields against the intended recipient and token contract.',
+            'Confirm the segregated sender wallet remains the intended execution source.',
+            'Sign with the matching hot-wallet or other self-custody sender key.',
+            'Broadcast with eth_sendRawTransaction only on the intended network.',
+            'Capture tx hash and verifier evidence before attaching this transfer to any settlement claim.',
+        ],
+    }
+
+
+def sign_x402_transfer_from_wallet(actor_id, *, org_id=None,
+                                   rpc_url='', token_contract_address='',
+                                   recipient_address='', amount_usdc=None,
+                                   private_key_env='MERIDIAN_X402_DEV_PRIVATE_KEY',
+                                   private_key='', sender_wallet_id='',
+                                   source_account_id='', nonce=None,
+                                   gas_limit=None, gas_price_wei=None,
+                                   chain_id=None, token_decimals=6,
+                                   host_supported_adapters=None,
+                                   timeout_seconds=10,
+                                   allow_mainnet_signing=False,
+                                   broadcast=False,
+                                   allow_mainnet_broadcast=False):
+    result = prepare_x402_unsigned_transfer_from_wallet(
+        actor_id,
+        org_id=org_id,
+        rpc_url=rpc_url,
+        token_contract_address=token_contract_address,
+        recipient_address=recipient_address,
+        amount_usdc=amount_usdc,
+        sender_wallet_id=sender_wallet_id,
+        source_account_id=source_account_id,
+        nonce=nonce,
+        gas_limit=gas_limit,
+        gas_price_wei=gas_price_wei,
+        chain_id=chain_id,
+        token_decimals=token_decimals,
+        host_supported_adapters=host_supported_adapters,
+        timeout_seconds=timeout_seconds,
+    )
+    signer_status = _signer_backend_status()
+    result['signer_backend'] = signer_status
+    result['signing_private_key_env'] = private_key_env
+    result['signing_private_key_source'] = 'direct_argument' if str(private_key or '').strip() else 'environment'
+    result['signing_performed'] = False
+    result['signing_blockers'] = []
+    result['signed_transaction'] = None
+    result['broadcast'] = {
+        'requested': bool(broadcast),
+        'attempted': False,
+        'allowed': False,
+        'rpc_tx_hash': '',
+        'error': '',
+        'blockers': [],
+    }
+    artifact_payload = {
+        'org_id': result['org_id'],
+        'source_account_id': result['source_account_id'],
+        'unsigned_transaction': result['unsigned_transaction'],
+        'token': result['token'],
+        'sender_wallet_id': result['sender_wallet_id'],
+        'transfer_request': result['transfer_request'],
+    }
+    raw_artifact = json.dumps(
+        artifact_payload,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')
+    result['dry_run_artifact'] = {
+        'artifact_digest': hashlib.sha256(raw_artifact).hexdigest(),
+        'payload': artifact_payload,
+    }
+
+    if not signer_status.get('available'):
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'signer_backend_missing',
+            signer_status.get('error') or 'eth_account backend is not available',
+        )
+    resolved_private_key = str(private_key or '').strip()
+    if not resolved_private_key:
+        resolved_private_key = str(os.environ.get(private_key_env, '') or '').strip()
+    if not resolved_private_key:
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'private_key_missing',
+            f'A private key argument or environment variable {private_key_env!r} is required for signing',
+        )
+    sender_level = result['sender_wallet'].get('verification_level')
+    if sender_level is None or int(sender_level) < 3:
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'sender_wallet_not_self_custody_verified',
+            (
+                f"Sender wallet '{result['sender_wallet_id']}' is Level "
+                f"{sender_level if sender_level is not None else 'unknown'}; signing is blocked until custody is verified at Level 3+ or multisig-controlled."
+            ),
+        )
+    if result['token']['chain_id'] == _BASE_MAINNET_CHAIN_ID and not allow_mainnet_signing:
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'mainnet_signing_disabled',
+            'Base mainnet signing is disabled by default in this slice. Set allow_mainnet_signing explicitly if an operator wants to assume that risk.',
+        )
+
+    if not result['signing_blockers']:
+        Account = _load_eth_account_backend()
+        signer = Account.from_key(resolved_private_key)
+        derived_address = signer.address.lower()
+        sender_address = result['sender_wallet']['address'].lower()
+        if derived_address != sender_address:
+            _append_structured_blocker(
+                result['signing_blockers'],
+                'signing_key_does_not_match_sender_wallet',
+                (
+                    f'Signing key resolves to {derived_address}, but sender wallet '
+                    f'is {sender_address}.'
+                ),
+            )
+        else:
+            tx_to_sign = {
+                'nonce': int(result['rpc_observations']['nonce']),
+                'gasPrice': int(result['rpc_observations']['gas_price_wei']),
+                'gas': int(result['rpc_observations']['gas_limit']),
+                'to': _checksum_signing_address(result['unsigned_transaction']['to']),
+                'value': 0,
+                'data': result['unsigned_transaction']['data'],
+                'chainId': int(result['token']['chain_id']),
+            }
+            signed = Account.sign_transaction(tx_to_sign, resolved_private_key)
+            result['signing_performed'] = True
+            result['signed_transaction'] = {
+                'tx_for_signing': tx_to_sign,
+                'raw_transaction_hex': '0x' + signed.raw_transaction.hex(),
+                'signed_tx_hash': '0x' + signed.hash.hex(),
+                'sender_address': derived_address,
+            }
+
+    if broadcast:
+        if not result['signing_performed']:
+            _append_structured_blocker(
+                result['broadcast']['blockers'],
+                'cannot_broadcast_without_signed_transaction',
+                'Broadcast requested but no signed transaction is available.',
+            )
+        elif not str(rpc_url or '').strip():
+            _append_structured_blocker(
+                result['broadcast']['blockers'],
+                'rpc_url_required_for_broadcast',
+                'Broadcast requested but no rpc_url was provided.',
+            )
+        elif result['token']['chain_id'] == _BASE_MAINNET_CHAIN_ID and not allow_mainnet_broadcast:
+            _append_structured_blocker(
+                result['broadcast']['blockers'],
+                'mainnet_broadcast_disabled',
+                'Base mainnet broadcast is disabled by default in this slice. No real Base transaction will be submitted without explicit override.',
+            )
+        else:
+            result['broadcast']['allowed'] = True
+            try:
+                rpc_tx_hash = _json_rpc_request(
+                    rpc_url,
+                    'eth_sendRawTransaction',
+                    [result['signed_transaction']['raw_transaction_hex']],
+                    timeout_seconds=timeout_seconds,
+                )
+                result['broadcast']['attempted'] = True
+                result['broadcast']['rpc_tx_hash'] = str(rpc_tx_hash or '')
+            except Exception as exc:
+                result['broadcast']['attempted'] = True
+                result['broadcast']['error'] = str(exc)
+
+    if result['token']['chain_id'] == _BASE_MAINNET_CHAIN_ID:
+        result['truth_boundary'] = (
+            'No Base mainnet transfer or tx hash was executed in this slice. Mainnet signing and broadcast remain explicitly config-gated.'
+        )
+    elif result['broadcast']['attempted']:
+        result['truth_boundary'] = (
+            'Broadcast was attempted only against Base Sepolia or another non-mainnet/local RPC endpoint. No Base mainnet settlement is implied.'
+        )
+    else:
+        result['truth_boundary'] = (
+            'Produced a deterministic dry-run artifact and, when allowed, a signed raw transaction for a non-mainnet or operator-supplied path. No Base mainnet transfer was executed.'
         )
     return result
 

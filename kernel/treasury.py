@@ -23,19 +23,30 @@ Usage:
   python3 treasury.py proposals
   python3 treasury.py funding-sources
   python3 treasury.py check-payout-wallet --wallet_id <id>
+  python3 treasury.py sign-x402-transfer --proposal_id <id> --actor_id <id> --rpc_url <url> --token_contract_address <addr>
 """
 import argparse
 import datetime
 import hashlib
 import json
 import os
+import re
 import sys
 import uuid
+from decimal import Decimal
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKSPACE = os.path.dirname(PLATFORM_DIR)
 ECONOMY_DIR = os.path.join(WORKSPACE, 'economy')
 LEGACY_TREASURY_DIR = os.path.join(WORKSPACE, 'treasury')
+
+_BASE_MAINNET_CHAIN_ID = 8453
+_ERC20_TRANSFER_SELECTOR = 'a9059cbb'
+_ERC20_DECIMALS_SELECTOR = '313ce567'
+_ERC20_BALANCE_OF_SELECTOR = '70a08231'
 
 if PLATFORM_DIR not in sys.path:
     sys.path.insert(0, PLATFORM_DIR)
@@ -2228,6 +2239,694 @@ def can_receive_payout(wallet_id, org_id=None):
     return True, f'Wallet {wallet_id} is Level {level} ({wallet.get("verification_label")}), payout eligible'
 
 
+def _normalize_chain_wallet_address(address, *, field_name):
+    text = str(address or '').strip()
+    if not re.fullmatch(r'0x[0-9a-fA-F]{40}', text):
+        raise ValueError(f'{field_name} must be a 20-byte hex address')
+    return '0x' + text[2:].lower()
+
+
+def _parse_rpc_quantity(value, *, field_name):
+    text = str(value or '').strip()
+    if not text.startswith('0x'):
+        raise ValueError(f'{field_name} must be a 0x-prefixed RPC quantity')
+    return int(text, 16)
+
+
+def _format_rpc_quantity(value, *, field_name):
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError(f'{field_name} is required')
+        if text.startswith('0x'):
+            return '0x0' if text.lower() == '0x' else '0x' + (text[2:].lstrip('0') or '0')
+        value = int(text, 10)
+    elif isinstance(value, Decimal):
+        value = int(value)
+    elif value is None:
+        raise ValueError(f'{field_name} is required')
+    value = int(value)
+    if value < 0:
+        raise ValueError(f'{field_name} must be >= 0')
+    return hex(value)
+
+
+def _format_uint256(value, *, field_name):
+    value = int(value)
+    if value < 0:
+        raise ValueError(f'{field_name} must be >= 0')
+    if value >= 2 ** 256:
+        raise ValueError(f'{field_name} exceeds uint256')
+    return format(value, '064x')
+
+
+def _encode_erc20_transfer_calldata(recipient_address, amount_base_units):
+    recipient = _normalize_chain_wallet_address(
+        recipient_address,
+        field_name='recipient_address',
+    )
+    return '0x' + _ERC20_TRANSFER_SELECTOR + recipient[2:].rjust(64, '0') + _format_uint256(
+        amount_base_units,
+        field_name='amount_base_units',
+    )
+
+
+def _encode_erc20_balance_of_calldata(address):
+    normalized = _normalize_chain_wallet_address(address, field_name='wallet_address')
+    return '0x' + _ERC20_BALANCE_OF_SELECTOR + normalized[2:].rjust(64, '0')
+
+
+def _json_rpc_request(rpc_url, method, params=None, *, timeout_seconds=10):
+    rpc_url = str(rpc_url or '').strip()
+    if not rpc_url:
+        raise ValueError('rpc_url is required')
+    payload = {
+        'jsonrpc': '2.0',
+        'id': f'rpc_{uuid.uuid4().hex[:12]}',
+        'method': method,
+        'params': list(params or []),
+    }
+    req = urllib_request.Request(
+        rpc_url,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
+            body = response.read().decode('utf-8')
+    except urllib_error.HTTPError as exc:
+        body = exc.read().decode('utf-8')
+        raise RuntimeError(
+            f'RPC {method} failed with HTTP {exc.code}: {body or exc.reason}'
+        ) from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f'RPC {method} failed: {exc.reason}') from exc
+    try:
+        decoded = json.loads(body or '{}')
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f'RPC {method} returned invalid JSON') from exc
+    if decoded.get('error'):
+        error_payload = decoded.get('error') or {}
+        raise RuntimeError(
+            f"RPC {method} error {error_payload.get('code', 'unknown')}: "
+            f"{error_payload.get('message', 'unknown error')}"
+        )
+    return decoded.get('result')
+
+
+def _redact_rpc_url(rpc_url):
+    parsed = urllib_parse.urlsplit(str(rpc_url or '').strip())
+    if not parsed.scheme or not parsed.netloc:
+        return ''
+    path = parsed.path or ''
+    return urllib_parse.urlunsplit((parsed.scheme, parsed.netloc, path, '', ''))
+
+
+def _wallet_chain_asset_guard(wallet, wallet_id, *, expected_chain, expected_asset, role_label):
+    chain = str(wallet.get('chain') or '').strip().lower()
+    asset = str(wallet.get('asset') or '').strip().upper()
+    if chain != expected_chain:
+        raise ValueError(
+            f"{role_label} wallet {wallet_id!r} is registered for chain {chain!r}, "
+            f'expected {expected_chain!r}'
+        )
+    if asset != expected_asset:
+        raise ValueError(
+            f"{role_label} wallet {wallet_id!r} is registered for asset {asset!r}, "
+            f'expected {expected_asset!r}'
+        )
+    return chain, asset
+
+
+def _resolve_x402_sender_wallet(*, org_id=None, sender_wallet_id='', source_account_id='company_treasury'):
+    accounts = load_treasury_accounts(org_id).get('accounts', {})
+    resolved_wallet_id = (sender_wallet_id or '').strip()
+    account = {}
+    if resolved_wallet_id:
+        account = dict(accounts.get((source_account_id or '').strip(), {}))
+    else:
+        source_account_id = (source_account_id or 'company_treasury').strip()
+        account = dict(accounts.get(source_account_id, {}))
+        if not account:
+            raise LookupError(f'Treasury account not found: {source_account_id}')
+        resolved_wallet_id = str(account.get('wallet_id') or '').strip()
+        if not resolved_wallet_id:
+            raise ValueError(
+                f"Treasury account '{source_account_id}' does not define a wallet_id"
+            )
+    wallet = get_wallet(resolved_wallet_id, org_id)
+    if not wallet:
+        raise LookupError(f'Sender wallet not found: {resolved_wallet_id}')
+    return account, resolved_wallet_id, wallet
+
+
+def _append_structured_blocker(target, code, message):
+    existing = {item.get('code') for item in target if isinstance(item, dict)}
+    if code in existing:
+        return
+    target.append({'code': code, 'message': message})
+
+
+def _prepare_x402_execution_gate_blockers(record, *, org_id=None):
+    blockers = []
+    try:
+        _require_transition(record, 'executed', org_id=org_id)
+    except ValueError as exc:
+        _append_structured_blocker(blockers, 'proposal_not_executable', str(exc))
+    phase_allowed, phase_reason = _payout_phase_gate(org_id)
+    if not phase_allowed:
+        _append_structured_blocker(blockers, 'payout_phase_blocked', phase_reason)
+    ends_at = str(record.get('dispute_window_ends_at') or '').strip()
+    if ends_at and _parse_ts(ends_at) > _parse_ts(_now()):
+        _append_structured_blocker(
+            blockers,
+            'dispute_window_open',
+            (
+                f"Payout proposal '{record.get('proposal_id', '')}' remains inside "
+                f'the dispute window until {ends_at}'
+            ),
+        )
+    eligible, reason = can_receive_payout(record.get('recipient_wallet_id', ''), org_id)
+    if not eligible:
+        _append_structured_blocker(blockers, 'recipient_wallet_ineligible', reason)
+    amount = round(float(record.get('amount_usd') or 0.0), 4)
+    if not can_payout(amount, org_id=org_id):
+        _append_structured_blocker(
+            blockers,
+            'reserve_floor_breach',
+            f"Payout proposal '{record.get('proposal_id', '')}' would breach treasury reserve floor",
+        )
+    linked_commitment_id = str(record.get('linked_commitment_id') or '').strip()
+    if linked_commitment_id:
+        try:
+            commitments.validate_commitment_for_settlement(
+                linked_commitment_id,
+                org_id=org_id,
+            )
+        except Exception as exc:
+            _append_structured_blocker(
+                blockers,
+                'linked_commitment_not_ready',
+                str(exc),
+            )
+    return blockers
+
+
+def _signer_backend_status():
+    try:
+        from eth_account import Account  # noqa: F401
+    except Exception as exc:
+        return {
+            'available': False,
+            'backend': 'eth_account',
+            'error': f'{exc.__class__.__name__}: {exc}',
+        }
+    return {
+        'available': True,
+        'backend': 'eth_account',
+        'error': '',
+    }
+
+
+def _load_eth_account_backend():
+    try:
+        from eth_account import Account
+    except Exception as exc:
+        raise RuntimeError(
+            'eth_account is required for x402 signing. Install eth-account to enable this path.'
+        ) from exc
+    return Account
+
+
+def prepare_x402_unsigned_transfer_for_payout(proposal_id, actor_id, *, org_id=None,
+                                              rpc_url='', token_contract_address='',
+                                              sender_wallet_id='',
+                                              source_account_id='company_treasury',
+                                              nonce=None, gas_limit=None,
+                                              gas_price_wei=None,
+                                              host_supported_adapters=None,
+                                              timeout_seconds=10):
+    actor_id = str(actor_id or '').strip()
+    if not actor_id:
+        raise ValueError('actor_id is required')
+    proposal_id = str(proposal_id or '').strip()
+    if not proposal_id:
+        raise ValueError('proposal_id is required')
+    record = get_payout_proposal(proposal_id, org_id)
+    if not record:
+        raise LookupError(f'Payout proposal not found: {proposal_id}')
+
+    settlement_adapter = str(record.get('settlement_adapter') or '').strip()
+    if settlement_adapter != 'base_usdc_x402':
+        raise ValueError(
+            f"Proposal '{proposal_id}' is not configured for base_usdc_x402"
+        )
+
+    adapter = _require_known_settlement_adapter('base_usdc_x402', org_id=org_id)
+    contract = _settlement_adapter_contract(
+        adapter,
+        host_supported_adapters=host_supported_adapters,
+    )
+    token_contract = _normalize_chain_wallet_address(
+        token_contract_address,
+        field_name='token_contract_address',
+    )
+
+    account, resolved_sender_wallet_id, sender_wallet = _resolve_x402_sender_wallet(
+        org_id=org_id,
+        sender_wallet_id=sender_wallet_id,
+        source_account_id=source_account_id,
+    )
+    recipient_wallet_id = str(record.get('recipient_wallet_id') or '').strip()
+    recipient_wallet = get_wallet(recipient_wallet_id, org_id)
+    if not recipient_wallet:
+        raise LookupError(f'Recipient wallet not found: {recipient_wallet_id}')
+
+    _wallet_chain_asset_guard(
+        sender_wallet,
+        resolved_sender_wallet_id,
+        expected_chain='base',
+        expected_asset='USDC',
+        role_label='Sender',
+    )
+    _wallet_chain_asset_guard(
+        recipient_wallet,
+        recipient_wallet_id,
+        expected_chain='base',
+        expected_asset='USDC',
+        role_label='Recipient',
+    )
+
+    sender_address = _normalize_chain_wallet_address(
+        sender_wallet.get('address'),
+        field_name=f'sender wallet {resolved_sender_wallet_id} address',
+    )
+    recipient_address = _normalize_chain_wallet_address(
+        recipient_wallet.get('address'),
+        field_name=f'recipient wallet {recipient_wallet_id} address',
+    )
+
+    rpc_calls = []
+
+    def _rpc(method, params=None):
+        result = _json_rpc_request(
+            rpc_url,
+            method,
+            params=params,
+            timeout_seconds=timeout_seconds,
+        )
+        rpc_calls.append({'method': method, 'params': list(params or []), 'result': result})
+        return result
+
+    chain_id = _parse_rpc_quantity(_rpc('eth_chainId', []), field_name='eth_chainId')
+    network_classification = 'base_mainnet' if chain_id == _BASE_MAINNET_CHAIN_ID else 'dev_or_nonmainnet'
+
+    decimals_hex = _rpc(
+        'eth_call',
+        [
+            {
+                'to': token_contract,
+                'data': '0x' + _ERC20_DECIMALS_SELECTOR,
+            },
+            'latest',
+        ],
+    )
+    token_decimals = _parse_rpc_quantity(decimals_hex, field_name='erc20 decimals')
+    nominal_amount = Decimal(str(record.get('amount_usd') or 0.0))
+    base_unit_multiplier = Decimal(10) ** token_decimals
+    amount_base_units_decimal = nominal_amount * base_unit_multiplier
+    if amount_base_units_decimal != amount_base_units_decimal.to_integral_value():
+        raise ValueError(
+            'Payout amount cannot be represented exactly at the token decimal precision'
+        )
+    amount_base_units = int(amount_base_units_decimal)
+    calldata = _encode_erc20_transfer_calldata(recipient_address, amount_base_units)
+
+    resolved_nonce = (
+        _parse_rpc_quantity(str(nonce), field_name='nonce')
+        if nonce not in ('', None)
+        else _parse_rpc_quantity(
+            _rpc('eth_getTransactionCount', [sender_address, 'pending']),
+            field_name='eth_getTransactionCount',
+        )
+    )
+    resolved_gas_price = (
+        _parse_rpc_quantity(str(gas_price_wei), field_name='gas_price_wei')
+        if gas_price_wei not in ('', None)
+        else _parse_rpc_quantity(_rpc('eth_gasPrice', []), field_name='eth_gasPrice')
+    )
+    resolved_gas_limit = (
+        _parse_rpc_quantity(str(gas_limit), field_name='gas_limit')
+        if gas_limit not in ('', None)
+        else _parse_rpc_quantity(
+            _rpc(
+                'eth_estimateGas',
+                [
+                    {
+                        'from': sender_address,
+                        'to': token_contract,
+                        'value': '0x0',
+                        'data': calldata,
+                    }
+                ],
+            ),
+            field_name='eth_estimateGas',
+        )
+    )
+    sender_native_balance = _parse_rpc_quantity(
+        _rpc('eth_getBalance', [sender_address, 'latest']),
+        field_name='eth_getBalance',
+    )
+    sender_token_balance = _parse_rpc_quantity(
+        _rpc(
+            'eth_call',
+            [
+                {
+                    'to': token_contract,
+                    'data': _encode_erc20_balance_of_calldata(sender_address),
+                },
+                'latest',
+            ],
+        ),
+        field_name='sender balanceOf',
+    )
+    recipient_token_balance = _parse_rpc_quantity(
+        _rpc(
+            'eth_call',
+            [
+                {
+                    'to': token_contract,
+                    'data': _encode_erc20_balance_of_calldata(recipient_address),
+                },
+                'latest',
+            ],
+        ),
+        field_name='recipient balanceOf',
+    )
+
+    unsigned_transaction = {
+        'chainId': chain_id,
+        'from': sender_address,
+        'to': token_contract,
+        'nonce': _format_rpc_quantity(resolved_nonce, field_name='nonce'),
+        'gas': _format_rpc_quantity(resolved_gas_limit, field_name='gas'),
+        'gasPrice': _format_rpc_quantity(resolved_gas_price, field_name='gasPrice'),
+        'value': '0x0',
+        'data': calldata,
+    }
+
+    actual_transfer_blockers = _prepare_x402_execution_gate_blockers(record, org_id=org_id)
+    if not contract.get('payout_execution_enabled'):
+        _append_structured_blocker(
+            actual_transfer_blockers,
+            'adapter_execution_disabled',
+            "Settlement adapter 'base_usdc_x402' is not enabled for payout execution",
+        )
+    if contract.get('host_supported') is False:
+        _append_structured_blocker(
+            actual_transfer_blockers,
+            'host_not_supported',
+            "Settlement adapter 'base_usdc_x402' is not supported on this host",
+        )
+    if not contract.get('verification_ready'):
+        _append_structured_blocker(
+            actual_transfer_blockers,
+            'verification_not_ready',
+            "Settlement adapter 'base_usdc_x402' verification path is not ready on this host",
+        )
+    sender_level = sender_wallet.get('verification_level')
+    if sender_level is None or int(sender_level) < 3:
+        _append_structured_blocker(
+            actual_transfer_blockers,
+            'sender_wallet_not_self_custody_verified',
+            (
+                f"Sender wallet '{resolved_sender_wallet_id}' is Level "
+                f"{sender_level if sender_level is not None else 'unknown'} "
+                f"({sender_wallet.get('verification_label') or 'unknown'}); "
+                'actual broadcast requires Level 3+ custody verification or a multisig-controlled source wallet.'
+            ),
+        )
+    estimated_fee_wei = resolved_gas_limit * resolved_gas_price
+    if sender_native_balance < estimated_fee_wei:
+        _append_structured_blocker(
+            actual_transfer_blockers,
+            'insufficient_native_balance_for_gas',
+            (
+                f'Sender native balance {sender_native_balance} wei is below the '
+                f'estimated gas requirement {estimated_fee_wei} wei.'
+            ),
+        )
+    if sender_token_balance < amount_base_units:
+        _append_structured_blocker(
+            actual_transfer_blockers,
+            'insufficient_usdc_balance',
+            (
+                f'Sender token balance {sender_token_balance} base units is below the '
+                f'required amount {amount_base_units}.'
+            ),
+        )
+    _append_structured_blocker(
+        actual_transfer_blockers,
+        'post_broadcast_evidence_required',
+        'execute_payout_proposal still requires tx_hash, settlement_proof, and x402_settlement_verifier attestation after operator broadcast.',
+    )
+
+    return {
+        'prepared_at': _now(),
+        'prepared_by': actor_id,
+        'org_id': org_id or _default_org_id(),
+        'proposal_id': proposal_id,
+        'proposal_status': record.get('status', ''),
+        'proposal_currency': record.get('currency', 'USDC'),
+        'settlement_adapter': 'base_usdc_x402',
+        'rpc_transport': 'json_rpc_http',
+        'rpc_url_redacted': _redact_rpc_url(rpc_url),
+        'source_account_id': str(account.get('id') or source_account_id or '').strip(),
+        'sender_wallet_id': resolved_sender_wallet_id,
+        'sender_wallet': {
+            'id': resolved_sender_wallet_id,
+            'address': sender_address,
+            'chain': sender_wallet.get('chain'),
+            'asset': sender_wallet.get('asset'),
+            'verification_level': sender_wallet.get('verification_level'),
+            'verification_label': sender_wallet.get('verification_label'),
+            'status': sender_wallet.get('status'),
+        },
+        'recipient_wallet_id': recipient_wallet_id,
+        'recipient_wallet': {
+            'id': recipient_wallet_id,
+            'address': recipient_address,
+            'chain': recipient_wallet.get('chain'),
+            'asset': recipient_wallet.get('asset'),
+            'verification_level': recipient_wallet.get('verification_level'),
+            'verification_label': recipient_wallet.get('verification_label'),
+            'status': recipient_wallet.get('status'),
+        },
+        'adapter_contract': contract,
+        'adapter_contract_snapshot': contract.get('contract_snapshot', {}),
+        'adapter_contract_digest': contract.get('contract_digest', ''),
+        'token': {
+            'symbol': 'USDC',
+            'chain': 'base',
+            'chain_id': chain_id,
+            'network_classification': network_classification,
+            'contract_address': token_contract,
+            'decimals': token_decimals,
+        },
+        'amount': {
+            'proposal_amount_usd': str(nominal_amount),
+            'nominal_token_amount': str(nominal_amount),
+            'token_decimals': token_decimals,
+            'base_units': str(amount_base_units),
+            'accounting_assumption': 'Kernel models USDC payouts at nominal USD parity; transaction amount is derived from proposal.amount_usd.',
+        },
+        'rpc_observations': {
+            'chain_id': chain_id,
+            'nonce': resolved_nonce,
+            'gas_price_wei': str(resolved_gas_price),
+            'gas_limit': resolved_gas_limit,
+            'estimated_fee_wei': str(estimated_fee_wei),
+            'sender_native_balance_wei': str(sender_native_balance),
+            'sender_token_balance_base_units': str(sender_token_balance),
+            'recipient_token_balance_base_units': str(recipient_token_balance),
+            'calls': rpc_calls,
+        },
+        'unsigned_transaction_prepared': True,
+        'unsigned_transaction': unsigned_transaction,
+        'actual_transfer_blockers': actual_transfer_blockers,
+        'operator_actions_remaining': [
+            'Review the unsigned transaction fields against the intended recipient and token contract.',
+            'Sign with a matching self-custody or multisig-controlled sender key.',
+            'Broadcast with eth_sendRawTransaction only on the intended network.',
+            'Capture tx hash, settlement proof, and x402_settlement_verifier attestation before execute_payout_proposal.',
+        ],
+    }
+
+
+def sign_x402_transfer_for_payout(proposal_id, actor_id, *, org_id=None,
+                                  rpc_url='', token_contract_address='',
+                                  private_key_env='MERIDIAN_X402_DEV_PRIVATE_KEY',
+                                  sender_wallet_id='',
+                                  source_account_id='company_treasury',
+                                  nonce=None, gas_limit=None,
+                                  gas_price_wei=None,
+                                  host_supported_adapters=None,
+                                  timeout_seconds=10,
+                                  allow_mainnet_signing=False,
+                                  broadcast=False,
+                                  allow_mainnet_broadcast=False):
+    result = prepare_x402_unsigned_transfer_for_payout(
+        proposal_id,
+        actor_id,
+        org_id=org_id,
+        rpc_url=rpc_url,
+        token_contract_address=token_contract_address,
+        sender_wallet_id=sender_wallet_id,
+        source_account_id=source_account_id,
+        nonce=nonce,
+        gas_limit=gas_limit,
+        gas_price_wei=gas_price_wei,
+        host_supported_adapters=host_supported_adapters,
+        timeout_seconds=timeout_seconds,
+    )
+    signer_status = _signer_backend_status()
+    result['signer_backend'] = signer_status
+    result['signing_private_key_env'] = private_key_env
+    result['signing_performed'] = False
+    result['signing_blockers'] = []
+    result['signed_transaction'] = None
+    result['broadcast'] = {
+        'requested': bool(broadcast),
+        'attempted': False,
+        'allowed': False,
+        'rpc_tx_hash': '',
+        'error': '',
+    }
+    artifact_payload = {
+        'proposal_id': result['proposal_id'],
+        'org_id': result['org_id'],
+        'unsigned_transaction': result['unsigned_transaction'],
+        'token': result['token'],
+        'sender_wallet_id': result['sender_wallet_id'],
+        'recipient_wallet_id': result['recipient_wallet_id'],
+    }
+    raw_artifact = json.dumps(
+        artifact_payload,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')
+    result['dry_run_artifact'] = {
+        'artifact_digest': hashlib.sha256(raw_artifact).hexdigest(),
+        'payload': artifact_payload,
+    }
+
+    if not signer_status.get('available'):
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'signer_backend_missing',
+            signer_status.get('error') or 'eth_account backend is not available',
+        )
+    private_key = str(os.environ.get(private_key_env, '') or '').strip()
+    if not private_key:
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'private_key_env_missing',
+            f'Environment variable {private_key_env!r} is required for signing',
+        )
+    sender_level = result['sender_wallet'].get('verification_level')
+    if sender_level is None or int(sender_level) < 3:
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'sender_wallet_not_self_custody_verified',
+            (
+                f"Sender wallet '{result['sender_wallet_id']}' is Level "
+                f"{sender_level if sender_level is not None else 'unknown'}; signing is blocked until custody is verified at Level 3+ or multisig-controlled."
+            ),
+        )
+    if result['token']['chain_id'] == _BASE_MAINNET_CHAIN_ID and not allow_mainnet_signing:
+        _append_structured_blocker(
+            result['signing_blockers'],
+            'mainnet_signing_disabled',
+            'Base mainnet signing is disabled by default in this slice. Set allow_mainnet_signing explicitly if an operator wants to assume that risk.',
+        )
+
+    if not result['signing_blockers']:
+        Account = _load_eth_account_backend()
+        signer = Account.from_key(private_key)
+        derived_address = signer.address.lower()
+        sender_address = result['sender_wallet']['address'].lower()
+        if derived_address != sender_address:
+            _append_structured_blocker(
+                result['signing_blockers'],
+                'signing_key_does_not_match_sender_wallet',
+                (
+                    f'Signing key resolves to {derived_address}, but sender wallet '
+                    f'is {sender_address}.'
+                ),
+            )
+        else:
+            tx_to_sign = {
+                'nonce': int(result['rpc_observations']['nonce']),
+                'gasPrice': int(result['rpc_observations']['gas_price_wei']),
+                'gas': int(result['rpc_observations']['gas_limit']),
+                'to': result['unsigned_transaction']['to'],
+                'value': 0,
+                'data': result['unsigned_transaction']['data'],
+                'chainId': int(result['token']['chain_id']),
+            }
+            signed = Account.sign_transaction(tx_to_sign, private_key)
+            result['signing_performed'] = True
+            result['signed_transaction'] = {
+                'tx_for_signing': tx_to_sign,
+                'raw_transaction_hex': '0x' + signed.raw_transaction.hex(),
+                'signed_tx_hash': '0x' + signed.hash.hex(),
+                'sender_address': derived_address,
+            }
+
+    if broadcast:
+        if not result['signing_performed']:
+            _append_structured_blocker(
+                result['broadcast'].setdefault('blockers', []),
+                'cannot_broadcast_without_signed_transaction',
+                'Broadcast requested but no signed transaction is available.',
+            )
+        elif result['token']['chain_id'] == _BASE_MAINNET_CHAIN_ID and not allow_mainnet_broadcast:
+            _append_structured_blocker(
+                result['broadcast'].setdefault('blockers', []),
+                'mainnet_broadcast_disabled',
+                'Base mainnet broadcast is disabled by default in this slice. No real Base transaction will be submitted without explicit override.',
+            )
+        else:
+            result['broadcast']['allowed'] = True
+            try:
+                rpc_tx_hash = _json_rpc_request(
+                    rpc_url,
+                    'eth_sendRawTransaction',
+                    [result['signed_transaction']['raw_transaction_hex']],
+                    timeout_seconds=timeout_seconds,
+                )
+                result['broadcast']['attempted'] = True
+                result['broadcast']['rpc_tx_hash'] = str(rpc_tx_hash or '')
+            except Exception as exc:
+                result['broadcast']['attempted'] = True
+                result['broadcast']['error'] = str(exc)
+
+    if result['token']['chain_id'] == _BASE_MAINNET_CHAIN_ID:
+        result['truth_boundary'] = (
+            'No Base mainnet transfer or tx hash was executed in this slice. Mainnet signing and broadcast remain explicitly config-gated.'
+        )
+    elif result['broadcast']['attempted']:
+        result['truth_boundary'] = (
+            'Broadcast was attempted only against a non-mainnet or local RPC endpoint. No Base mainnet settlement is implied.'
+        )
+    else:
+        result['truth_boundary'] = (
+            'Produced a deterministic dry-run artifact and, when allowed, a signed raw transaction for a non-mainnet path. No Base mainnet transfer was executed.'
+        )
+    return result
+
+
 def acknowledge_payout_plan_preview(preview_id, by, *, org_id=None, note=''):
     return _acknowledge_payout_plan_preview(org_id, preview_id, by=by, note=note)
 
@@ -2389,6 +3088,24 @@ def main():
     cpw.add_argument('--org_id', default=None)
     cpw.add_argument('--wallet_id', required=True)
 
+    sxt = sub.add_parser('sign-x402-transfer')
+    sxt.add_argument('--org_id', default=None)
+    sxt.add_argument('--proposal_id', required=True)
+    sxt.add_argument('--actor_id', required=True)
+    sxt.add_argument('--rpc_url', required=True)
+    sxt.add_argument('--token_contract_address', required=True)
+    sxt.add_argument('--private_key_env', default='MERIDIAN_X402_DEV_PRIVATE_KEY')
+    sxt.add_argument('--sender_wallet_id', default='')
+    sxt.add_argument('--source_account_id', default='company_treasury')
+    sxt.add_argument('--nonce', default='')
+    sxt.add_argument('--gas_limit', default='')
+    sxt.add_argument('--gas_price_wei', default='')
+    sxt.add_argument('--timeout_seconds', type=int, default=10)
+    sxt.add_argument('--host_supported_adapter', action='append', default=[])
+    sxt.add_argument('--allow_mainnet_signing', action='store_true')
+    sxt.add_argument('--broadcast', action='store_true')
+    sxt.add_argument('--allow_mainnet_broadcast', action='store_true')
+
     args = p.parse_args()
 
     if args.command == 'balance':
@@ -2504,6 +3221,26 @@ def main():
         status = 'ELIGIBLE' if eligible else 'BLOCKED'
         print(f'{status}: {reason}')
         sys.exit(0 if eligible else 1)
+    elif args.command == 'sign-x402-transfer':
+        result = sign_x402_transfer_for_payout(
+            args.proposal_id,
+            args.actor_id,
+            org_id=args.org_id,
+            rpc_url=args.rpc_url,
+            token_contract_address=args.token_contract_address,
+            private_key_env=args.private_key_env,
+            sender_wallet_id=args.sender_wallet_id,
+            source_account_id=args.source_account_id,
+            nonce=args.nonce or None,
+            gas_limit=args.gas_limit or None,
+            gas_price_wei=args.gas_price_wei or None,
+            host_supported_adapters=args.host_supported_adapter or None,
+            timeout_seconds=args.timeout_seconds,
+            allow_mainnet_signing=args.allow_mainnet_signing,
+            broadcast=args.broadcast,
+            allow_mainnet_broadcast=args.allow_mainnet_broadcast,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
     else:
         p.print_help()
 

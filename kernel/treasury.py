@@ -77,6 +77,8 @@ from metering import get_spend, summary as metering_summary
 from agent_registry import check_budget as _agent_check_budget
 import commitments
 from payout_plan_preview_queue import (
+    acknowledge_payout_plan_preview as _acknowledge_payout_plan_preview,
+    inspect_payout_plan_preview_queue as _inspect_payout_plan_preview_queue,
     load_payout_plan_preview_queue,
     payout_plan_preview_queue_snapshot,
     payout_plan_preview_queue_summary,
@@ -2132,6 +2134,14 @@ def can_receive_payout(wallet_id, org_id=None):
     if wallet.get('status') != 'active':
         return False, f'Wallet {wallet_id} status is {wallet.get("status")}, must be active'
     return True, f'Wallet {wallet_id} is Level {level} ({wallet.get("verification_label")}), payout eligible'
+
+
+def acknowledge_payout_plan_preview(preview_id, by, *, org_id=None, note=''):
+    return _acknowledge_payout_plan_preview(org_id, preview_id, by=by, note=note)
+
+
+def inspect_payout_plan_preview_queue(org_id=None, *, state=None, limit=50):
+    return _inspect_payout_plan_preview_queue(org_id, state=state, limit=limit)
 
 
 def treasury_snapshot(org_id=None):

@@ -866,6 +866,58 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(captured['data']['summary']['total'], 1)
         self.assertEqual(captured['data']['payout_plan_previews'][0]['preview_id'], 'ptx_preview_demo')
 
+    def test_treasury_payout_plan_preview_queue_inspection_endpoint_returns_inspection(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/treasury/payout-plan-preview-queue/inspect'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        inspection = {
+            'summary': {'total': 1, 'execution_ready': 1},
+            'inspection_summary': {'total': 1, 'ready_for_ack': 1, 'requires_operator_ack': 1},
+            'payout_plan_previews': [
+                {
+                    'preview_id': 'ptx_preview_demo',
+                    'proposal_id': 'pay_demo',
+                    'inspection_state': 'ready_for_ack',
+                }
+            ],
+        }
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()), \
+             mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}), \
+             mock.patch.object(self.workspace, '_payout_plan_preview_queue_inspection', return_value=inspection):
+            handler.do_GET()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['inspection_summary']['total'], 1)
+        self.assertEqual(captured['data']['payout_plan_previews'][0]['inspection_state'], 'ready_for_ack')
+
     def test_federation_snapshot_surfaces_trusted_peers(self):
         from runtime_host import default_host_identity
         import tempfile

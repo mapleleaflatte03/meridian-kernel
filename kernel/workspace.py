@@ -31,6 +31,7 @@ Endpoints:
   GET  /api/federation/handoff-preview-queue -> Persisted remote handoff preview queue
   GET  /api/federation/execution-jobs -> Receiver-side federated execution jobs
   GET  /api/treasury/payout-plan-preview-queue -> Persisted payout-plan preview queue
+  GET  /api/treasury/payout-plan-preview-queue/inspect -> Read-only payout-plan preview queue inspection pass
   GET  /api/federation/manifest   -> Public host federation manifest
   GET  /api/federation/witness/archive -> Witness-host archival evidence state
   GET  /api/runtimes              -> Runtime registry and contract status
@@ -288,6 +289,7 @@ from federation_handoff_queue import (
     upsert_handoff_preview,
 )
 from payout_plan_preview_queue import (
+    inspect_payout_plan_preview_queue as _payout_plan_preview_queue_inspection,
     payout_plan_preview_queue_snapshot as _payout_plan_preview_queue_snapshot,
     payout_plan_preview_queue_summary,
 )
@@ -5790,6 +5792,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(load_funding_sources(org_id))
         elif path == '/api/treasury/payout-plan-preview-queue':
             return self._json(_payout_plan_preview_queue_snapshot(org_id))
+        elif path == '/api/treasury/payout-plan-preview-queue/inspect':
+            return self._json(_payout_plan_preview_queue_inspection(org_id))
         elif path == '/api/payouts':
             host_identity, _admission_registry = _runtime_host_state(org_id)
             return self._json(_payout_snapshot(

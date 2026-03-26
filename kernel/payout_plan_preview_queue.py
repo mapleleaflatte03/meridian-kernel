@@ -207,6 +207,41 @@ def _preview_digest(record):
     return _canonical_hash(digest_payload)
 
 
+def _preview_inspection_state(record):
+    record = dict(record or {})
+    state = (record.get('state') or record.get('preview_state') or '').strip() or 'previewed'
+    if record.get('settlement_claimed'):
+        return 'settlement_claimed'
+    if record.get('external_settlement_observed'):
+        return 'external_settlement_observed'
+    if state == 'blocked':
+        return 'blocked'
+    if state == 'superseded':
+        return 'superseded'
+    if record.get('acknowledged'):
+        return 'acknowledged'
+    if record.get('execution_ready'):
+        return 'ready_for_ack'
+    return 'previewed'
+
+
+def _inspected_preview_record(record):
+    inspected = dict(record or {})
+    inspection_state = _preview_inspection_state(inspected)
+    inspected['inspection_state'] = inspection_state
+    inspected['inspection_required'] = inspection_state == 'ready_for_ack'
+    inspected['inspection_message'] = {
+        'settlement_claimed': 'Preview has a claimed settlement reference but remains non-executable here.',
+        'external_settlement_observed': 'Preview observed external settlement evidence; no settlement execution is claimed.',
+        'blocked': 'Preview is blocked and needs operator review.',
+        'superseded': 'Preview was superseded by a newer preview.',
+        'acknowledged': 'Preview was acknowledged by an operator.',
+        'ready_for_ack': 'Preview is execution-ready but still awaiting operator acknowledgment.',
+        'previewed': 'Preview is recorded and still awaiting operator review.',
+    }[inspection_state]
+    return inspected
+
+
 def _normalize_preview(preview, org_id, existing=None):
     preview = dict(preview or {})
     existing = dict(existing or {})
@@ -247,6 +282,28 @@ def _normalize_preview(preview, org_id, existing=None):
         record['settlement_claimed'] = bool(preview.get('settlement_claimed'))
     elif 'settlement_claimed' not in record:
         record['settlement_claimed'] = False
+    if 'acknowledged' in preview:
+        record['acknowledged'] = bool(preview.get('acknowledged'))
+    elif 'acknowledged' not in record:
+        record['acknowledged'] = False
+    if 'acknowledged_at' in preview or 'acknowledged_at' not in record:
+        record['acknowledged_at'] = (
+            preview.get('acknowledged_at')
+            or existing.get('acknowledged_at')
+            or ''
+        ).strip()
+    if 'acknowledged_by' in preview or 'acknowledged_by' not in record:
+        record['acknowledged_by'] = (
+            preview.get('acknowledged_by')
+            or existing.get('acknowledged_by')
+            or ''
+        ).strip()
+    if 'acknowledged_note' in preview or 'acknowledged_note' not in record:
+        record['acknowledged_note'] = (
+            preview.get('acknowledged_note')
+            or existing.get('acknowledged_note')
+            or ''
+        ).strip()
     if 'external_settlement_observed' in preview or 'external_settlement_observed' not in record:
         record['external_settlement_observed'] = bool(
             preview.get(
@@ -320,6 +377,30 @@ def list_payout_plan_previews(org_id, *, state=None):
     return previews
 
 
+def acknowledge_payout_plan_preview(org_id, preview_id, *, by, note=''):
+    preview_id = (preview_id or '').strip()
+    by = (by or '').strip()
+    if not preview_id:
+        raise ValueError('preview_id is required')
+    if not by:
+        raise ValueError('by is required')
+    with _preview_lock(org_id):
+        store = _load_store(org_id)
+        record = store.get('payout_plan_previews', {}).get(preview_id)
+        if not record:
+            raise LookupError(f'Payout-plan preview not found: {preview_id}')
+        if not record.get('acknowledged'):
+            timestamp = _now()
+            record['acknowledged'] = True
+            record['acknowledged_at'] = timestamp
+            record['acknowledged_by'] = by
+            record['acknowledged_note'] = (note or '').strip()
+            record['updated_at'] = timestamp
+            store['payout_plan_previews'][preview_id] = record
+            _save_store(store, org_id)
+        return record
+
+
 def upsert_payout_plan_preview(org_id, preview=None, **preview_fields):
     payload = dict(preview or {})
     payload.update(preview_fields)
@@ -346,6 +427,8 @@ def payout_plan_preview_queue_summary(org_id):
             'superseded': 0,
             'execution_ready': 0,
             'settlement_claimed': 0,
+            'acknowledged': 0,
+            'acknowledgement_pending': 0,
             'state_counts': {},
             'adapter_counts': {},
             'updatedAt': _now(),
@@ -355,6 +438,8 @@ def payout_plan_preview_queue_summary(org_id):
     adapter_counts = {}
     execution_ready = 0
     settlement_claimed = 0
+    acknowledged = 0
+    acknowledgement_pending = 0
     for record in store.get('payout_plan_previews', {}).values():
         state = (record.get('state') or record.get('preview_state') or '').strip() or 'previewed'
         record['state'] = state
@@ -366,6 +451,10 @@ def payout_plan_preview_queue_summary(org_id):
             execution_ready += 1
         if record.get('settlement_claimed'):
             settlement_claimed += 1
+        if record.get('acknowledged'):
+            acknowledged += 1
+        elif record.get('execution_ready') and state == 'previewed':
+            acknowledgement_pending += 1
     return {
         'org_id': (org_id or '').strip(),
         'total': len(store.get('payout_plan_previews', {})),
@@ -374,6 +463,8 @@ def payout_plan_preview_queue_summary(org_id):
         'superseded': state_counts.get('superseded', 0),
         'execution_ready': execution_ready,
         'settlement_claimed': settlement_claimed,
+        'acknowledged': acknowledged,
+        'acknowledgement_pending': acknowledgement_pending,
         'state_counts': state_counts,
         'adapter_counts': dict(sorted(adapter_counts.items())),
         'updatedAt': store.get('updatedAt', _now()),
@@ -388,6 +479,33 @@ def payout_plan_preview_queue_snapshot(org_id, *, state=None, limit=50):
     return {
         'summary': summary,
         'payout_plan_previews': records,
+    }
+
+
+def inspect_payout_plan_preview_queue(org_id, *, state=None, limit=50):
+    snapshot = payout_plan_preview_queue_snapshot(org_id, state=state, limit=limit)
+    inspected_records = [_inspected_preview_record(record) for record in snapshot['payout_plan_previews']]
+    inspection_state_counts = {}
+    for record in inspected_records:
+        inspection_state = record.get('inspection_state', 'previewed')
+        inspection_state_counts[inspection_state] = inspection_state_counts.get(inspection_state, 0) + 1
+    inspection_summary = {
+        'org_id': (org_id or '').strip(),
+        'total': len(inspected_records),
+        'acknowledged': inspection_state_counts.get('acknowledged', 0),
+        'ready_for_ack': inspection_state_counts.get('ready_for_ack', 0),
+        'blocked': inspection_state_counts.get('blocked', 0),
+        'superseded': inspection_state_counts.get('superseded', 0),
+        'settlement_claimed': inspection_state_counts.get('settlement_claimed', 0),
+        'external_settlement_observed': inspection_state_counts.get('external_settlement_observed', 0),
+        'requires_operator_ack': inspection_state_counts.get('ready_for_ack', 0),
+        'inspection_state_counts': dict(sorted(inspection_state_counts.items())),
+        'inspected_at': _now(),
+    }
+    return {
+        'summary': snapshot['summary'],
+        'inspection_summary': inspection_summary,
+        'payout_plan_previews': inspected_records,
     }
 
 

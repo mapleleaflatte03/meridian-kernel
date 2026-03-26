@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  Runtime-neutral governance primitives, public proof, and contract surfaces for managed digital labor.
+  <img src="docs/assets/meridian_kernel_surfaces.svg" alt="Meridian Kernel surface overview" width="960">
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/kernel-python%20stdlib-0c1117?style=flat-square" alt="Python standard library only">
-  <img src="https://img.shields.io/badge/proof-public%20bundle%20ready-0f766e?style=flat-square" alt="Public proof bundle ready">
-  <img src="https://img.shields.io/badge/runtime-neutral-governance%20layer-1f6feb?style=flat-square" alt="Runtime neutral governance layer">
+  <img src="https://img.shields.io/badge/proof-public%20proof%20surfaces-0f766e?style=flat-square" alt="Public proof surfaces">
+  <img src="https://img.shields.io/badge/runtime-neutral%20governance%20layer-1f6feb?style=flat-square" alt="Runtime neutral governance layer">
   <img src="https://img.shields.io/github/actions/workflow/status/mapleleaflatte03/meridian-kernel/test.yml?branch=main&style=flat-square" alt="Kernel CI">
   <img src="https://img.shields.io/badge/license-Apache--2.0-475569?style=flat-square" alt="Apache 2.0 license">
 </p>
@@ -18,22 +18,29 @@
   <a href="docs/PROOF_MATRIX.md">Proof Matrix</a> ·
   <a href="docs/RUNTIME_CONTRACT.md">Runtime Contract</a> ·
   <a href="ARCHITECTURE.md">Architecture</a> ·
-  <a href="docs/LOOM_SPEC.md">Loom Spec</a> ·
-  <a href="https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md">Loom 100 Improvements</a> ·
-  <a href="https://app.welliam.codes">Live Host</a>
+  <a href="https://github.com/mapleleaflatte03/meridian-intelligence">Meridian Intelligence</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian-loom">Meridian Loom</a>
 </p>
 
-<p align="center">
-  <img src="docs/assets/meridian_kernel_surfaces.svg" alt="Meridian Kernel surface overview" width="960">
-</p>
-
-> Meridian Kernel is the governance layer above runtimes: real primitives, real proof, and an honest runtime boundary. It does not pretend to be the runner.
+> Meridian Kernel is the governance boundary. It does not run your agents; it governs them with explicit authority, treasury, and court primitives.
 
 # Meridian Constitutional Kernel
 
 **Five primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**
 
 Pure Python. No external dependencies. Apache-2.0.
+
+## Three-Part Architecture
+
+Meridian is intentionally split into three layers so each part can evolve without blurring truth boundaries.
+
+| Layer | Repo | Role |
+|---|---|---|
+| **Kernel** | This repo | Governance primitives, proof surfaces, capsule-backed state, and the runtime contract |
+| **Intelligence** | [`meridian-intelligence`](https://github.com/mapleleaflatte03/meridian-intelligence) | Governed work, planning, analysis, and operational intelligence on top of the kernel |
+| **Loom** | [`meridian-loom`](https://github.com/mapleleaflatte03/meridian-loom) | The runtime/runtime-adjacent execution scaffold that consumes the kernel contract |
+
+The kernel and intelligence layers can be exercised entirely locally. Loom remains a separate runtime surface so the governance contract stays independent of any one runner.
 
 ---
 
@@ -127,8 +134,6 @@ For the broader frontier agenda behind Loom as a future runtime, see
 That document is intentionally a research docket, not a present-tense product claim.
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
-
----
 
 ## What Is Open
 

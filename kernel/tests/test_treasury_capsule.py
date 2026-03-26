@@ -869,7 +869,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(result['requirements']['dispute_model'], 'court_case_plus_chain_review')
         self.assertEqual(result['requirements']['finality_model'], 'external_chain_finality')
 
-    def test_preflight_settlement_adapter_surfaces_manual_wire_contract_but_blocks_execution(self):
+    def test_preflight_settlement_adapter_requires_host_support_for_manual_wire_execution(self):
         result = treasury.preflight_settlement_adapter(
             'manual_bank_wire',
             org_id=self.org_id,
@@ -881,12 +881,12 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertFalse(result['preflight_ok'])
         self.assertFalse(result['can_execute_now'])
         self.assertEqual(result['error_type'], 'permission_error')
-        self.assertIn('not enabled', result['error'])
+        self.assertIn('not supported on this host', result['error'])
         self.assertFalse(result['execution_ready'])
         self.assertEqual(result['contract']['execution_mode'], 'manual_offchain')
         self.assertEqual(result['contract']['settlement_path'], 'manual_bank_review')
         self.assertEqual(result['contract']['verification_mode'], 'manual_attestation')
-        self.assertFalse(result['contract']['verification_ready'])
+        self.assertTrue(result['contract']['verification_ready'])
         self.assertTrue(result['contract']['requires_verifier_attestation'])
         self.assertEqual(
             result['contract']['accepted_attestation_types'],
@@ -894,12 +894,11 @@ class TreasuryCapsuleTests(unittest.TestCase):
         )
         self.assertEqual(result['contract']['dispute_model'], 'manual_reversal_and_court_case')
         self.assertEqual(result['contract']['finality_model'], 'manual_settlement_pending')
-        self.assertIn('payout_execution_disabled', result['execution_blockers'])
-        self.assertIn('verification_not_ready', result['execution_blockers'])
+        self.assertIn('host_not_supported', result['execution_blockers'])
         self.assertEqual(result['requirements']['execution_mode'], 'manual_offchain')
         self.assertEqual(result['requirements']['settlement_path'], 'manual_bank_review')
         self.assertEqual(result['requirements']['verification_mode'], 'manual_attestation')
-        self.assertFalse(result['requirements']['verification_ready'])
+        self.assertTrue(result['requirements']['verification_ready'])
         self.assertTrue(result['requirements']['requires_verifier_attestation'])
         self.assertEqual(
             result['requirements']['accepted_attestation_types'],
@@ -907,6 +906,38 @@ class TreasuryCapsuleTests(unittest.TestCase):
         )
         self.assertEqual(result['requirements']['dispute_model'], 'manual_reversal_and_court_case')
         self.assertEqual(result['requirements']['finality_model'], 'manual_settlement_pending')
+
+    def test_preflight_settlement_adapter_accepts_manual_wire_with_evidence_and_host_support(self):
+        result = treasury.preflight_settlement_adapter(
+            'manual_bank_wire',
+            org_id=self.org_id,
+            currency='USD',
+            settlement_proof={
+                'reference': 'manual-receipt',
+                'verification_attestation': {
+                    'type': 'manual_wire_verifier',
+                    'reference': 'attest://manual/wire',
+                },
+            },
+            host_supported_adapters=['manual_bank_wire'],
+        )
+        self.assertTrue(result['known'])
+        self.assertTrue(result['preflight_ok'])
+        self.assertTrue(result['can_execute_now'])
+        self.assertTrue(result['execution_enabled'])
+        self.assertTrue(result['host_supported'])
+        self.assertTrue(result['execution_ready'])
+        self.assertEqual(result['contract']['execution_mode'], 'manual_offchain')
+        self.assertEqual(result['contract']['settlement_path'], 'manual_bank_review')
+        self.assertEqual(result['contract']['verification_mode'], 'manual_attestation')
+        self.assertTrue(result['contract']['verification_ready'])
+        self.assertTrue(result['contract']['requires_verifier_attestation'])
+        self.assertEqual(result['contract']['accepted_attestation_types'], ['manual_wire_verifier'])
+        self.assertFalse(result['execution_blockers'])
+        self.assertEqual(result['requirements']['verification_ready'], True)
+        self.assertEqual(result['normalized_proof']['execution_mode'], 'manual_offchain')
+        self.assertEqual(result['normalized_proof']['settlement_path'], 'manual_bank_review')
+        self.assertEqual(result['normalized_proof']['verification_attestation_types'], ['manual_wire_verifier'])
 
     def test_preflight_settlement_adapter_blocks_enabled_external_adapter_without_verifier_readiness(self):
         settlement_adapters_path = self.capsule_dir / 'settlement_adapters.json'

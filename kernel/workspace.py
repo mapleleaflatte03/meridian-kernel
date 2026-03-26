@@ -29,6 +29,7 @@ Endpoints:
   GET  /api/federation/peers      -> Federation peer registry state
   GET  /api/federation/inbox      -> Institution-scoped federation inbox state
   GET  /api/federation/handoff-preview-queue -> Persisted remote handoff preview queue
+  GET  /api/federation/handoff-dispatch-queue -> Persisted federation handoff dispatch queue
   GET  /api/federation/execution-jobs -> Receiver-side federated execution jobs
   GET  /api/treasury/payout-plan-preview-queue -> Persisted payout-plan preview queue
   GET  /api/treasury/payout-plan-preview-queue/inspect -> Read-only payout-plan preview queue inspection pass
@@ -97,6 +98,7 @@ Endpoints:
   POST /api/federation/peers/revoke -> Revoke a federation peer
   POST /api/federation/send       -> Deliver a federation envelope to a trusted peer
   POST /api/federation/receive    -> Validate and consume a federation envelope
+  POST /api/federation/handoff-preview-queue/acknowledge -> Acknowledge a remote handoff preview and queue a dispatch record
   POST /api/federation/witness/archive -> Archive independently validated witness evidence
   POST /api/institution/charter   -> Set charter
   POST /api/institution/lifecycle -> Transition lifecycle
@@ -290,8 +292,13 @@ from federated_execution_jobs import (
     upsert_execution_job,
 )
 from federation_handoff_queue import (
+    acknowledge_handoff_preview,
     handoff_preview_queue_snapshot as _handoff_preview_queue_snapshot,
     upsert_handoff_preview,
+)
+from federation_handoff_dispatch_queue import (
+    handoff_dispatch_queue_snapshot as _handoff_dispatch_queue_snapshot,
+    promote_acknowledged_handoff_preview_to_dispatch_record,
 )
 from payout_plan_preview_queue import (
     inspect_payout_plan_preview_queue as _payout_plan_preview_queue_inspection,
@@ -378,6 +385,7 @@ MUTATION_ROLE_REQUIREMENTS = {
     '/api/cases/stay': 'admin',
     '/api/cases/resolve': 'admin',
     '/api/federation/execution-jobs/execute': 'admin',
+    '/api/federation/handoff-preview-queue/acknowledge': 'admin',
     '/api/treasury/contribute': 'owner',
     '/api/treasury/reserve-floor': 'owner',
     '/api/treasury/settlement-adapters/preflight': 'member',
@@ -541,6 +549,7 @@ def _federation_snapshot(bound_org_id, host_identity=None, admission_registry=No
         org_registry=load_orgs().get('organizations', {}),
     )
     snapshot['handoff_preview_queue'] = _handoff_preview_queue_snapshot(bound_org_id)
+    snapshot['handoff_dispatch_queue'] = _handoff_dispatch_queue_snapshot(bound_org_id)
     snapshot['witness_archive'] = _witness_archive_snapshot(
         bound_org_id,
         host_identity=host_identity,
@@ -4088,6 +4097,31 @@ def _persist_remote_handoff_preview(bound_org_id, preview):
         return None
 
 
+def _acknowledge_and_dispatch_remote_handoff_preview(bound_org_id, handoff_id, *, actor_id, note=''):
+    preview = acknowledge_handoff_preview(bound_org_id, handoff_id, by=actor_id, note=note)
+    result = {
+        'handoff_preview': preview,
+        'dispatch_record': None,
+        'dispatch_record_created': False,
+        'dispatch_record_error': '',
+    }
+    if not preview.get('dispatch_ready'):
+        return result
+    try:
+        dispatch_record = promote_acknowledged_handoff_preview_to_dispatch_record(
+            bound_org_id,
+            handoff_id,
+            promoted_by=actor_id,
+            promotion_note=note,
+        )
+    except (LookupError, PermissionError, ValueError) as exc:
+        result['dispatch_record_error'] = str(exc)
+        return result
+    result['dispatch_record'] = dispatch_record
+    result['dispatch_record_created'] = True
+    return result
+
+
 def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
                                       host_identity=None, admission_registry=None,
                                       peer_registry=None, org_registry=None):
@@ -5829,6 +5863,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             return self._json(_federation_inbox_snapshot(org_id))
         elif path == '/api/federation/handoff-preview-queue':
             return self._json(_handoff_preview_queue_snapshot(org_id))
+        elif path == '/api/federation/handoff-dispatch-queue':
+            return self._json(_handoff_dispatch_queue_snapshot(org_id))
         elif path == '/api/federation/execution-jobs':
             return self._json(_federation_execution_jobs_snapshot(org_id))
         elif path == '/api/federation/manifest':
@@ -7691,6 +7727,34 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                         host_identity=host_identity,
                     ),
                 })
+
+            elif path == '/api/federation/handoff-preview-queue/acknowledge':
+                handoff_id = (body.get('handoff_id') or '').strip()
+                if not handoff_id:
+                    return self._json({'error': 'handoff_id is required'}, 400)
+                by_actor = (body.get('by') or by or '').strip()
+                if not by_actor:
+                    return self._json({'error': 'by is required'}, 400)
+                try:
+                    promotion = _acknowledge_and_dispatch_remote_handoff_preview(
+                        org_id,
+                        handoff_id,
+                        actor_id=by_actor,
+                        note=body.get('note', ''),
+                    )
+                except LookupError as e:
+                    return self._json({'error': str(e)}, 404)
+                except PermissionError as e:
+                    return self._json({'error': str(e)}, 403)
+                except ValueError as e:
+                    return self._json({'error': str(e)}, 400)
+                response = {
+                    'message': 'Federation handoff preview acknowledged',
+                    **promotion,
+                }
+                if promotion.get('dispatch_record_created'):
+                    response['message'] = 'Federation handoff preview acknowledged and promoted to dispatch'
+                return self._json(response)
 
             elif path == '/api/federation/execution-jobs/execute':
                 job_ref = (body.get('job_id') or body.get('envelope_id') or body.get('local_warrant_id') or '').strip()

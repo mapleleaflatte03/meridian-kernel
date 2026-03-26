@@ -138,13 +138,14 @@ On the current reference path:
 |---------|--------|------------------|
 | `internal_ledger` | registered | enabled |
 | `base_usdc_x402` | registered | disabled |
-| `manual_bank_wire` | registered | disabled |
+| `manual_bank_wire` | active | enabled |
 
 `internal_ledger` normalizes proof as an institution transaction journal
-reference and marks execution as `host_ledger_final`. The other adapters remain
-registered-only policy stubs. Their contract is still surfaced in preflight and
-execution planning, but their payout execution path stays disabled until a
-stronger settlement verification path is wired.
+reference and marks execution as `host_ledger_final`. `base_usdc_x402` remains
+registered-only policy-disabled because it still depends on external chain
+truth. `manual_bank_wire` is now executable on the internal/manual path when
+its verifier attestation is present and the host advertises support, but the
+wire itself remains manual/offchain.
 
 On the reference host, `internal_ledger` is treated as the implicit local
 settlement path even when host metadata does not explicitly enumerate a

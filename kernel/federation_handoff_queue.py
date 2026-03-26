@@ -202,6 +202,12 @@ def _preview_digest(record):
         'dispatch_ready': bool(record.get('dispatch_ready')),
         'dispatch_blockers': list(record.get('dispatch_blockers') or []),
         'draft_execution_request': dict(record.get('draft_execution_request') or {}),
+        'acknowledged': bool(record.get('acknowledged')),
+        'acknowledged_by': (record.get('acknowledged_by') or '').strip(),
+        'acknowledged_at': (record.get('acknowledged_at') or '').strip(),
+        'acknowledged_note': (record.get('acknowledged_note') or '').strip(),
+        'settlement_claimed': bool(record.get('settlement_claimed')),
+        'external_settlement_observed': bool(record.get('external_settlement_observed')),
     }
     return _canonical_hash(digest_payload)
 
@@ -233,6 +239,16 @@ def _normalize_preview(preview, org_id, existing=None):
         record['dispatch_blockers'] = list(preview.get('dispatch_blockers') or [])
     elif 'dispatch_blockers' not in record:
         record['dispatch_blockers'] = []
+    if 'acknowledged' in preview:
+        record['acknowledged'] = bool(preview.get('acknowledged'))
+    elif 'acknowledged' not in record:
+        record['acknowledged'] = False
+    if 'acknowledged_by' in preview or 'acknowledged_by' not in record:
+        record['acknowledged_by'] = (preview.get('acknowledged_by') or existing.get('acknowledged_by') or '').strip()
+    if 'acknowledged_at' in preview or 'acknowledged_at' not in record:
+        record['acknowledged_at'] = (preview.get('acknowledged_at') or existing.get('acknowledged_at') or '').strip()
+    if 'acknowledged_note' in preview or 'acknowledged_note' not in record:
+        record['acknowledged_note'] = (preview.get('acknowledged_note') or existing.get('acknowledged_note') or '').strip()
     if 'preview_truth_source' in preview or 'preview_truth_source' not in record:
         record['preview_truth_source'] = (preview.get('preview_truth_source') or existing.get('preview_truth_source') or '').strip()
     if 'dispatch_paths' in preview:
@@ -247,6 +263,14 @@ def _normalize_preview(preview, org_id, existing=None):
         record['remote_execution_claimed'] = bool(preview.get('remote_execution_claimed'))
     elif 'remote_execution_claimed' not in record:
         record['remote_execution_claimed'] = False
+    if 'settlement_claimed' in preview:
+        record['settlement_claimed'] = bool(preview.get('settlement_claimed'))
+    elif 'settlement_claimed' not in record:
+        record['settlement_claimed'] = False
+    if 'external_settlement_observed' in preview:
+        record['external_settlement_observed'] = bool(preview.get('external_settlement_observed'))
+    elif 'external_settlement_observed' not in record:
+        record['external_settlement_observed'] = False
 
     draft = dict(record.get('draft_execution_request') or {})
     record['source_host_id'] = (preview.get('source_host_id') or draft.get('source_host_id') or existing.get('source_host_id') or '').strip()
@@ -276,6 +300,30 @@ def get_handoff_preview(handoff_id, org_id):
         return None
     store = _load_store(org_id)
     return store.get('handoff_previews', {}).get(handoff_id)
+
+
+def acknowledge_handoff_preview(org_id, handoff_id, *, by, note=''):
+    handoff_id = (handoff_id or '').strip()
+    by = (by or '').strip()
+    if not handoff_id:
+        raise ValueError('handoff_id is required')
+    if not by:
+        raise ValueError('by is required')
+    with _handoff_lock(org_id):
+        store = _load_store(org_id)
+        record = store.get('handoff_previews', {}).get(handoff_id)
+        if not record:
+            raise LookupError(f'Federation handoff preview not found: {handoff_id}')
+        if not record.get('acknowledged'):
+            timestamp = _now()
+            record['acknowledged'] = True
+            record['acknowledged_at'] = timestamp
+            record['acknowledged_by'] = by
+            record['acknowledged_note'] = (note or '').strip()
+            record['updated_at'] = timestamp
+            store['handoff_previews'][handoff_id] = record
+            _save_store(store, org_id)
+        return record
 
 
 def list_handoff_previews(org_id, *, state=None):
@@ -323,6 +371,8 @@ def handoff_preview_queue_summary(org_id):
     state_counts = {}
     route_kind_counts = {}
     dispatch_ready = 0
+    acknowledged = 0
+    acknowledgement_pending = 0
     remote_execution_claimed = 0
     for record in store.get('handoff_previews', {}).values():
         state = (record.get('state') or record.get('handoff_state') or '').strip() or 'previewed'
@@ -333,6 +383,10 @@ def handoff_preview_queue_summary(org_id):
         route_kind_counts[route_kind] = route_kind_counts.get(route_kind, 0) + 1
         if record.get('dispatch_ready'):
             dispatch_ready += 1
+        if record.get('acknowledged'):
+            acknowledged += 1
+        elif record.get('dispatch_ready') and state == 'previewed':
+            acknowledgement_pending += 1
         if record.get('remote_execution_claimed'):
             remote_execution_claimed += 1
     return {
@@ -342,6 +396,8 @@ def handoff_preview_queue_summary(org_id):
         'blocked': state_counts.get('blocked', 0),
         'superseded': state_counts.get('superseded', 0),
         'dispatch_ready': dispatch_ready,
+        'acknowledged': acknowledged,
+        'acknowledgement_pending': acknowledgement_pending,
         'remote_execution_claimed': remote_execution_claimed,
         'state_counts': state_counts,
         'route_kind_counts': dict(sorted(route_kind_counts.items())),

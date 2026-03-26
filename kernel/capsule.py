@@ -42,6 +42,8 @@ CAPSULE_FILES = (
     '.federated_execution_jobs.lock',
     'federation_handoff_queue.json',
     '.federation_handoff_queue.lock',
+    'federation_handoff_dispatch_queue.json',
+    '.federation_handoff_dispatch_queue.lock',
     'payout_plan_preview_queue.json',
     '.payout_plan_preview_queue.lock',
     'payout_plan_approval_candidate_queue.json',
@@ -409,6 +411,22 @@ _CAPSULE_DEFAULTS = {
         },
     },
     '.federation_handoff_queue.lock': '',
+    'federation_handoff_dispatch_queue.json': {
+        'version': 1,
+        'updatedAt': '',
+        'handoff_dispatch_records': {},
+        'states': [
+            'dispatchable',
+            'dispatched',
+            'blocked',
+            'superseded',
+        ],
+        '_meta': {
+            'service_scope': 'institution_owned_service',
+            'bound_org_id': '',
+        },
+    },
+    '.federation_handoff_dispatch_queue.lock': '',
     'payout_plan_preview_queue.json': {
         'version': 1,
         'updatedAt': '',

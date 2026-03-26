@@ -299,6 +299,29 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(called_preview['requested_org_id'], 'org_remote')
         self.assertEqual(called_preview['draft_execution_request']['target_host_id'], 'host_beta')
 
+    def test_federation_snapshot_includes_handoff_dispatch_queue(self):
+        host = self.workspace.load_host_identity('missing')
+        host.federation_enabled = True
+
+        class _AuthorityStub:
+            def snapshot(self, **kwargs):
+                return {'host_id': host.host_id, 'peers': [], 'admitted_org_ids': ['org_local']}
+
+        with mock.patch.object(self.workspace, '_federation_authority', return_value=_AuthorityStub()), \
+             mock.patch.object(self.workspace, '_routing_handoff_preview_snapshot', return_value={'summary': {'total': 0}, 'handoff_candidates': []}), \
+             mock.patch.object(self.workspace, '_handoff_dispatch_queue_snapshot', return_value={'summary': {'total': 1}, 'handoff_dispatch_records': [{'dispatch_id': 'fhdp_demo'}]}), \
+             mock.patch.object(self.workspace, '_witness_archive_snapshot', return_value={'summary': {'total': 0}, 'witness_observations': []}):
+            snapshot = self.workspace._federation_snapshot(
+                'org_local',
+                host_identity=host,
+                admission_registry={'admitted_org_ids': ['org_local']},
+                peer_registry={'peers': {}},
+            )
+
+        self.assertIn('handoff_dispatch_queue', snapshot)
+        self.assertEqual(snapshot['handoff_dispatch_queue']['summary']['total'], 1)
+        self.assertEqual(snapshot['handoff_dispatch_queue']['handoff_dispatch_records'][0]['dispatch_id'], 'fhdp_demo')
+
     def test_auth_context_prefers_explicit_user_id(self):
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_meridian_owner')
         self.workspace.load_orgs = lambda: {
@@ -374,6 +397,8 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertTrue(permissions['/api/federation/send']['allowed'])
         self.assertTrue(permissions['/api/federation/execution-jobs/execute']['allowed'])
         self.assertEqual(permissions['/api/federation/execution-jobs/execute']['required_role'], 'admin')
+        self.assertTrue(permissions['/api/federation/handoff-preview-queue/acknowledge']['allowed'])
+        self.assertEqual(permissions['/api/federation/handoff-preview-queue/acknowledge']['required_role'], 'admin')
         self.assertFalse(permissions['/api/federation/peers/refresh']['allowed'])
         self.assertEqual(permissions['/api/federation/peers/refresh']['required_role'], 'owner')
 

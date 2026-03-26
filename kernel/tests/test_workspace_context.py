@@ -267,18 +267,21 @@ class WorkspaceContextTests(unittest.TestCase):
         }
         self.workspace._routing_planner_snapshot = lambda *args, **kwargs: planner
 
-        preview = self.workspace._routing_handoff_preview_snapshot(
-            'org_local',
-            host_identity=host,
-            admission_registry={'admitted_org_ids': ['org_local']},
-            peer_registry={'peers': {}},
-            org_registry={'org_local': {}, 'org_remote': {}, 'org_blocked': {}},
-        )
+        with mock.patch.object(self.workspace, 'upsert_handoff_preview', return_value={'state': 'previewed'}) as upsert:
+            preview = self.workspace._routing_handoff_preview_snapshot(
+                'org_local',
+                host_identity=host,
+                admission_registry={'admitted_org_ids': ['org_local']},
+                peer_registry={'peers': {}},
+                org_registry={'org_local': {}, 'org_remote': {}, 'org_blocked': {}},
+            )
 
         self.assertEqual(preview['summary'], {'total': 3, 'local': 1, 'remote': 1, 'blocked': 1, 'remote_previewed': 1})
         remote = next(item for item in preview['handoff_candidates'] if item['requested_org_id'] == 'org_remote')
         self.assertEqual(remote['handoff_state'], 'previewed')
         self.assertTrue(remote['dispatch_ready'])
+        self.assertTrue(remote['handoff_queue_recorded'])
+        self.assertEqual(remote['handoff_queue_state'], 'previewed')
         self.assertFalse(remote['remote_execution_claimed'])
         self.assertEqual(remote['dispatch_paths']['send'], '/api/federation/send')
         self.assertEqual(remote['draft_execution_request']['target_host_id'], 'host_beta')
@@ -287,6 +290,12 @@ class WorkspaceContextTests(unittest.TestCase):
         blocked = next(item for item in preview['handoff_candidates'] if item['requested_org_id'] == 'org_blocked')
         self.assertEqual(blocked['handoff_state'], 'blocked')
         self.assertFalse(blocked['dispatch_ready'])
+        upsert.assert_called_once()
+        called_org_id, called_preview = upsert.call_args.args
+        self.assertEqual(called_org_id, 'org_local')
+        self.assertEqual(called_preview['handoff_id'], remote['handoff_id'])
+        self.assertEqual(called_preview['requested_org_id'], 'org_remote')
+        self.assertEqual(called_preview['draft_execution_request']['target_host_id'], 'host_beta')
 
     def test_auth_context_prefers_explicit_user_id(self):
         self.workspace._load_workspace_credentials = lambda: ('owner', 'secret', 'org_a', 'user_meridian_owner')
@@ -856,6 +865,8 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(snap['admitted_org_ids'], ['org_a', 'org_b'])
             self.assertEqual(snap['management_mode'], 'workspace_api_file_backed')
             self.assertTrue(snap['mutation_enabled'])
+            self.assertIn('handoff_preview_queue', snap)
+            self.assertIn('summary', snap['handoff_preview_queue'])
 
     def test_federation_execution_jobs_snapshot_surfaces_local_warrant(self):
         self.workspace.list_execution_jobs = lambda org_id, state=None: [

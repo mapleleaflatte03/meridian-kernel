@@ -28,6 +28,7 @@ Endpoints:
   GET  /api/federation            -> Federation gateway state
   GET  /api/federation/peers      -> Federation peer registry state
   GET  /api/federation/inbox      -> Institution-scoped federation inbox state
+  GET  /api/federation/handoff-preview-queue -> Persisted remote handoff preview queue
   GET  /api/federation/execution-jobs -> Receiver-side federated execution jobs
   GET  /api/federation/manifest   -> Public host federation manifest
   GET  /api/federation/witness/archive -> Witness-host archival evidence state
@@ -281,6 +282,10 @@ from federated_execution_jobs import (
     execution_job_summary,
     upsert_execution_job,
 )
+from federation_handoff_queue import (
+    handoff_preview_queue_snapshot as _handoff_preview_queue_snapshot,
+    upsert_handoff_preview,
+)
 from witness_archive import (
     archive_witness_observation,
     list_witness_observations,
@@ -523,6 +528,7 @@ def _federation_snapshot(bound_org_id, host_identity=None, admission_registry=No
         peer_registry=peer_registry,
         org_registry=load_orgs().get('organizations', {}),
     )
+    snapshot['handoff_preview_queue'] = _handoff_preview_queue_snapshot(bound_org_id)
     snapshot['witness_archive'] = _witness_archive_snapshot(
         bound_org_id,
         host_identity=host_identity,
@@ -4061,6 +4067,15 @@ def _routing_planner_snapshot(bound_org_id, *, requested_org_ids=None, host_iden
     }
 
 
+def _persist_remote_handoff_preview(bound_org_id, preview):
+    if (preview or {}).get('route_kind') != 'remote':
+        return None
+    try:
+        return upsert_handoff_preview(bound_org_id, preview)
+    except (SystemExit, ValueError, FileNotFoundError, OSError):
+        return None
+
+
 def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
                                       host_identity=None, admission_registry=None,
                                       peer_registry=None, org_registry=None):
@@ -4077,6 +4092,7 @@ def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
         org_registry=org_registry,
     )
     handoff_candidates = []
+    generated_at = _now()
     for decision in routing_planner['decisions']:
         requested_org_id = decision.get('requested_org_id', '')
         route_kind = decision.get('route_kind', '')
@@ -4118,6 +4134,9 @@ def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
                 'warrant_id': '',
                 'commitment_id': '',
             },
+            'generated_at': generated_at,
+            'previewed_at': generated_at,
+            'queued_at': generated_at,
         }
         if route_kind == 'remote':
             preview['handoff_id'] = 'fhdp_' + hashlib.sha256(
@@ -4135,6 +4154,12 @@ def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
             preview['peer_label'] = decision.get('peer_label', '')
             preview['peer_trust_state'] = decision.get('peer_trust_state', '')
             preview['remote_execution_claimed'] = False
+            persisted_preview = _persist_remote_handoff_preview(bound_org_id, preview)
+            if persisted_preview is not None:
+                preview['handoff_queue_recorded'] = True
+                preview['handoff_queue_state'] = persisted_preview.get('state', '')
+            else:
+                preview['handoff_queue_recorded'] = False
         else:
             preview['target_host_id'] = decision.get('target_host_id', '')
             preview['target_endpoint_url'] = decision.get('target_endpoint_url', '')
@@ -4147,7 +4172,7 @@ def _routing_handoff_preview_snapshot(bound_org_id, *, requested_org_ids=None,
     return {
         'bound_org_id': bound_org_id,
         'host_id': getattr(host_identity, 'host_id', '') if host_identity else '',
-        'generated_at': _now(),
+        'generated_at': generated_at,
         'routing_planner': routing_planner,
         'summary': {
             'total': len(handoff_candidates),
@@ -5148,6 +5173,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
             'permissions': _permission_snapshot(auth_context),
         },
         'routing_planner': routing_planner,
+        'handoff_preview_queue': _handoff_preview_queue_snapshot(org_id),
         'runtime_core': runtime_core_snapshot(
             inst_ctx,
             additional_institutions_allowed=True,
@@ -5778,6 +5804,8 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             ))
         elif path == '/api/federation/inbox':
             return self._json(_federation_inbox_snapshot(org_id))
+        elif path == '/api/federation/handoff-preview-queue':
+            return self._json(_handoff_preview_queue_snapshot(org_id))
         elif path == '/api/federation/execution-jobs':
             return self._json(_federation_execution_jobs_snapshot(org_id))
         elif path == '/api/federation/manifest':

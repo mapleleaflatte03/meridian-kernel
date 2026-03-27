@@ -9,7 +9,7 @@ ROOT = os.path.normpath(os.path.join(THIS_DIR, '..'))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, THIS_DIR)
 
-from adapters import openclaw_compatible as openclaw_adapter  # noqa: E402
+from adapters import legacy_v1_compatible as legacy_v1_adapter  # noqa: E402
 from test_federation import (  # noqa: E402
     _find_free_port,
     _http_json,
@@ -21,12 +21,12 @@ from test_federation import (  # noqa: E402
 )
 
 
-def _run_openclaw_reference_adapter_federation_proof():
-    orig_check_authority = openclaw_adapter.check_authority
-    orig_check_budget = openclaw_adapter.check_budget
-    orig_get_restrictions = openclaw_adapter.get_restrictions
-    orig_meter_record = openclaw_adapter.meter_record
-    orig_log_event = openclaw_adapter.log_event
+def _run_legacy_v1_reference_adapter_federation_proof():
+    orig_check_authority = legacy_v1_adapter.check_authority
+    orig_check_budget = legacy_v1_adapter.check_budget
+    orig_get_restrictions = legacy_v1_adapter.get_restrictions
+    orig_meter_record = legacy_v1_adapter.meter_record
+    orig_log_event = legacy_v1_adapter.log_event
     try:
         try:
             port_alpha = _find_free_port()
@@ -36,10 +36,10 @@ def _run_openclaw_reference_adapter_federation_proof():
             raise unittest.SkipTest(f'localhost socket bind unavailable in sandbox: {exc}')
 
         seen = {}
-        openclaw_adapter.get_restrictions = lambda agent_id, org_id=None: []
-        openclaw_adapter.check_authority = lambda agent_id, action_type, org_id=None: (True, 'ok')
-        openclaw_adapter.check_budget = lambda agent_id, cost_usd, org_id=None: (True, 'ok')
-        openclaw_adapter.meter_record = lambda org_id, agent_id, metric, quantity=1.0, unit='calls', cost_usd=0.0, run_id='', details=None: (
+        legacy_v1_adapter.get_restrictions = lambda agent_id, org_id=None: []
+        legacy_v1_adapter.check_authority = lambda agent_id, action_type, org_id=None: (True, 'ok')
+        legacy_v1_adapter.check_budget = lambda agent_id, cost_usd, org_id=None: (True, 'ok')
+        legacy_v1_adapter.meter_record = lambda org_id, agent_id, metric, quantity=1.0, unit='calls', cost_usd=0.0, run_id='', details=None: (
             seen.setdefault(
                 'meter',
                 {
@@ -52,9 +52,9 @@ def _run_openclaw_reference_adapter_federation_proof():
                     'run_id': run_id,
                     'details': details or {},
                 },
-            ) or 'meter_openclaw_ref'
+            ) or 'meter_legacy_v1_ref'
         )
-        openclaw_adapter.log_event = lambda org_id, agent_id, action, resource='', outcome='success', actor_type='agent', details=None, policy_ref='', session_id=None: (
+        legacy_v1_adapter.log_event = lambda org_id, agent_id, action, resource='', outcome='success', actor_type='agent', details=None, policy_ref='', session_id=None: (
             seen.setdefault(
                 'audit',
                 {
@@ -67,7 +67,7 @@ def _run_openclaw_reference_adapter_federation_proof():
                     'details': details or {},
                     'session_id': session_id,
                 },
-            ) or 'event_openclaw_ref'
+            ) or 'event_legacy_v1_ref'
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,7 +157,7 @@ def _run_openclaw_reference_adapter_federation_proof():
 
             with _run_workspace(gamma), _run_workspace(beta), _run_workspace(alpha):
                 alpha_session = _issue_workspace_session(alpha)
-                adapter_envelope = openclaw_adapter.build_action_envelope(
+                adapter_envelope = legacy_v1_adapter.build_action_envelope(
                     'atlas',
                     'federated_execution',
                     'host_beta/shared_brief_review',
@@ -170,7 +170,7 @@ def _run_openclaw_reference_adapter_federation_proof():
                         'target_institution_id': 'org_beta',
                     },
                 )
-                action_gate = openclaw_adapter.pre_action_check('org_alpha', adapter_envelope)
+                action_gate = legacy_v1_adapter.pre_action_check('org_alpha', adapter_envelope)
                 assert action_gate['allowed'], action_gate
                 assert action_gate['stage'] == 'ok', action_gate
 
@@ -262,7 +262,7 @@ def _run_openclaw_reference_adapter_federation_proof():
                 assert execution_body['delivery']['claims']['message_type'] == 'execution_request', execution_body
                 assert execution_body['delivery']['witness_archive']['created'] == 1, execution_body
 
-                post_record = openclaw_adapter.post_action_record(
+                post_record = legacy_v1_adapter.post_action_record(
                     'org_alpha',
                     dict(
                         adapter_envelope,
@@ -372,7 +372,7 @@ def _run_openclaw_reference_adapter_federation_proof():
             assert len(archived) >= 5, gamma_events
 
             return {
-                'runtime_id': 'openclaw_compatible',
+                'runtime_id': 'legacy_v1_compatible',
                 'adapter_kind': 'reference_adapter',
                 'scope': 'kernel_side_reference_seam',
                 'action_gate': action_gate,
@@ -419,17 +419,17 @@ def _run_openclaw_reference_adapter_federation_proof():
                 },
             }
     finally:
-        openclaw_adapter.check_authority = orig_check_authority
-        openclaw_adapter.check_budget = orig_check_budget
-        openclaw_adapter.get_restrictions = orig_get_restrictions
-        openclaw_adapter.meter_record = orig_meter_record
-        openclaw_adapter.log_event = orig_log_event
+        legacy_v1_adapter.check_authority = orig_check_authority
+        legacy_v1_adapter.check_budget = orig_check_budget
+        legacy_v1_adapter.get_restrictions = orig_get_restrictions
+        legacy_v1_adapter.meter_record = orig_meter_record
+        legacy_v1_adapter.log_event = orig_log_event
 
 
-class OpenClawFederationProofTests(unittest.TestCase):
-    def test_openclaw_reference_adapter_wraps_three_host_federation_execution(self):
-        proof = _run_openclaw_reference_adapter_federation_proof()
-        self.assertEqual(proof['runtime_id'], 'openclaw_compatible')
+class LegacyV1FederationProofTests(unittest.TestCase):
+    def test_legacy_v1_reference_adapter_wraps_three_host_federation_execution(self):
+        proof = _run_legacy_v1_reference_adapter_federation_proof()
+        self.assertEqual(proof['runtime_id'], 'legacy_v1_compatible')
         self.assertEqual(proof['adapter_kind'], 'reference_adapter')
         self.assertTrue(proof['action_gate']['allowed'])
         self.assertEqual(proof['action_gate']['stage'], 'ok')

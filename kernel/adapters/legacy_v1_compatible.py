@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Reference adapter for OpenClaw-compatible runtimes.
+Legacy Execution Parity Adapter: Used by Meridian to benchmark and audit legacy un-governed runtimes against the Meridian constitutional ledger.
 
-This module is not a claim that a live OpenClaw deployment is already wired to
-all Meridian hooks. It is a tested kernel-side adapter library showing how an
-OpenClaw-compatible runtime can satisfy the constitutional contract once the
+This module does not claim that a live legacy_v1 deployment is already wired to
+all Meridian hooks. It is a tested kernel-side adapter library showing how a
+legacy_v1-compatible runtime can satisfy the constitutional contract once the
 runtime routes its session/action boundaries through these functions.
 """
 from __future__ import annotations
@@ -30,10 +30,10 @@ SUPPORTED_HOOKS = (
 def adapter_proof():
     return {
         'type': 'reference_library',
-        'runtime_id': 'openclaw_compatible',
+        'runtime_id': 'legacy_v1_compatible',
         'implemented_hooks': list(SUPPORTED_HOOKS),
         'notes': (
-            'Kernel-side reference adapter for OpenClaw-compatible runtimes. '
+            'Legacy Execution Parity Adapter: Used by Meridian to benchmark and audit legacy un-governed runtimes against the Meridian constitutional ledger. '
             'Runtime-side wiring is still required in a real deployment.'
         ),
     }

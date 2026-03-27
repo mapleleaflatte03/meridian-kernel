@@ -5,10 +5,19 @@
       "label": "Local Kernel Runtime",
       "description": "Built-in local runtime used by the Meridian quickstart and governed workspace demo. Agents run in the same process or via subprocess on the local machine.",
       "type": "local",
-      "protocol_support": ["custom"],
+      "protocol_support": [
+        "custom"
+      ],
       "identity_mode": "string_id",
       "execution_ownership": "meridian",
-      "capability_exposure": ["research", "write", "qa", "execute", "compress", "manage"],
+      "capability_exposure": [
+        "research",
+        "write",
+        "qa",
+        "execute",
+        "compress",
+        "manage"
+      ],
       "contract_compliance": {
         "agent_identity": true,
         "action_envelope": true,
@@ -27,15 +36,25 @@
       "status": "active",
       "notes": "Reference implementation. All seven contract requirements satisfied natively. Used by kernel/workspace.py and examples/intelligence/."
     },
-    "openclaw_compatible": {
-      "id": "openclaw_compatible",
-      "label": "OpenClaw-Compatible Runtime",
-      "description": "Self-hosted multi-agent runtime with session management, channel routing, and Docker sandboxing. Agents run in bounded containers with channel-based communication.",
+    "legacy_v1_compatible": {
+      "id": "legacy_v1_compatible",
+      "label": "Legacy V1-Compatible Runtime",
+      "description": "Legacy self-hosted multi-agent runtime with session management, channel routing, and Docker sandboxing. Agents run in bounded containers with channel-based communication.",
       "type": "hosted",
-      "protocol_support": ["custom"],
+      "protocol_support": [
+        "custom"
+      ],
       "identity_mode": "string_id",
       "execution_ownership": "runtime",
-      "capability_exposure": ["research", "write", "qa", "execute", "compress", "manage", "deliver"],
+      "capability_exposure": [
+        "research",
+        "write",
+        "qa",
+        "execute",
+        "compress",
+        "manage",
+        "deliver"
+      ],
       "contract_compliance": {
         "agent_identity": true,
         "action_envelope": true,
@@ -54,21 +73,23 @@
       "status": "reference_adapter",
       "adapter_proof": {
         "type": "reference_library",
-        "module": "adapters.openclaw_compatible",
+        "module": "adapters.legacy_v1_compatible",
         "verification": [
-          "python3 kernel/tests/test_openclaw_adapter.py",
-          "python3 kernel/runtime_adapter.py check-proof --runtime_id openclaw_compatible"
+          "python3 kernel/tests/test_legacy_v1_adapter.py",
+          "python3 kernel/runtime_adapter.py check-proof --runtime_id legacy_v1_compatible"
         ],
-        "notes": "Kernel-side reference adapter library implemented and tested. A real OpenClaw deployment still needs to route runtime events through this adapter."
+        "notes": "Legacy Execution Parity Adapter: Used by Meridian to benchmark and audit legacy un-governed runtimes against the Meridian constitutional ledger. Runtime-side wiring is still required in a real deployment."
       },
-      "notes": "OpenClaw-compatible runtime now has a tested kernel-side reference adapter. Public proof exists at the adapter-library level; a live deployment still needs runtime-side wiring for end-to-end governance."
+      "notes": "legacy_v1-compatible runtime now has a tested kernel-side parity adapter. Public proof exists at the adapter-library level; a live deployment still needs runtime-side wiring for end-to-end governance."
     },
     "openfang_compatible": {
       "id": "openfang_compatible",
       "label": "OpenFang-Compatible Runtime",
       "description": "Open-source agentic runtime placeholder. Meridian can govern agents from OpenFang-compatible runtimes once an adapter satisfying the constitutional contract is implemented.",
       "type": "hosted",
-      "protocol_support": ["custom"],
+      "protocol_support": [
+        "custom"
+      ],
       "identity_mode": "string_id",
       "execution_ownership": "runtime",
       "capability_exposure": [],
@@ -95,10 +116,16 @@
       "label": "Generic MCP Runtime",
       "description": "Any agent runtime that exposes tools and context via the Model Context Protocol (MCP, EIP 2024). Agent identity maps to MCP client ID. Actions map to tool calls.",
       "type": "mcp_app",
-      "protocol_support": ["MCP"],
+      "protocol_support": [
+        "MCP"
+      ],
       "identity_mode": "mcp_client_id",
       "execution_ownership": "runtime",
-      "capability_exposure": ["tool_call", "resource_read", "prompt"],
+      "capability_exposure": [
+        "tool_call",
+        "resource_read",
+        "prompt"
+      ],
       "contract_compliance": {
         "agent_identity": true,
         "action_envelope": true,
@@ -122,10 +149,16 @@
       "label": "Generic A2A Runtime",
       "description": "Any agent-to-agent capable runtime implementing the A2A interoperability protocol. Agent identity maps to A2A agent card. Inter-agent calls map to the action envelope.",
       "type": "a2a_agent",
-      "protocol_support": ["A2A"],
+      "protocol_support": [
+        "A2A"
+      ],
       "identity_mode": "a2a_agent_card",
       "execution_ownership": "runtime",
-      "capability_exposure": ["task", "stream", "push_notify"],
+      "capability_exposure": [
+        "task",
+        "stream",
+        "push_notify"
+      ],
       "contract_compliance": {
         "agent_identity": true,
         "action_envelope": null,
@@ -147,9 +180,13 @@
     "meridian_loom": {
       "id": "meridian_loom",
       "label": "Meridian Loom",
-      "description": "Planned Meridian-native execution runtime in Rust. Designed to implement all 7 contract hooks natively without adapter translation. Replaces OpenClaw through a phased shadow-mode migration.",
+      "description": "Planned Meridian-native execution runtime in Rust. Designed to implement all 7 contract hooks natively without adapter translation. Replaces legacy_v1 through a phased shadow-mode migration.",
       "type": "hosted",
-      "protocol_support": ["custom", "MCP", "A2A"],
+      "protocol_support": [
+        "custom",
+        "MCP",
+        "A2A"
+      ],
       "identity_mode": "string_id",
       "execution_ownership": "meridian",
       "capability_exposure": [],
@@ -169,7 +206,7 @@
       },
       "adapter_available": false,
       "status": "planned",
-      "notes": "Experimental public scaffold exists for CLI/setup rehearsal and 7-surface runtime rehearsal coverage. `loom action execute` now materializes a fail-closed runtime receipt, a kernel-owned runtime audit artifact, a parity stream, and a governed local worker dispatch on allow-path. `loom action enqueue` plus `loom supervisor run` now exercise the same decision path through a local queue supervisor, `loom job list` / `loom job inspect` now surface runtime-owned persisted job state, `loom supervisor watch` adds bounded heartbeat/status artifacts for that same local loop, and `loom supervisor daemon start/status/stop` add a local daemon-lifecycle rehearsal with runtime_state tracking and stop-request handling. `loom service start/status/submit/stop` now provide a local runtime-service shell with service events, ingress receipts, truthful file-backed ingress fallback when the Unix socket boundary is unavailable, and an optional tokenized local HTTP control plane for `GET /status`, `POST /submit`, and `POST /stop` when the host permits binding. `loom service import-commitments` can now import sender-side `execution_request` delivery refs from a commitments snapshot into the local Loom queue. The parity surface can also capture per-action live OpenClaw probe artifacts and an OpenClaw probe stream on the founder host. Sanction controls, approval hook, and budget gate still originate from read-only kernel reference gates plus a local sanction preview; there is still no hosted governed worker runtime or proven hook compliance. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Directional targets: <50MB memory, <500ms cold start, native 7/7 contract compliance (all unproven). See docs/LOOM_SPEC.md for spec, docs/loom/ for productization strategy."
+      "notes": "Experimental public scaffold exists for CLI/setup rehearsal and 7-surface runtime rehearsal coverage. `loom action execute` now materializes a fail-closed runtime receipt, a kernel-owned runtime audit artifact, a parity stream, and a governed local worker dispatch on allow-path. `loom action enqueue` plus `loom supervisor run` now exercise the same decision path through a local queue supervisor, `loom job list` / `loom job inspect` now surface runtime-owned persisted job state, `loom supervisor watch` adds bounded heartbeat/status artifacts for that same local loop, and `loom supervisor daemon start/status/stop` add a local daemon-lifecycle rehearsal with runtime_state tracking and stop-request handling. `loom service start/status/submit/stop` now provide a local runtime-service shell with service events, ingress receipts, truthful file-backed ingress fallback when the Unix socket boundary is unavailable, and an optional tokenized local HTTP control plane for `GET /status`, `POST /submit`, and `POST /stop` when the host permits binding. `loom service import-commitments` can now import sender-side `execution_request` delivery refs from a commitments snapshot into the local Loom queue. The parity surface can also capture per-action live legacy_v1 probe artifacts and a legacy_v1 probe stream on the founder host. Sanction controls, approval hook, and budget gate still originate from read-only kernel reference gates plus a local sanction preview; there is still no hosted governed worker runtime or proven hook compliance. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Directional targets: <50MB memory, <500ms cold start, native 7/7 contract compliance (all unproven). See docs/LOOM_SPEC.md for spec, docs/loom/ for productization strategy."
     }
   },
   "contract_requirements": {

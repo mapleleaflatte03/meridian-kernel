@@ -6,11 +6,11 @@ import unittest
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, ROOT)
 
-from adapters import openclaw_compatible as adapter
+from adapters import legacy_v1_compatible as adapter
 import runtime_adapter
 
 
-class OpenClawAdapterTests(unittest.TestCase):
+class LegacyV1AdapterTests(unittest.TestCase):
     def setUp(self):
         self.orig_check_authority = adapter.check_authority
         self.orig_check_budget = adapter.check_budget
@@ -28,17 +28,17 @@ class OpenClawAdapterTests(unittest.TestCase):
     def test_adapter_proof_reports_reference_library(self):
         proof = adapter.adapter_proof()
         self.assertEqual(proof['type'], 'reference_library')
-        self.assertEqual(proof['runtime_id'], 'openclaw_compatible')
+        self.assertEqual(proof['runtime_id'], 'legacy_v1_compatible')
         self.assertEqual(set(proof['implemented_hooks']), set(adapter.SUPPORTED_HOOKS))
 
     def test_runtime_registry_reports_reference_adapter(self):
-        proof = runtime_adapter.get_adapter_proof('openclaw_compatible')
+        proof = runtime_adapter.get_adapter_proof('legacy_v1_compatible')
         self.assertEqual(proof['status'], 'available')
-        self.assertEqual(proof['module'], 'adapters.openclaw_compatible')
+        self.assertEqual(proof['module'], 'adapters.legacy_v1_compatible')
         self.assertEqual(proof['assessment_basis'], 'reference_adapter_library')
         self.assertEqual(proof['type'], 'reference_library')
 
-        contract = runtime_adapter.check_contract('openclaw_compatible')
+        contract = runtime_adapter.check_contract('legacy_v1_compatible')
         self.assertEqual(contract['status'], 'reference_adapter')
         self.assertEqual(contract['score'], 7)
         self.assertEqual(contract['total'], 7)

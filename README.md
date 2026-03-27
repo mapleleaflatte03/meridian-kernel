@@ -26,6 +26,10 @@
 
 # Meridian Constitutional Kernel
 
+## 🛡️ The PoGE Protocol (Proof of Governed Execution)
+
+Meridian enforces cryptographic audit trails for Wasm host-calls and settles governed execution evidence on EVM, so execution claims can be verified instead of trusted. The full technical draft RFC is available in the Meridian Loom docs at [`docs/MERIDIAN_PoGE_PROTOCOL.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/MERIDIAN_PoGE_PROTOCOL.md).
+
 **Five primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**
 
 Pure Python. No external dependencies. Apache-2.0.

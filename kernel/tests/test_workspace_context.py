@@ -4387,5 +4387,181 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(audit_events[1]['args'][2], 'federation_peer_auto_suspended')
 
 
+    def test_workspace_do_get_delegates_federation_service(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/federation'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+        delegated = {}
+
+        def fake_handle_get(_handler, _path, **kwargs):
+            delegated['org_id'] = kwargs['org_id']
+            _handler._json({'delegated': 'federation_service', 'org_id': kwargs['org_id']})
+            return {'delegated': True}
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}),              mock.patch.object(self.workspace.federation_service, 'handle_get', side_effect=fake_handle_get),              mock.patch.object(self.workspace, '_federation_snapshot', side_effect=self.fail):
+            handler.do_GET()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['delegated'], 'federation_service')
+        self.assertEqual(delegated['org_id'], 'org_a')
+
+    def test_workspace_do_get_delegates_execution_job_service(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/federation/execution-jobs'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        def fake_handle_get(_handler, _path, **kwargs):
+            _handler._json({'delegated': 'execution_job_service', 'org_id': kwargs['org_id']})
+            return {'delegated': True}
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner'}),              mock.patch.object(self.workspace.execution_job_service, 'handle_get', side_effect=fake_handle_get),              mock.patch.object(self.workspace, '_federation_execution_jobs_snapshot', side_effect=self.fail):
+            handler.do_GET()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['delegated'], 'execution_job_service')
+
+    def test_workspace_do_post_delegates_treasury_service(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/payouts/execute'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._read_body = lambda: {'proposal_id': 'pay_demo', 'warrant_id': 'war_demo'}
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        def fake_handle_post(_handler, _path, **kwargs):
+            _handler._json({'delegated': 'treasury_service', 'actor_id': kwargs['actor_id']})
+            return {'delegated': True}
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'owner', 'actor_id': 'user_owner'}),              mock.patch.object(self.workspace, '_enforce_mutation_authorization', return_value='owner'),              mock.patch.object(self.workspace.treasury_service, 'handle_post', side_effect=fake_handle_post),              mock.patch.object(self.workspace, 'execute_payout_proposal', side_effect=self.fail):
+            handler.do_POST()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['delegated'], 'treasury_service')
+        self.assertEqual(captured['data']['actor_id'], 'user_owner')
+
+    def test_workspace_do_post_delegates_court_service(self):
+        class FakeContext:
+            def __init__(self):
+                self.org_id = 'org_a'
+                self.org = {'id': 'org_a', 'name': 'Org A'}
+                self.context_source = 'configured_org'
+
+            def to_dict(self):
+                return {
+                    'org_id': self.org_id,
+                    'org_name': self.org.get('name', ''),
+                    'boundary_name': 'workspace',
+                    'identity_model': 'session',
+                    'routing_scope': 'institution_bound',
+                    'host_id': 'host_alpha',
+                    'host_role': 'institution_host',
+                    'admission_id': '',
+                    'federation_mode': 'federated_runtime_core',
+                    'context_source': self.context_source,
+                    'founded_at': '',
+                }
+
+        captured = {}
+        handler = object.__new__(self.workspace.WorkspaceHandler)
+        handler.path = '/api/court/file'
+        handler.headers = _Headers()
+        handler._require_auth = lambda _path: True
+        handler._session_claims_from_request = lambda expected_org_id=None: None
+        handler._read_body = lambda: {
+            'agent': 'agent_atlas_a',
+            'type': 'policy_violation',
+            'severity': 'moderate',
+            'evidence': 'demo',
+        }
+        handler._json = lambda data, status=200: captured.update({'status': status, 'data': data})
+        handler._html = lambda html: captured.update({'status': 200, 'html': html})
+
+        def fake_handle_post(_handler, _path, **kwargs):
+            _handler._json({'delegated': 'court_service', 'org_id': kwargs['org_id']})
+            return {'delegated': True}
+
+        with mock.patch.object(self.workspace, '_resolve_workspace_context', return_value=FakeContext()),              mock.patch.object(self.workspace, '_resolve_auth_context', return_value={'enabled': True, 'role': 'admin', 'actor_id': 'user_admin'}),              mock.patch.object(self.workspace, '_enforce_mutation_authorization', return_value='admin'),              mock.patch.object(self.workspace.court_service, 'handle_post', side_effect=fake_handle_post),              mock.patch.object(self.workspace, 'file_violation', side_effect=self.fail):
+            handler.do_POST()
+
+        self.assertEqual(captured['status'], 200)
+        self.assertEqual(captured['data']['delegated'], 'court_service')
+
+
 if __name__ == '__main__':
     unittest.main()

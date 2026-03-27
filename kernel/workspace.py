@@ -326,6 +326,12 @@ from runtime_host import (
     set_admission_state,
 )
 
+
+import court_service
+import execution_job_service
+import federation_service
+import treasury_service
+
 # Process-level session authority (tokens do not survive restarts unless
 # MERIDIAN_SESSION_SECRET is set in the environment).
 _session_revocation_file = (
@@ -334,7 +340,208 @@ _session_revocation_file = (
 if not _session_revocation_file and os.environ.get('MERIDIAN_SESSION_SECRET', '').strip():
     # Persistent signing key → revocations must also persist.
     _session_revocation_file = os.path.join(PLATFORM_DIR, '.session_revocations')
+
 _session_authority = SessionAuthority(revocation_file=_session_revocation_file)
+
+
+def _treasury_service_deps():
+    return SimpleNamespace(
+        treasury_snapshot=treasury_snapshot,
+        load_wallets=load_wallets,
+        load_treasury_accounts=load_treasury_accounts,
+        load_maintainers=load_maintainers,
+        load_contributors=load_contributors,
+        load_payout_proposals=load_payout_proposals,
+        settlement_adapter_summary=settlement_adapter_summary,
+        list_settlement_adapters=list_settlement_adapters,
+        _runtime_host_state=_runtime_host_state,
+        _settlement_adapter_readiness_snapshot=_settlement_adapter_readiness_snapshot,
+        load_funding_sources=load_funding_sources,
+        _payout_plan_preview_queue_snapshot=_payout_plan_preview_queue_snapshot,
+        _payout_plan_preview_queue_inspection=_payout_plan_preview_queue_inspection,
+        payout_plan_approval_candidate_queue_snapshot=payout_plan_approval_candidate_queue_snapshot,
+        payout_execution_queue_snapshot=payout_execution_queue_snapshot,
+        inspect_payout_plan_approval_candidate_queue=inspect_payout_plan_approval_candidate_queue,
+        _payout_snapshot=_payout_snapshot,
+        contribute_owner_capital=contribute_owner_capital,
+        set_reserve_floor_policy=set_reserve_floor_policy,
+        preflight_settlement_adapter=preflight_settlement_adapter,
+        log_event=log_event,
+        create_payout_proposal=create_payout_proposal,
+        payout_proposal_summary=payout_proposal_summary,
+        submit_payout_proposal=submit_payout_proposal,
+        review_payout_proposal=review_payout_proposal,
+        approve_payout_proposal=approve_payout_proposal,
+        open_payout_dispute_window=open_payout_dispute_window,
+        reject_payout_proposal=reject_payout_proposal,
+        cancel_payout_proposal=cancel_payout_proposal,
+        promote_payout_plan_preview_to_approval_candidate=promote_payout_plan_preview_to_approval_candidate,
+        get_payout_proposal=get_payout_proposal,
+        _maybe_block_commitment_settlement=_maybe_block_commitment_settlement,
+        validate_warrant_for_execution=validate_warrant_for_execution,
+        execute_payout_proposal=execute_payout_proposal,
+        mark_warrant_executed=mark_warrant_executed,
+    )
+
+
+def _execution_job_service_deps():
+    return SimpleNamespace(
+        _federation_execution_jobs_snapshot=_federation_execution_jobs_snapshot,
+        get_execution_job=get_execution_job,
+        get_execution_job_by_local_warrant=get_execution_job_by_local_warrant,
+        _complete_federated_execution_job=_complete_federated_execution_job,
+        FederationUnavailable=FederationUnavailable,
+        FederationDeliveryError=FederationDeliveryError,
+        _federation_claims_dict=_federation_claims_dict,
+    )
+
+
+def _federation_service_deps():
+    return SimpleNamespace(
+        _runtime_host_state=_runtime_host_state,
+        _federation_snapshot=_federation_snapshot,
+        _federation_inbox_snapshot=_federation_inbox_snapshot,
+        _handoff_preview_queue_snapshot=_handoff_preview_queue_snapshot,
+        _handoff_dispatch_queue_snapshot=_handoff_dispatch_queue_snapshot,
+        _federation_manifest=_federation_manifest,
+        _witness_archive_snapshot=_witness_archive_snapshot,
+        _admission_snapshot=_admission_snapshot,
+        _control_plane_notice_validation_peer_registry=_control_plane_notice_validation_peer_registry,
+        _accept_federation_request=_accept_federation_request,
+        _federation_receipt=_federation_receipt,
+        _federation_inbox_entry=_federation_inbox_entry,
+        _process_received_federation_message=_process_received_federation_message,
+        summarize_inbox_entries=summarize_inbox_entries,
+        _deliver_federation_envelope=_deliver_federation_envelope,
+        _acknowledge_and_dispatch_remote_handoff_preview=_acknowledge_and_dispatch_remote_handoff_preview,
+        _run_federation_dispatch=_run_federation_dispatch,
+        _mutate_federation_peer=_mutate_federation_peer,
+        _mutate_admission=_mutate_admission,
+        _federation_authority=_federation_authority,
+        _federation_claims_dict=_federation_claims_dict,
+        archive_witness_observation=archive_witness_observation,
+        WITNESS_ARCHIVE_FILE=WITNESS_ARCHIVE_FILE,
+        log_event=log_event,
+        FederationUnavailable=FederationUnavailable,
+        FederationDeliveryError=FederationDeliveryError,
+        FederationValidationError=FederationValidationError,
+        FederationReplayError=FederationReplayError,
+    )
+
+
+def _court_service_deps():
+    return SimpleNamespace(
+        _load_records=_load_records,
+        list_warrants=list_warrants,
+        _warrant_summary=_warrant_summary,
+        _commitment_snapshot=_commitment_snapshot,
+        _case_snapshot=_case_snapshot,
+        file_violation=file_violation,
+        resolve_violation=resolve_violation,
+        file_appeal=file_appeal,
+        decide_appeal=decide_appeal,
+        auto_review=auto_review,
+        remediate=remediate,
+        issue_warrant=issue_warrant,
+        review_warrant=review_warrant,
+        _sync_execution_job_for_warrant_review=_sync_execution_job_for_warrant_review,
+        _deliver_execution_job_court_notice=_deliver_execution_job_court_notice,
+        propose_commitment=propose_commitment,
+        _commitment_summary=_commitment_summary,
+        _deliver_federation_envelope=_deliver_federation_envelope,
+        _federation_claims_dict=_federation_claims_dict,
+        get_payout_proposal=get_payout_proposal,
+        _maybe_block_commitment_settlement=_maybe_block_commitment_settlement,
+        record_settlement_ref=record_settlement_ref,
+        accept_commitment=accept_commitment,
+        reject_commitment=reject_commitment,
+        breach_commitment=breach_commitment,
+        settle_commitment=settle_commitment,
+        _maybe_open_case_for_commitment_breach=_maybe_open_case_for_commitment_breach,
+        _maybe_stay_warrant_for_case=_maybe_stay_warrant_for_case,
+        open_case=open_case,
+        _case_notice_delivery_context=_case_notice_delivery_context,
+        _maybe_suspend_peer_for_case=_maybe_suspend_peer_for_case,
+        _deliver_case_notice=_deliver_case_notice,
+        get_case=get_case,
+        stay_case=stay_case,
+        resolve_case=resolve_case,
+        _maybe_restore_peer_for_case=_maybe_restore_peer_for_case,
+        log_event=log_event,
+        FederationUnavailable=FederationUnavailable,
+        FederationDeliveryError=FederationDeliveryError,
+        FederationValidationError=FederationValidationError,
+    )
+
+
+_WORKSPACE_GET_SERVICES = (
+    (treasury_service, _treasury_service_deps),
+    (federation_service, _federation_service_deps),
+    (court_service, _court_service_deps),
+    (execution_job_service, _execution_job_service_deps),
+)
+
+_WORKSPACE_INGRESS_POST_SERVICES = (
+    (federation_service, _federation_service_deps),
+)
+
+_WORKSPACE_POST_SERVICES = (
+    (treasury_service, _treasury_service_deps),
+    (federation_service, _federation_service_deps),
+    (court_service, _court_service_deps),
+    (execution_job_service, _execution_job_service_deps),
+)
+
+
+def _dispatch_workspace_get_service(handler, path, *, org_id, inst_ctx=None, request_context=None, auth_context=None):
+    for service_module, deps_factory in _WORKSPACE_GET_SERVICES:
+        result = service_module.handle_get(
+            handler,
+            path,
+            org_id=org_id,
+            inst_ctx=inst_ctx,
+            request_context=request_context,
+            auth_context=auth_context,
+            deps=deps_factory(),
+        )
+        if result is not service_module.NOT_HANDLED:
+            return result
+    return None
+
+
+def _dispatch_workspace_ingress_post_service(handler, path, *, body, inst_ctx):
+    for service_module, deps_factory in _WORKSPACE_INGRESS_POST_SERVICES:
+        handle = getattr(service_module, 'handle_ingress_post', None)
+        if handle is None:
+            continue
+        result = handle(
+            handler,
+            path,
+            body=body,
+            inst_ctx=inst_ctx,
+            deps=deps_factory(),
+        )
+        if result is not service_module.NOT_HANDLED:
+            return result
+    return None
+
+
+def _dispatch_workspace_post_service(handler, path, *, body, org_id, actor_id, session_id, auth_context, inst_ctx=None):
+    for service_module, deps_factory in _WORKSPACE_POST_SERVICES:
+        result = service_module.handle_post(
+            handler,
+            path,
+            body=body,
+            org_id=org_id,
+            actor_id=actor_id,
+            session_id=session_id,
+            auth_context=auth_context,
+            inst_ctx=inst_ctx,
+            deps=deps_factory(),
+        )
+        if result is not service_module.NOT_HANDLED:
+            return result
+    return None
 
 # Optional: CI vertical import from the example vertical if present
 _ci_vertical_available = False
@@ -6083,6 +6290,17 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         except ValueError as e:
             return self._json({'error': str(e)}, 400)
 
+        service_response = _dispatch_workspace_get_service(
+            self,
+            path,
+            org_id=org_id,
+            inst_ctx=inst_ctx,
+            request_context=request_context,
+            auth_context=auth_context,
+        )
+        if service_response is not None:
+            return service_response
+
         if path == '/' or path == '/workspace':
             return self._html(DASHBOARD_HTML)
         elif path == '/api/status':
@@ -6302,6 +6520,22 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == '/api/federation/receive':
+            try:
+                inst_ctx = _resolve_workspace_context()
+                body = self._read_body()
+            except RuntimeError as e:
+                return self._json({'error': str(e)}, 503)
+            except ValueError as e:
+                return self._json({'error': str(e)}, 400)
+            service_response = _dispatch_workspace_ingress_post_service(
+                self,
+                path,
+                body=body,
+                inst_ctx=inst_ctx,
+            )
+            if service_response is not None:
+                return service_response
         if path == '/api/federation/receive':
             try:
                 inst_ctx = _resolve_workspace_context()
@@ -6526,6 +6760,19 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
 
         by = auth_context.get('actor_id') or 'owner'  # server-enforced — never trust client-supplied actor identity
         _sid = auth_context.get('session_id')  # session traceability for audit
+
+        service_response = _dispatch_workspace_post_service(
+            self,
+            path,
+            body=body,
+            org_id=org_id,
+            actor_id=by,
+            session_id=_sid,
+            auth_context=auth_context,
+            inst_ctx=inst_ctx,
+        )
+        if service_response is not None:
+            return service_response
 
         try:
             if path == '/api/authority/kill-switch':

@@ -30,6 +30,14 @@
 
 Pure Python. No external dependencies. Apache-2.0.
 
+## 5-Minute Golden Path
+
+- Bootstrap: `python3 quickstart.py`
+- Inspect Agents: open the workspace or query the local agent surfaces
+- Issue Warrant: create a warrant proposal tied to a governed action
+- Execute: run the action through a runtime that consumes the kernel contract
+- Audit: inspect the emitted proof, treasury, and runtime audit trails
+
 ## Three-Part Architecture
 
 Meridian is intentionally split into three layers so each part can evolve without blurring truth boundaries.

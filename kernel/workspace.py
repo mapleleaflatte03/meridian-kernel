@@ -6162,43 +6162,44 @@ setInterval(refresh, 15000);
 
 class WorkspaceHandler(BaseHTTPRequestHandler):
 
-    def _json(self, data, status=200):
+    def _send_bytes(self, payload, *, status=200, content_type='application/json'):
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', content_type)
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', str(len(payload)))
+        self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        self.wfile.write(payload)
+        self.close_connection = True
+
+    def _json(self, data, status=200):
+        self._send_bytes(json.dumps(data).encode('utf-8'), status=status, content_type='application/json')
 
     def _html(self, html):
-        self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(html.encode())
+        self._send_bytes(html.encode('utf-8'), status=200, content_type='text/html; charset=utf-8')
 
     def _unauthorized(self, is_api=True):
+        payload = (json.dumps({'error': 'Unauthorized'}).encode('utf-8') if is_api else b'Unauthorized')
         self.send_response(401)
         self.send_header('WWW-Authenticate', 'Basic realm="Meridian Workspace"')
-        if is_api:
-            self.send_header('Content-Type', 'application/json')
-        else:
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Type', 'application/json' if is_api else 'text/plain; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', str(len(payload)))
+        self.send_header('Connection', 'close')
         self.end_headers()
-        if is_api:
-            self.wfile.write(json.dumps({'error': 'Unauthorized'}).encode())
-        else:
-            self.wfile.write(b'Unauthorized')
+        self.wfile.write(payload)
+        self.close_connection = True
 
     def _service_unavailable(self, message, is_api=True):
+        payload = (json.dumps({'error': message}).encode('utf-8') if is_api else message.encode('utf-8'))
         self.send_response(503)
-        if is_api:
-            self.send_header('Content-Type', 'application/json')
-        else:
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Type', 'application/json' if is_api else 'text/plain; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', str(len(payload)))
+        self.send_header('Connection', 'close')
         self.end_headers()
-        if is_api:
-            self.wfile.write(json.dumps({'error': message}).encode())
-        else:
-            self.wfile.write(message.encode())
+        self.wfile.write(payload)
+        self.close_connection = True
 
     def _is_authorized(self):
         header = self.headers.get('Authorization', '')

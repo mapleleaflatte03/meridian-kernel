@@ -2,6 +2,7 @@
 import base64
 import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -298,6 +299,15 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
             'settlement_adapters': list(settlement_adapters or []),
         },
     )
+
+    capsule_spec = importlib.util.spec_from_file_location(
+        f'kernel_capsule_seed_{host_id}',
+        os.path.join(kernel_dst, 'capsule.py'),
+    )
+    capsule_mod = importlib.util.module_from_spec(capsule_spec)
+    capsule_spec.loader.exec_module(capsule_mod)
+    capsule_mod.init_capsule(org_id)
+
     _write_json(
         os.path.join(kernel_dst, 'institution_admissions.json'),
         {

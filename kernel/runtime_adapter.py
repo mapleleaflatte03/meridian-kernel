@@ -262,6 +262,13 @@ def register_runtime(runtime_id, label, runtime_type, protocols, identity_mode,
         'integration': {'treasury': 'none', 'audit': 'none', 'court': 'none'},
         'adapter_available': False,
         'status': 'planned',
+        'transport_contract': {
+            'supported_protocols': [p.strip().lower() for p in protocols.split(',') if p.strip()],
+            'auth_shapes': [],
+            'remote_audit_required': False,
+            'external_cost_attribution_required': False,
+            'admission_policy': 'planned',
+        },
         'notes': notes,
         'registered_at': _now(),
     }
@@ -292,6 +299,19 @@ def get_compliant_runtimes():
     return results
 
 
+# -- Admission helpers --------------------------------------------------------
+
+def get_admission(runtime_id):
+    from admission_policy import check_admission
+
+    return check_admission(runtime_id)
+
+
+def check_all_admissions():
+    data = load_runtimes()
+    return {rid: get_admission(rid) for rid in data.get('runtimes', {})}
+
+
 # -- CLI ----------------------------------------------------------------------
 
 def main():
@@ -311,6 +331,11 @@ def main():
     cp.add_argument('--runtime_id', required=True)
 
     sub.add_parser('check-all')
+
+    ca = sub.add_parser('check-admission')
+    ca.add_argument('--runtime_id', required=True)
+
+    sub.add_parser('check-all-admission')
 
     reg = sub.add_parser('register')
     reg.add_argument('--id', required=True, dest='runtime_id')
@@ -332,19 +357,21 @@ def main():
             return
         print(f'\n=== Runtime Registry ({len(runtimes)} runtimes) ===')
         for rid, rt in runtimes.items():
-            compliance = rt.get('contract_compliance', {})
-            score = sum(1 for v in compliance.values() if v is True)
-            total = len(compliance)
+            contract = check_contract(rid)
+            admission = get_admission(rid)
             print(f"  {rid}: {rt.get('label')} | type={rt.get('type')} | "
-                  f"contract={score}/{total} | status={rt.get('status')} | "
-                  f"adapter={'YES' if rt.get('adapter_available') else 'no'}")
+                  f"contract={contract.get('score', 0)}/{contract.get('total', 0)} | "
+                  f"admission={admission.get('policy', 'unknown')}:{'yes' if admission.get('admitted') else 'no'} | "
+                  f"status={rt.get('status')} | adapter={'YES' if rt.get('adapter_available') else 'no'}")
 
     elif args.command == 'show':
         rt = get_runtime(args.runtime_id)
         if not rt:
             print(f'Runtime {args.runtime_id!r} not found.')
             sys.exit(1)
-        print(json.dumps(rt, indent=2))
+        payload = dict(rt)
+        payload['admission'] = get_admission(args.runtime_id)
+        print(json.dumps(payload, indent=2))
 
     elif args.command == 'check-contract':
         result = check_contract(args.runtime_id)
@@ -372,6 +399,17 @@ def main():
         result = get_adapter_proof(args.runtime_id)
         print(json.dumps(result, indent=2))
         sys.exit(0 if result.get('available') else 1)
+
+    elif args.command == 'check-admission':
+        result = get_admission(args.runtime_id)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result.get('admitted') else 1)
+
+    elif args.command == 'check-all-admission':
+        results = check_all_admissions()
+        print(json.dumps(results, indent=2))
+        has_failures = any(not result.get('admitted') and result.get('status') == 'active' for result in results.values())
+        sys.exit(1 if has_failures else 0)
 
     elif args.command == 'check-all':
         results = check_all_contracts()

@@ -34,6 +34,13 @@
       },
       "adapter_available": true,
       "status": "active",
+      "transport_contract": {
+        "supported_protocols": ["custom"],
+        "auth_shapes": ["none"],
+        "remote_audit_required": false,
+        "external_cost_attribution_required": false,
+        "admission_policy": "kernel_local"
+      },
       "notes": "Reference implementation. All seven contract requirements satisfied natively. Used by kernel/workspace.py and examples/intelligence/."
     },
     "loom_native": {
@@ -72,6 +79,13 @@
       },
       "adapter_available": false,
       "status": "active",
+      "transport_contract": {
+        "supported_protocols": ["openai_rest", "codex_session", "ollama_local", "mcp", "custom_http"],
+        "auth_shapes": ["none", "bearer_token", "oauth_session", "static_header"],
+        "remote_audit_required": true,
+        "external_cost_attribution_required": true,
+        "admission_policy": "loom_first"
+      },
       "notes": "Primary Meridian runtime. Loom provides native 7/7 contract compliance through governed capability dispatch, session provenance, and PoGE receipts."
     },
     "openfang_compatible": {
@@ -203,6 +217,13 @@
       },
       "adapter_available": true,
       "status": "active",
+      "transport_contract": {
+        "supported_protocols": ["custom"],
+        "auth_shapes": ["none"],
+        "remote_audit_required": true,
+        "external_cost_attribution_required": true,
+        "admission_policy": "adapter_bridge"
+      },
       "adapter_proof": {
         "type": "reference_library",
         "module": "adapters.legacy_v1_compatible",

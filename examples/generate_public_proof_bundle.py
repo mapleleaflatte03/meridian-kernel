@@ -14,8 +14,8 @@ ROOT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file_
 TESTS_DIR = os.path.join(ROOT_DIR, 'kernel', 'tests')
 sys.path.insert(0, TESTS_DIR)
 
-from test_openclaw_federation_proof import (  # noqa: E402
-    _run_openclaw_reference_adapter_federation_proof,
+from test_legacy_v1_federation_proof import (  # noqa: E402
+    _run_legacy_reference_adapter_federation_proof,
 )
 from test_three_host_federation_proof import _run_three_host_federation_proof  # noqa: E402
 
@@ -197,7 +197,7 @@ def _latest_local_runtime_receipt():
     }
 
 
-def _summarize_openclaw_reference_proof(proof):
+def _summarize_legacy_reference_proof(proof):
     return {
         'runtime_id': proof.get('runtime_id'),
         'adapter_kind': proof.get('adapter_kind'),
@@ -268,15 +268,15 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
             'reason': str(exc),
         }
     try:
-        openclaw = {
+        legacy_proof = {
             'passed': True,
             'skipped': False,
-            'summary': _summarize_openclaw_reference_proof(
-                _run_openclaw_reference_adapter_federation_proof()
+            'summary': _summarize_legacy_reference_proof(
+                _run_legacy_reference_adapter_federation_proof()
             ),
         }
     except unittest.SkipTest as exc:
-        openclaw = {
+        legacy_proof = {
             'passed': False,
             'skipped': True,
             'reason': str(exc),
@@ -286,7 +286,7 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
         'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         'reference_scope': 'oss_kernel_reference',
         'three_host_federation': three_host,
-        'openclaw_reference_adapter_federation': openclaw,
+        'legacy_reference_adapter_federation': legacy_proof,
         'live_host_receipt': (
             _fetch_live_manifest(live_manifest_url)
             if live_manifest_url else
@@ -313,7 +313,7 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
         'local_loom_runtime_receipt': _latest_local_runtime_receipt(),
         'not_live_proven': [
             'live multi-host federation between independent deployments',
-            'live OpenClaw end-to-end hosted wiring',
+            'live end-to-end hosted runtime wiring',
             'live non-internal settlement execution',
         ],
     }
@@ -387,14 +387,14 @@ def _render_live_receipt_summary(item, title, identity_path, detail_path):
 
 def render_bundle_human(bundle):
     three_host = bundle.get('three_host_federation', {}) or {}
-    openclaw = bundle.get('openclaw_reference_adapter_federation', {}) or {}
+    legacy_proof = bundle.get('legacy_reference_adapter_federation', {}) or {}
     live_host = bundle.get('live_host_receipt', {}) or {}
     live_runtime = bundle.get('live_runtime_receipt', {}) or {}
     local_runtime = bundle.get('local_loom_runtime_receipt', {}) or {}
     not_live_proven = bundle.get('not_live_proven', []) or []
 
     three_host_summary = three_host.get('summary', {}) or {}
-    openclaw_summary = openclaw.get('summary', {}) or {}
+    legacy_summary = legacy_proof.get('summary', {}) or {}
 
     lines = [
         'Meridian Kernel // PUBLIC PROOF BUNDLE',
@@ -421,21 +421,21 @@ def render_bundle_human(bundle):
     else:
         lines.append(f"  reason:                            {three_host.get('reason', 'not available')}")
 
-    lines.append(f"openclaw_reference_adapter:          {_proof_status_label(openclaw)}")
-    if openclaw.get('passed'):
-        delivery = openclaw_summary.get('delivery', {}) or {}
-        audit = openclaw_summary.get('audit_event', {}) or {}
+    lines.append(f"legacy_reference_adapter:            {_proof_status_label(legacy_proof)}")
+    if legacy_proof.get('passed'):
+        delivery = legacy_summary.get('delivery', {}) or {}
+        audit = legacy_summary.get('audit_event', {}) or {}
         lines.extend(
             [
-                f"  adapter_kind:                      {openclaw_summary.get('adapter_kind', '')}",
-                f"  scope:                             {openclaw_summary.get('scope', '')}",
-                f"  action_gate_stage:                 {(openclaw_summary.get('action_gate') or {}).get('stage', '')}",
+                f"  adapter_kind:                      {legacy_summary.get('adapter_kind', '')}",
+                f"  scope:                             {legacy_summary.get('scope', '')}",
+                f"  action_gate_stage:                 {(legacy_summary.get('action_gate') or {}).get('stage', '')}",
                 f"  execution_message_type:            {delivery.get('execution_message_type', '')}",
                 f"  audit_outcome:                     {audit.get('outcome', '')}",
             ]
         )
     else:
-        lines.append(f"  reason:                            {openclaw.get('reason', 'not available')}")
+        lines.append(f"  reason:                            {legacy_proof.get('reason', 'not available')}")
 
     lines.extend(
         [

@@ -72,11 +72,11 @@ deliberately narrow:
   identity model, service registry, admission state, and federation gateway
   state as machine-readable state
 - one built-in runtime path (`local_kernel`) is the real reference adapter
-- one external runtime family (`openclaw_compatible`) now has a tested
+- one external runtime family (`loom_native`) now has a tested
   kernel-side reference adapter library
-- one tested OpenClaw-compatible federation seam now exists in OSS tests:
+- one tested legacy-compatible federation seam now exists in OSS tests:
   those kernel-side adapter hooks can wrap a federated `execution_request`
-  story end-to-end without claiming a live OpenClaw deployment is already wired
+  story end-to-end
 - one host-service federation primitive now exists as a kernel reference:
   HMAC-signed envelopes, peer registry, and replay protection
 - one receiver-side federation inbox primitive now exists as a kernel reference:
@@ -109,7 +109,7 @@ deliberately narrow:
   live host receipt from `GET /api/federation/manifest`
 
 What is not yet broadly proven in public code:
-- live end-to-end OpenClaw-compatible deployment wiring
+- live end-to-end hosted deployment wiring
 - general MCP middleware enforcement
 - general A2A adapter enforcement
 - live multi-institution routing inside one deployed service boundary
@@ -304,12 +304,12 @@ path; it does not yet claim general multi-org request routing.
 ├────────────────────────────────────────────────────────┤
 │  Runtime Adapter Layer                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │ Local Kernel │  │  OpenClaw-   │  │ MCP Generic │ │
-│  │ (built-in)   │  │  compatible  │  │  (planned)  │ │
+│  │ Local Kernel │  │ Loom Native  │  │ MCP Generic │ │
+│  │ (built-in)   │  │   (active)   │  │  (planned)  │ │
 │  └──────────────┘  └──────────────┘  └─────────────┘ │
 │  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐ │
 │  │ A2A Generic  │  │ Meridian     │  │   Custom /  │ │
-│  │  (planned)   │  │ Loom (spec)  │  │   Your Own  │ │
+│  │  (planned)   │  │ Loom (live)  │  │   Your Own  │ │
 │  └──────────────┘  └──────────────┘  └─────────────┘ │
 └────────────────────────────────────────────────────────┘
 ```
@@ -411,16 +411,16 @@ Currently registered runtimes:
 | Runtime | Type | Contract Status |
 |---------|------|----------------|
 | `local_kernel` | local | Compliant (7/7) |
-| `openclaw_compatible` | hosted | Reference adapter (7/7 via tested kernel-side library) |
-| `meridian_loom` | hosted | Planned (0/7, spec + public experimental scaffold with 7-surface rehearsal, fail-closed `loom action execute`, governed local worker dispatch on allow-path, `action enqueue` + `supervisor run` queue rehearsal, runtime-owned `job list` / `job inspect` surfaces, bounded `supervisor watch` heartbeat/status artifacts, local daemon lifecycle rehearsal, kernel-owned runtime audit artifacts, and a parity stream with per-action OpenClaw probe artifacts — [LOOM_SPEC](docs/LOOM_SPEC.md)) |
+| `loom_native` | hosted | Active (7/7) — primary Meridian runtime with 11 live runtime planes and native contract compliance |
+| `legacy_v1_compatible` | hosted | Active (adapter bridge) — bounded compatibility seam for legacy integration paths |
 | `mcp_generic` | mcp_app | Planned (2/7, no adapter yet) |
 | `a2a_generic` | a2a_agent | Planned (1/7, no adapter yet) |
 | `openfang_compatible` | hosted | Planned (0/7, no adapter yet) |
 
 See [Constitutional Runtime Contract](docs/RUNTIME_CONTRACT.md) for the full
 requirements and integration guide. Today the built-in `local_kernel` path is
-the real reference runtime path, and `openclaw_compatible` now has a tested
-kernel-side reference adapter library. That is real public adapter proof, but
+the real reference runtime path, and `loom_native` is the primary active
+runtime. The legacy bridge remains available for bounded compatibility paths. That is real public proof, but
 it is still not the same thing as a live deployment proving runtime-side event
 routing end-to-end.
 
@@ -449,7 +449,7 @@ for value creation, not token accumulation.
 │  (REP, AUTH, CASH mechanics) │  The computational substrate
 ├──────────────────────────────┤
 │  Agent Runtime               │  Any execution environment
-│  (your choice)               │  MCP, A2A, LangChain, OpenClaw, custom
+│  (your choice)               │  Loom, MCP, A2A, LangChain, custom
 └──────────────────────────────┘
 ```
 

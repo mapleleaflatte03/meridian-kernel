@@ -30,6 +30,7 @@ capsules/
 
 # Runtime
 .openclaw/
+.meridian/
 .claude/
 .env
 .hot-wallet-secrets/

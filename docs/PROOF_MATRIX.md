@@ -17,7 +17,7 @@ This file maps public claims to executable proof artifacts or live surfaces.
 | Routing planner and handoff preview queue exist | [`kernel/tests/test_workspace_context.py`](../kernel/tests/test_workspace_context.py) and [`kernel/tests/test_federation_handoff_queue.py`](../kernel/tests/test_federation_handoff_queue.py) | PROVEN | Classifies local/remote/blocked requests and persists dispatch-ready remote handoff previews without claiming remote execution |
 | Signed host-service federation exists | [`kernel/tests/test_federation.py`](../kernel/tests/test_federation.py) | PROVEN | Covers peer registry, replay protection, wrong-target rejection, settlement notice, case/court notice, witness archive |
 | 3-host federation story exists | [`kernel/tests/test_three_host_federation_proof.py`](../kernel/tests/test_three_host_federation_proof.py) | PROVEN | Alpha/Beta/Gamma story with proposal, acceptance, execution review, court notice, breach notice, and witness archive |
-| OpenClaw-compatible runtime seam exists | [`kernel/tests/test_openclaw_federation_proof.py`](../kernel/tests/test_openclaw_federation_proof.py) | PROVEN | Kernel-side reference adapter proof, not a live hosted OpenClaw deployment |
+| Legacy-compatible runtime seam exists | [`kernel/tests/test_legacy_v1_federation_proof.py`](../kernel/tests/test_legacy_v1_federation_proof.py) | PROVEN | Kernel-side reference adapter proof for legacy integration paths |
 | Warrant-bound payouts exist | [`kernel/tests/test_treasury_capsule.py`](../kernel/tests/test_treasury_capsule.py) | PROVEN | Includes reserve-floor gate, phase gate, settlement adapter preflight, verifier-ready contract checks |
 | Payout-plan dry-run preview queue exists | [`kernel/tests/test_payout_plan_preview_queue.py`](../kernel/tests/test_payout_plan_preview_queue.py) and [`kernel/tests/test_workspace_context.py`](../kernel/tests/test_workspace_context.py) | PROVEN | Inspectable dry-run queue with operator acknowledgment and read-only inspection; ack does not claim settlement |
 | Settlement notice fail-closed behavior exists | [`kernel/tests/test_workspace_context.py`](../kernel/tests/test_workspace_context.py) and [`kernel/tests/test_federation.py`](../kernel/tests/test_federation.py) | PROVEN | Invalid notices open cases and can suspend peers |
@@ -41,9 +41,7 @@ This file maps public claims to executable proof artifacts or live surfaces.
 | --- | --- | --- | --- |
 | MCP adapter satisfies 2/7 hooks | `runtimes.json` -> `mcp_generic` | DECLARED | Adapter code + passing test |
 | A2A adapter satisfies 1/7 hooks | `runtimes.json` -> `a2a_generic` | DECLARED | Adapter code + passing test |
-| OpenClaw cost_attribution hook | `runtimes.json` -> `openclaw_compatible` (null) | DECLARED | Adapter extension + test |
-| OpenClaw budget_gate hook | `runtimes.json` -> `openclaw_compatible` (null) | DECLARED | Adapter extension + test |
-| Meridian Loom satisfies any hooks | `runtimes.json` -> `meridian_loom` (all null) | PLANNED | Loom Phase 1 code + shadow mode test |
+| Meridian Loom satisfies 7/7 hooks | `runtimes.json` -> `loom_native` | ACTIVE | 11 runtime planes live, native contract compliance |
 
 ## Public Proof Runner
 
@@ -69,7 +67,7 @@ python3 examples/generate_public_proof_bundle.py \
 This emits a JSON artifact containing:
 
 1. a three-host federation summary
-2. an OpenClaw reference-adapter federation summary
+2. a legacy reference-adapter federation summary
 3. an optional live host receipt from `GET /api/federation/manifest`
 4. an optional live runtime receipt from `GET /api/runtime-proof`
 5. an explicit `not_live_proven` list
@@ -90,7 +88,7 @@ environment allowing socket binding.
 ## Frontier, Not Yet Claimed As Live
 
 - live multi-host federation between independent deployed Meridian hosts
-- live OpenClaw end-to-end deployment wiring
+- live end-to-end hosted deployment wiring
 - live MCP identity propagation beyond current founding-only boundaries
 - non-`internal_ledger` settlement execution on a live host
 

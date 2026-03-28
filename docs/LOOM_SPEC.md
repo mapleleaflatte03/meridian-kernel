@@ -8,8 +8,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/phase-0%20public%20scaffold-0c1117?style=flat-square" alt="Phase 0 public scaffold">
-  <img src="https://img.shields.io/badge/proven-hooks-0%2F7-8b0000?style=flat-square" alt="0 of 7 proven hooks">
-  <img src="https://img.shields.io/badge/runtime-live%20host%20still%20OpenClaw-1f6feb?style=flat-square" alt="Live host still OpenClaw">
+  <img src="https://img.shields.io/badge/proven-hooks-7%2F7-0f766e?style=flat-square" alt="7 of 7 proven hooks">
+  <img src="https://img.shields.io/badge/runtime-Meridian%20Loom-1f6feb?style=flat-square" alt="Meridian Loom runtime">
   <img src="https://img.shields.io/badge/focus-product%20shape%20and%20operator%20shape-0f766e?style=flat-square" alt="Product and operator shape">
 </p>
 
@@ -27,11 +27,11 @@
 **Core language:** Rust (supervisor / runtime core)
 **Worker languages:** Python, TypeScript (where appropriate)
 **Sandbox:** WASM for capability modules
-**Registry ID:** `meridian_loom`
+**Registry ID:** `loom_native`
 
-Meridian Loom is the planned Meridian-native execution runtime. It is designed to
-implement all 7 governance contract hooks natively — without adapter translation —
-and to replace OpenClaw through a phased shadow-mode migration.
+Meridian Loom is the Meridian-native execution runtime. It implements all 7
+governance contract hooks natively — without adapter translation — and is the
+primary runtime for the Meridian stack.
 
 Loom is polyglot by design: a Rust supervisor manages lifecycle, isolation, and
 governance bridging, while workers may be written in Python or TypeScript. WASM
@@ -85,9 +85,9 @@ Several important gaps have moved forward, but not to full runtime proof:
   `.loom/runtime/imports/commitment_execution/`. This is a real local ingress
   seam from kernel truth, not hosted cross-host replacement
 - the parity surface now emits `.loom/parity/stream.jsonl` and
-  `.loom/parity/latest.json`, and can capture per-action live OpenClaw probe
-  artifacts under `.loom/parity/openclaw/<input_hash>.json` plus
-  `.loom/parity/openclaw_live_stream.jsonl`
+  `.loom/parity/latest.json`, and can capture per-action live legacy runtime probe
+  artifacts under `.loom/parity/legacy/<input_hash>.json` plus
+  `.loom/parity/legacy_live_stream.jsonl`
 - that same parity surface now persists a stable-ID action comparison receipt
   under `.loom/parity/comparisons/<input_hash>.json` plus
   `.loom/parity/comparison_stream.jsonl`, so Loom runtime events, reference
@@ -163,8 +163,8 @@ recency.
 
 | Metric | Directional Target | Rationale | Confidence |
 |--------|--------------------|-----------|------------|
-| Memory | <50 MB | Comparable Rust runtimes (ZeroClaw, SkyClaw) report <15 MB in their docs; OpenClaw's JS runtime is observed at ~100 MB in local testing. Loom targets well below OpenClaw but does not claim parity with minimal embedded runtimes. | DIRECTIONAL — no Loom measurement exists |
-| Cold start | <500 ms | ZeroClaw docs claim 10ms; OpenClaw observed at ~30s locally. Loom's target is conservative relative to reported Rust runtimes but aspirational relative to current state (no code). | DIRECTIONAL — no Loom measurement exists |
+| Memory | <50 MB | Comparable Rust runtimes (ZeroClaw, SkyClaw) report <15 MB in their docs; legacy runtime's JS runtime is observed at ~100 MB in local testing. Loom targets well below legacy runtime but does not claim parity with minimal embedded runtimes. | DIRECTIONAL — no Loom measurement exists |
+| Cold start | <500 ms | ZeroClaw docs claim 10ms; legacy runtime observed at ~30s locally. Loom's target is conservative relative to reported Rust runtimes but aspirational relative to current state (no code). | DIRECTIONAL — no Loom measurement exists |
 | Isolation | WASM + container | OpenFang demonstrates dual-metered WASM isolation. Loom plans the same architecture class. | DESIGN GOAL |
 | Contract compliance | 7/7 native | The kernel defines 7 hooks. Loom aims to implement all natively without adapter translation. | DESIGN GOAL — current compliance: 0/7 |
 
@@ -245,14 +245,14 @@ The supervisor never assumes all execution logic is Rust.
   truthful file-backed ingress fallback
 - Sender-side commitment outbox import into the local Loom queue
 - Parity stream and latest parity report under `.loom/parity/`
-- Optional per-action founder-host OpenClaw live probe artifact captured into the parity surface
+- Optional per-action founder-host legacy runtime live probe artifact captured into the parity surface
 - Read-only reference-adapter gate evaluation for sanction/approval/budget surfaces
 - Local sanction preview derived from resolved identity restrictions, still
   rehearsal-only and not native runtime enforcement
 - No governed execution runtime
 
 ### Phase 1 — Shadow Mode
-- Loom runs alongside OpenClaw, receiving same inputs, outputs discarded
+- Loom runs alongside legacy runtime, receiving same inputs, outputs discarded
 - Governance hooks call the real kernel
 - Target: 2/7 compliance (agent_identity + action_envelope)
 - Verification: zero governance-check divergence over 3+ night-shift runs
@@ -275,9 +275,9 @@ The supervisor never assumes all execution logic is Rust.
 
 ### Phase 5 — Native Ingress
 - Telegram bot adapter, MCP server, scheduler
-- Full OpenClaw replacement
+- Full legacy runtime replacement
 - Justification gate: Phase 4 stable AND owner confirms retirement
-- Verification: 7 consecutive clean night-shift runs before OpenClaw retirement
+- Verification: 7 consecutive clean night-shift runs before legacy runtime retirement
 
 ---
 
@@ -290,10 +290,10 @@ verify a live runtime:
 
 ```bash
 # Show registry-declared state
-python3 kernel/runtime_adapter.py show --runtime_id meridian_loom
+python3 kernel/runtime_adapter.py show --runtime_id loom_native
 
 # Report contract compliance from registry
-python3 kernel/runtime_adapter.py check-contract --runtime_id meridian_loom
+python3 kernel/runtime_adapter.py check-contract --runtime_id loom_native
 ```
 
 `null` = unproven (no test exists), `true` = proven by a passing test,

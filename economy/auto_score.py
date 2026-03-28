@@ -36,7 +36,7 @@ except ImportError:
 
 # Configurable paths -- override via environment variables.
 # Backward-compatible legacy env vars are still honored, but repo-local sample
-# data is the default so the OSS repo does not assume a private OpenClaw layout.
+# data is the default so the OSS repo does not assume a private runtime layout.
 RUN_STATE_FILE = (
     os.environ.get('MERIDIAN_RUN_STATE_FILE')
     or os.environ.get('MERIDIAN_CRON_JOBS')

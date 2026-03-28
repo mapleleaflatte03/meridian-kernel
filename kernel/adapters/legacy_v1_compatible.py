@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Legacy Execution Parity Adapter: Used by Meridian to benchmark and audit legacy un-governed runtimes against the Meridian constitutional ledger.
+Legacy v1-compatible kernel adapter bridge.
 
-This module does not claim that a live legacy_v1 deployment is already wired to
-all Meridian hooks. It is a tested kernel-side adapter library showing how a
-legacy_v1-compatible runtime can satisfy the constitutional contract once the
-runtime routes its session/action boundaries through these functions.
+This adapter provides backward-compatible kernel hook routing for runtimes
+that predate the Loom-native contract interface. Loom is the primary runtime;
+this bridge exists for legacy integration paths.
 """
 from __future__ import annotations
 
@@ -33,8 +32,8 @@ def adapter_proof():
         'runtime_id': 'legacy_v1_compatible',
         'implemented_hooks': list(SUPPORTED_HOOKS),
         'notes': (
-            'Legacy Execution Parity Adapter: Used by Meridian to benchmark and audit legacy un-governed runtimes against the Meridian constitutional ledger. '
-            'Runtime-side wiring is still required in a real deployment.'
+            'Legacy v1-compatible kernel adapter bridge. '
+            'Provides backward-compatible hook routing for pre-Loom integration paths.'
         ),
     }
 

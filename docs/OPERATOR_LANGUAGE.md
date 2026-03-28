@@ -378,17 +378,16 @@ Run contract compliance check against the runtime registry. Wraps
 hooks, and the overall compliance verdict.
 
 ```
-meridian verify-runtime --runtime-id openclaw_compatible
+meridian verify-runtime --runtime-id loom_native
 ```
 
 ```
-=== Contract Check: openclaw_compatible ===
-Status:    REFERENCE_ADAPTER
+=== Contract Check: loom_native ===
+Status:    ACTIVE
 Score:     7/7
-Native:    agent_identity
-Adapter:   action_envelope, cost_attribution, approval_hook, ...
-Verdict:   Runtime 'openclaw_compatible' now has a tested kernel-side
-           reference adapter covering 7/7 constitutional requirements.
+Native:    agent_identity, action_envelope, cost_attribution, approval_hook, ...
+Verdict:   Runtime 'loom_native' satisfies all 7 constitutional requirements
+           natively through governed capability dispatch.
 ```
 
 ### `meridian verify-attestation` (future)
@@ -537,7 +536,7 @@ Expected output shape:
 
 ### Shadow Mode
 
-Shadow mode runs Loom alongside OpenClaw, receiving the same inputs, discarding
+Shadow mode runs Loom alongside the legacy runtime, receiving the same inputs, discarding
 outputs. Used during Phase 1 migration to verify governance hook compliance
 without risk.
 

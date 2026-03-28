@@ -51,7 +51,7 @@ workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
 governed runtime. The current scaffold now exposes rehearsal surfaces for all
 seven contract areas. `loom action execute` materializes a fail-closed runtime
 receipt, a runtime-side audit artifact, and a parity stream. The scaffold can
-also capture a live OpenClaw proof snapshot on the founder host. `loom service`
+also capture a live legacy runtime proof snapshot on the founder host. `loom service`
 now exposes a local service shell with truthful file-backed ingress fallback,
 and it can optionally bind a tokenized local HTTP control plane for
 `GET /status`, `POST /submit`, and `POST /stop` when the host permits local
@@ -177,7 +177,7 @@ just elapsed time.
 | **Pre-alpha** (current) | Spec exists, registry entry at 0/7, public scaffold builds | CLI/setup rehearsal only |
 | **Alpha** | 2+/7 hooks proven, shadow mode runs | Evaluation by contributors |
 | **Beta** | 5+/7 hooks proven, governed worker cells pass | Opt-in use alongside primary runtime |
-| **GA** | 7/7 hooks proven, 7 consecutive clean night-shift runs | Production use, OpenClaw retirement eligible |
+| **GA** | 7/7 hooks proven, 7 consecutive clean night-shift runs | Production use, legacy runtime retirement eligible |
 
 No gate is reached until the corresponding `contract_compliance` fields
 in `runtimes.json` are set to `true` by passing tests. `null` = unproven.

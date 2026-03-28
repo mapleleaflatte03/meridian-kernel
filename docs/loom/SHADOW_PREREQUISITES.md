@@ -29,7 +29,7 @@ exist, but the runtime and verification gates for true Phase 1 shadow mode are
 still not met.
 
 Shadow mode means: Loom receives the same input stream as the primary
-runtime (OpenClaw), runs its own governance hooks, and discards output.
+runtime (legacy runtime), runs its own governance hooks, and discards output.
 The only observable effect is a divergence report comparing Loom decisions
 against the primary runtime's actual decisions. Zero production impact.
 
@@ -55,7 +55,7 @@ run.
 - [x] Read-only reference gate surface exists for sanction/approval/budget
   - Loom can compare shadow events against kernel reference-adapter decisions
   - Loom can now also materialize a runtime-side parity stream and latest report
-  - per-action live OpenClaw parity still does not exist
+  - per-action live legacy runtime parity still does not exist
 - [x] Experimental decision artifact exists
   - `loom shadow decide` writes the current allow/deny outcome to `.loom/shadow/decision.json`
   - still adapter-backed preflight only, not native runtime enforcement
@@ -72,7 +72,7 @@ run.
   - `loom service start/status/submit/stop` now expose a local runtime service shell
   - the service prefers Unix socket ingress but truthfully falls back to file-backed ingress under `.loom/runtime/ingress/`
   - `loom service import-commitments` can import sender-side `execution_request` delivery refs from commitment snapshots
-  - these are local rehearsal seams, not proof that Loom receives the same live input stream as OpenClaw
+  - these are local rehearsal seams, not proof that Loom receives the same live input stream as legacy runtime
 - [x] Experimental local sanction preview exists
   - derived from the resolved identity snapshot, not a live Loom runtime
   - `execute` / `remediation_only` can deny locally even if the read-only reference gate allows
@@ -90,16 +90,16 @@ run.
   - exists in `RUNTIME_CONTRACT.md`
   - input: action payload, agent context, policy snapshot
   - output: signed envelope with governance metadata
-- [ ] `kernel/runtimes.json` entry for `meridian_loom`
-  - EXISTS today -- 0/7 hooks satisfied, status "planned"
+- [x] `kernel/runtimes.json` entry for `loom_native`
+  - EXISTS today -- primary Meridian runtime with native 7/7 contract compliance
 - [ ] Shadow mode event format defined
   - envelope schema for shadowed actions
   - must include: timestamp, hook name, primary decision, shadow decision
   - must include: input hash for reproducibility
 - [ ] Shadow divergence comparison against a primary runtime
   - current scaffold can compare Loom shadow events against kernel reference-adapter events
-  - current scaffold can capture a live OpenClaw proof snapshot into the parity surface
-  - future Phase 1 still requires pairing Loom decisions with real per-action OpenClaw runtime decisions
+  - current scaffold can capture a live legacy runtime proof snapshot into the parity surface
+  - future Phase 1 still requires pairing Loom decisions with real per-action legacy runtime runtime decisions
 
 ---
 
@@ -119,7 +119,7 @@ run.
   - health command: return structured status
   - stop command: graceful shutdown, flush pending shadow events
 - [ ] Shadow mode receiver
-  - accepts same input stream as OpenClaw
+  - accepts same input stream as legacy runtime
   - runs hooks (`agent_identity`, `action_envelope`)
   - discards governance output (does not affect production)
   - writes shadow event log to local file
@@ -139,7 +139,7 @@ run.
   - reports: total events, matches, divergences, divergence percentage
 - [x] `loom parity report` surfaces runtime-side parity artifacts
   - reads `.loom/parity/latest.json` and `.loom/parity/stream.jsonl`
-  - includes live OpenClaw proof snapshot when available on the founder host
+  - includes live legacy runtime proof snapshot when available on the founder host
 - [ ] 3+ consecutive shadow runs with zero governance divergence
   - each run processes at least 10 governance events
   - zero divergence across all three runs

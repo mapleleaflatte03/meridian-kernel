@@ -22,7 +22,7 @@ Meridian Loom will live in a **separate repository** from the Meridian Kernel.
    libraries. Mixing them would pollute the kernel's clean dependency boundary.
 
 3. **Independent adoption.** A team might use the kernel with a different
-   runtime (OpenClaw, OpenFang, etc.). A team might also evaluate Loom before
+   runtime (Loom, OpenFang, etc.). A team might also evaluate Loom before
    committing to the full kernel governance model. Separate repos make both
    paths natural.
 

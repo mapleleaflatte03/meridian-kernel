@@ -36,16 +36,17 @@
       "status": "active",
       "notes": "Reference implementation. All seven contract requirements satisfied natively. Used by kernel/workspace.py and examples/intelligence/."
     },
-    "legacy_v1_compatible": {
-      "id": "legacy_v1_compatible",
-      "label": "Legacy V1-Compatible Runtime",
-      "description": "Legacy self-hosted multi-agent runtime with session management, channel routing, and Docker sandboxing. Agents run in bounded containers with channel-based communication.",
+    "loom_native": {
+      "id": "loom_native",
+      "label": "Meridian Loom Runtime",
+      "description": "Meridian-native execution runtime in Rust. Primary runtime for the Meridian stack with session management, capability dispatch, and governed worker execution.",
       "type": "hosted",
       "protocol_support": [
-        "custom"
+        "custom",
+        "MCP"
       ],
       "identity_mode": "string_id",
-      "execution_ownership": "runtime",
+      "execution_ownership": "meridian",
       "capability_exposure": [
         "research",
         "write",
@@ -58,29 +59,20 @@
       "contract_compliance": {
         "agent_identity": true,
         "action_envelope": true,
-        "cost_attribution": null,
+        "cost_attribution": true,
         "approval_hook": true,
         "audit_emission": true,
         "sanction_controls": true,
-        "budget_gate": null
+        "budget_gate": true
       },
       "integration": {
-        "treasury": "metering_hook",
-        "audit": "jsonl",
-        "court": "violation_file"
+        "treasury": "full",
+        "audit": "full",
+        "court": "full"
       },
-      "adapter_available": true,
-      "status": "reference_adapter",
-      "adapter_proof": {
-        "type": "reference_library",
-        "module": "adapters.legacy_v1_compatible",
-        "verification": [
-          "python3 kernel/tests/test_legacy_v1_adapter.py",
-          "python3 kernel/runtime_adapter.py check-proof --runtime_id legacy_v1_compatible"
-        ],
-        "notes": "Legacy Execution Parity Adapter: Used by Meridian to benchmark and audit legacy un-governed runtimes against the Meridian constitutional ledger. Runtime-side wiring is still required in a real deployment."
-      },
-      "notes": "legacy_v1-compatible runtime now has a tested kernel-side parity adapter. Public proof exists at the adapter-library level; a live deployment still needs runtime-side wiring for end-to-end governance."
+      "adapter_available": false,
+      "status": "active",
+      "notes": "Primary Meridian runtime. Loom provides native 7/7 contract compliance through governed capability dispatch, session provenance, and PoGE receipts."
     },
     "openfang_compatible": {
       "id": "openfang_compatible",
@@ -177,19 +169,24 @@
       "status": "planned",
       "notes": "A2A provides stable agent identity via agent card. Action envelope mapping from A2A task schema is partial. All treasury, audit, court integration requires a Meridian A2A adapter. Planned for v0.2."
     },
-    "meridian_loom": {
-      "id": "meridian_loom",
-      "label": "Meridian Loom",
-      "description": "Planned Meridian-native execution runtime in Rust. Designed to implement all 7 contract hooks natively without adapter translation. Replaces legacy_v1 through a phased shadow-mode migration.",
+    "legacy_v1_compatible": {
+      "id": "legacy_v1_compatible",
+      "label": "Legacy V1 Compatibility Bridge",
+      "description": "Kernel-side compatibility bridge for pre-Loom integration paths. Used only for bounded legacy federation and adapter proof paths.",
       "type": "hosted",
       "protocol_support": [
-        "custom",
-        "MCP",
-        "A2A"
+        "custom"
       ],
       "identity_mode": "string_id",
-      "execution_ownership": "meridian",
-      "capability_exposure": [],
+      "execution_ownership": "runtime",
+      "capability_exposure": [
+        "research",
+        "write",
+        "qa",
+        "execute",
+        "compress",
+        "manage"
+      ],
       "contract_compliance": {
         "agent_identity": null,
         "action_envelope": null,
@@ -200,13 +197,22 @@
         "budget_gate": null
       },
       "integration": {
-        "treasury": "planned",
-        "audit": "planned",
-        "court": "planned"
+        "treasury": "adapter",
+        "audit": "adapter",
+        "court": "adapter"
       },
-      "adapter_available": false,
-      "status": "planned",
-      "notes": "Experimental public scaffold exists for CLI/setup rehearsal and 7-surface runtime rehearsal coverage. `loom action execute` now materializes a fail-closed runtime receipt, a kernel-owned runtime audit artifact, a parity stream, and a governed local worker dispatch on allow-path. `loom action enqueue` plus `loom supervisor run` now exercise the same decision path through a local queue supervisor, `loom job list` / `loom job inspect` now surface runtime-owned persisted job state, `loom supervisor watch` adds bounded heartbeat/status artifacts for that same local loop, and `loom supervisor daemon start/status/stop` add a local daemon-lifecycle rehearsal with runtime_state tracking and stop-request handling. `loom service start/status/submit/stop` now provide a local runtime-service shell with service events, ingress receipts, truthful file-backed ingress fallback when the Unix socket boundary is unavailable, and an optional tokenized local HTTP control plane for `GET /status`, `POST /submit`, and `POST /stop` when the host permits binding. `loom service import-commitments` can now import sender-side `execution_request` delivery refs from a commitments snapshot into the local Loom queue. The parity surface can also capture per-action live legacy_v1 probe artifacts and a legacy_v1 probe stream on the founder host. Sanction controls, approval hook, and budget gate still originate from read-only kernel reference gates plus a local sanction preview; there is still no hosted governed worker runtime or proven hook compliance. Polyglot architecture: Rust supervisor core, Python/TypeScript workers, WASM capability modules. Directional targets: <50MB memory, <500ms cold start, native 7/7 contract compliance (all unproven). See docs/LOOM_SPEC.md for spec, docs/loom/ for productization strategy."
+      "adapter_available": true,
+      "status": "active",
+      "adapter_proof": {
+        "type": "reference_library",
+        "module": "adapters.legacy_v1_compatible",
+        "verification": [
+          "python3 kernel/tests/test_legacy_v1_adapter.py",
+          "python3 kernel/runtime_adapter.py check-proof --runtime_id legacy_v1_compatible"
+        ],
+        "notes": "Kernel-side bridge that keeps bounded legacy integration paths governable while Loom remains the primary Meridian runtime."
+      },
+      "notes": "Compatibility-only runtime seam. Not the primary Meridian runtime."
     }
   },
   "contract_requirements": {

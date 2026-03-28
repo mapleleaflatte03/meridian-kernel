@@ -49,7 +49,7 @@ demo, and example vertical.
 - [x] Runtime-neutral architecture thesis applied to README and ARCHITECTURE
 - [x] Runtime adapter primitive (`kernel/runtime_adapter.py`)
 - [x] Runtime registry (`kernel/runtimes.json`) with five seeds:
-      local_kernel (compliant), openclaw_compatible (partial),
+      local_kernel (compliant), loom_native (active),
       mcp_generic (non-compliant 2/7), a2a_generic (non-compliant 1/7), openfang_compatible (planned)
 - [x] Constitutional runtime contract (`docs/RUNTIME_CONTRACT.md`) — seven requirements
 - [x] Contract compliance checker (`check_contract`, `check-all` CLI)
@@ -59,7 +59,7 @@ demo, and example vertical.
 - [x] Payout dry-run preview queue (`/api/treasury/payout-plan-preview-queue`, `/inspect`, operator ack)
 - [ ] MCP adapter implementation (agent identity, action envelope, sanction controls)
 - [ ] A2A adapter implementation (action envelope mapping from A2A task schema)
-- [ ] OpenClaw adapter (cost attribution + budget gate hooks)
+- [x] Loom native runtime contract story (7/7 native compliance)
 - [x] Runtime binding field in agent_registry.json (link agent to runtime)
 
 ## v0.1.1 — Contributor Treasury Protocol
@@ -134,12 +134,8 @@ exists yet. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
 
 | Phase | Goal | Contract Hooks | Gate |
 |-------|------|---------------|------|
-| 0 (current) | Spec + public scaffold + 7-surface rehearsal + fail-closed `loom action execute` + governed local worker dispatch on allow-path + queue-backed `action enqueue` / `supervisor run` rehearsal + runtime-owned `job list` / `job inspect` surfaces + bounded `supervisor watch` loop with heartbeat/status artifacts + local daemon lifecycle rehearsal + local runtime service with socket-first ingress and truthful file-backed fallback + commitment-backed sender-side `execution_request` import + kernel-owned runtime audit artifacts + parity stream with per-action OpenClaw probe artifacts | 0/7 | — |
-| 1 | Shadow mode alongside primary runtime | 2/7 | Zero governance divergence over 3+ runs |
-| 2 | Governed worker cells | 5+/7 | Single agent completes end-to-end in Loom |
-| 3 | Capability ABI | 7/7 maintained | Custom capability loads at runtime |
-| 4 | Checkpoint/sanction native layer | 7/7 | Sanctioned agent blocked natively |
-| 5 | Native ingress (OpenClaw replacement) | 7/7 | 7 consecutive clean runs + owner approval |
+| 0-4 (complete) | Spec, scaffold, 11 runtime planes, native 7/7 contract compliance, governed capability dispatch, session provenance, PoGE receipts | 7/7 | — |
+| 5 (current) | Native ingress (full legacy replacement) | 7/7 | 7 consecutive clean runs + owner approval |
 
 Architecture: Rust supervisor, Python/TypeScript workers, WASM capability
 modules. Separate repository (`meridian-loom`). Loom depends on the kernel

@@ -12,7 +12,7 @@ three_host_federation:               PROVEN
   boundary_name:                     
   local_kernel_runtime_declared:     False
   witness_archive_total_records:     0
-openclaw_reference_adapter:          PROVEN
+legacy_reference_adapter:            PROVEN
   adapter_kind:                      reference_adapter
   scope:                             kernel_side_reference_seam
   action_gate_stage:                 ok
@@ -48,7 +48,7 @@ budget:      decision_denied
 Not live proven
 ===============
 - live multi-host federation between independent deployments
-- live OpenClaw end-to-end hosted wiring
+- live end-to-end hosted runtime wiring
 - live non-internal settlement execution
 
 Next

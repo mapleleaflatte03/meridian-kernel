@@ -58,7 +58,7 @@ The kernel and intelligence layers can be exercised entirely locally. Loom remai
 
 **Meridian does not run your agents. It governs them.**
 
-Any runtime — MCP-backed apps, LangChain pipelines, OpenClaw, A2A agents, or your own stack — can have its agents governed by the same five primitives. The governance layer is independent of the execution layer.
+Any runtime — Meridian Loom, MCP-backed apps, LangChain pipelines, A2A agents, or your own stack — can have its agents governed by the same five primitives. The governance layer is independent of the execution layer.
 
 | Primitive | What It Does |
 |-----------|-------------|
@@ -91,7 +91,7 @@ What is real today:
 - the reference workspace and JSON API
 - the `runtime_core` surface that exposes institution context, host identity, boundary identity model, service registry, admission state, and federation gateway state
 - one real built-in reference runtime path: `local_kernel`
-- one tested kernel-side reference adapter library: `openclaw_compatible`
+- one tested kernel-side legacy compatibility bridge: `legacy_v1_compatible`
 - agent records now carry an explicit `runtime_binding` field, and the surfaced workspace APIs keep that binding coherent with the runtime registry
 - one tested host-service federation primitive: signed HMAC envelopes with peer registry and replay protection
 - one institution-scoped federation inbox surface on the receiver side: accepted envelopes persist into the target capsule and are surfaced through `GET /api/federation/inbox`
@@ -100,7 +100,7 @@ What is real today:
 - one receiver-side execution review path: accepted `execution_request` envelopes can materialize a local federated execution job plus a pending local warrant instead of implying remote work is already authorized
 - one sender-side review feedback path: receiver-side warrant review for a federated `execution_request` can emit a signed `court_notice` back to the source host, so sender-side warrant state and commitment provenance reflect remote review before settlement
 - one routing-planner preview path: `/api/status` and `/api/federation` now surface local/remote/blocked routing decisions, and remote candidates can be persisted into `GET /api/federation/handoff-preview-queue` for inspection without claiming remote execution
-- one tested OpenClaw-compatible federation seam in OSS: the kernel-side `openclaw_compatible` adapter can wrap a federated `execution_request` story in tests by gating the action envelope before dispatch and emitting metering/audit proof after the federated receipt returns, without claiming a live OpenClaw deployment is already wired
+- one tested legacy-compatible federation seam in OSS: the kernel-side `legacy_v1_compatible` adapter can wrap a federated `execution_request` story in tests by gating the action envelope before dispatch and emitting metering/audit proof after the federated receipt returns, without claiming a live legacy runtime deployment is already wired
 - one sender-side commitment outbox seam that Loom can now consume locally: successful `execution_request` deliveries can append sender-side `delivery_refs` with `payload_hash` and `adapter_envelope` to the linked commitment, making the kernel's own commitment truth rich enough for Loom to import into a local runtime queue
 - one first-class commitment primitive: capsule-backed commitment records, workspace commitment APIs, sender-side federation validation when `commitment_id` is supplied, and warrant-bound `commitment_proposal` / `commitment_acceptance` / `commitment_breach_notice` envelopes
 - one first-class payout primitive: capsule-backed payout proposals, workspace payout APIs, and warrant-bound reference execution against the institution ledger
@@ -110,7 +110,7 @@ What is real today:
 - one integrated 3-host federation proof in tests: proposal, acceptance, execution review, court notice, breach notice, and witness archival now compose into one end-to-end kernel story
 
 What is not yet broadly proven:
-- live end-to-end deployment wiring for OpenClaw-, MCP-, or A2A-style integrations
+- live end-to-end deployment wiring for MCP- or A2A-style integrations
 - live multi-host federation between independent Meridian deployments
 - live multi-institution routing inside one deployed service boundary
 
@@ -122,7 +122,7 @@ For the smallest high-signal rerun, generate the public proof bundle with
 For a terminal-friendly summary instead of raw JSON, add `--format human`.
 That bundle now emits:
 - a structured three-host federation summary
-- a structured OpenClaw reference-adapter federation summary
+- a structured legacy reference-adapter federation summary
 - an optional live host receipt when `--live-manifest-url` is supplied
 - a local Loom runtime receipt when `kernel/runtime_audit/loom_runtime_events.jsonl`
   exists, including canonical runtime IDs and budget reservation status
@@ -387,8 +387,8 @@ python3 kernel/authority.py kill-switch off --by owner
 ├───────────────────────────────────────────────────────┤
 │  Runtime Adapter Layer (runtime-neutral)              │
 │  ┌─────────────┐ ┌──────────────┐ ┌───────────────┐  │
-│  │ local_kernel│ │  openclaw_   │ │  mcp_generic  │  │
-│  │  (built-in) │ │  compatible  │ │   (planned)   │  │
+│  │ local_kernel│ │  loom_native │ │  mcp_generic  │  │
+│  │  (built-in) │ │   (active)   │ │   (planned)   │  │
 │  └─────────────┘ └──────────────┘ └───────────────┘  │
 │  ┌─────────────┐ ┌──────────────┐                    │
 │  │ a2a_generic │ │ your runtime │                    │
@@ -406,8 +406,8 @@ Meridian is runtime-neutral in design. Today, one runtime path is built in and o
 | Runtime | Protocol | Contract Status |
 |---------|----------|----------------|
 | `local_kernel` | custom | Compliant (7/7) — built-in reference |
-| `openclaw_compatible` | custom | Reference adapter (7/7 via tested kernel-side library) |
-| `meridian_loom` | custom, MCP, A2A | Planned (0/7) — [spec + public experimental scaffold](docs/LOOM_SPEC.md), including 7-surface shadow rehearsal, fail-closed `loom action execute`, governed local worker dispatch on allow-path, `action enqueue` + `supervisor run` queue rehearsal, runtime-owned `job list` / `job inspect` surfaces, bounded `supervisor watch` heartbeat/status artifacts, local daemon lifecycle rehearsal, a local runtime service shell with socket/file ingress plus optional tokenized local HTTP control plane, kernel-owned runtime audit artifacts, and a parity stream with per-action OpenClaw probe artifacts |
+| `loom_native` | custom, MCP, A2A | Active (7/7) — primary Meridian runtime with 11 live runtime planes, governed capability dispatch, session provenance, and PoGE receipts |
+| `legacy_v1_compatible` | custom | Active (adapter bridge) — bounded compatibility seam for legacy integration paths |
 | `mcp_generic` | MCP | Planned (2/7) — no adapter yet |
 | `a2a_generic` | A2A | Planned (1/7) — no adapter yet |
 | `openfang_compatible` | custom | Planned (0/7) — no adapter yet |
@@ -417,7 +417,7 @@ Meridian is runtime-neutral in design. Today, one runtime path is built in and o
 python3 kernel/runtime_adapter.py check-all
 
 # Inspect kernel-side proof for a specific adapter
-python3 kernel/runtime_adapter.py check-proof --runtime_id openclaw_compatible
+python3 kernel/runtime_adapter.py check-proof --runtime_id legacy_v1_compatible
 
 # Register your own runtime
 python3 kernel/runtime_adapter.py register \

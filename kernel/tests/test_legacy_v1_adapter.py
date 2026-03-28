@@ -46,7 +46,7 @@ class LegacyV1AdapterTests(unittest.TestCase):
             contract['assessment_basis'],
             'declared_runtime_plus_reference_adapter',
         )
-        self.assertEqual(contract['adapter_supplied'], ['cost_attribution', 'budget_gate'])
+        self.assertEqual(contract['adapter_supplied'], ['agent_identity', 'action_envelope', 'cost_attribution', 'approval_hook', 'audit_emission', 'sanction_controls', 'budget_gate'])
         self.assertIn('route runtime events through that adapter', contract['verdict'])
 
     def test_build_action_envelope_normalizes_fields(self):

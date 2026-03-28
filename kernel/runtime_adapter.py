@@ -17,7 +17,7 @@ and documented in docs/RUNTIME_CONTRACT.md.
 Usage:
   python3 runtime_adapter.py list
   python3 runtime_adapter.py show --runtime_id mcp_generic
-  python3 runtime_adapter.py check-contract --runtime_id legacy_v1_compatible
+  python3 runtime_adapter.py check-contract --runtime_id loom_native
   python3 runtime_adapter.py check-proof --runtime_id legacy_v1_compatible
   python3 runtime_adapter.py register --id my_runtime --label "My Runtime" \
       --type hosted --protocols "MCP,A2A" --identity_mode api_key

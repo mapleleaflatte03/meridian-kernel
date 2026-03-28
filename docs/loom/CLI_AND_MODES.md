@@ -103,7 +103,7 @@ Loom has three modes. The mode is set in `loom.toml` under `[runtime].mode`.
 
 ### 1. Shadow mode (`mode = "shadow"`)
 
-**Purpose:** Eventually run alongside the primary runtime (OpenClaw) without
+**Purpose:** Eventually run alongside the primary runtime (legacy runtime) without
 affecting production. Loom will receive the same inputs and run the same
 governance hooks while its outputs are discarded.
 
@@ -144,15 +144,15 @@ identical results to the primary runtime.
   supervisor in a real local daemon-lifecycle shell with `runtime_state.json`,
   background logging, and stop-request handling
 - `loom shadow compare` compares Loom's captured events against a
-  kernel-reference event log, not a live OpenClaw runtime stream
+  kernel-reference event log, not a live legacy runtime runtime stream
 - `loom shadow report` surfaces the latest comparison or preflight report
 - `loom parity report` surfaces the runtime-side parity report and, when
-  available, a per-action OpenClaw probe artifact and probe stream captured
+  available, a per-action legacy runtime probe artifact and probe stream captured
   from the founder host
 
 **What it does not do yet:**
 - It does not subscribe to live production traffic
-- It does not shadow the real OpenClaw runtime process
+- It does not shadow the real legacy runtime runtime process
 - It does not prove per-action live runtime parity
 - It does not prove a hosted runtime service or durable ingress transport
 - It does not prove live sender-host commitment import cutover
@@ -166,7 +166,7 @@ identical results to the primary runtime.
 governance bridging, and transport.
 
 **When to use:** Phase 5 — after Loom has proven 7/7 compliance and passed
-the OpenClaw retirement gate.
+the legacy runtime retirement gate.
 
 **What it does:**
 - Full lifecycle management (start, stop, health, restart)
@@ -257,7 +257,7 @@ They do **not** get:
 - multi-institution support
 - native sanction enforcement in a hosted worker runtime
 - the hosted kernel's canonical audit log
-- per-action live OpenClaw parity against a real OpenClaw action execution stream
+- per-action live legacy runtime parity against a real legacy runtime action execution stream
 
 Those remain future runtime work, not current scaffold truth.
 

@@ -9,7 +9,7 @@ It exists so the public OSS repo can demonstrate:
 - `economy/auto_score.py --dry-run`
 - `brief_quality.py`
 
-without depending on a private runtime layout such as `~/.openclaw/...`.
+without depending on a private runtime layout such as `~/.meridian/...`.
 
 ## Included Files
 

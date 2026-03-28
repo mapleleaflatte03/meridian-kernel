@@ -37,7 +37,7 @@
   <text x="456" y="118" class="tag">Public Proof</text>
   <text x="456" y="160" class="title">docs/PROOF_MATRIX.md</text>
   <text x="456" y="208" class="body">public bundle        three-host federation summary</text>
-  <text x="456" y="240" class="body">reference adapter    OpenClaw-compatible proof</text>
+  <text x="456" y="240" class="body">reference adapter    Legacy compatibility proof</text>
   <text x="456" y="272" class="body">live receipt         optional founding-host manifest</text>
   <text x="456" y="324" class="ok">PROOF EXISTS</text>
   <text x="456" y="356" class="body">Not all runtime claims are proven.</text>
@@ -45,8 +45,8 @@
   <text x="824" y="118" class="tag">Runtime Boundary</text>
   <text x="824" y="160" class="title">Kernel above runtimes</text>
   <text x="824" y="208" class="body">local_kernel         built-in reference path</text>
-  <text x="824" y="240" class="body">openclaw_compatible  tested adapter seam</text>
-  <text x="824" y="272" class="body">meridian_loom        public runtime scaffold</text>
+  <text x="824" y="240" class="body">legacy_v1_compatible  tested adapter seam</text>
+  <text x="824" y="272" class="body">loom_native         primary runtime surface</text>
   <text x="824" y="320" class="warn">KERNEL IS NOT A RUNNER</text>
   <text x="824" y="352" class="body">Execution remains a separate program.</text>
 </svg>

@@ -60,7 +60,7 @@ class CourtCapsuleTests(unittest.TestCase):
             },
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
-        self.legacy_records_before = LEGACY_RECORDS_PATH.read_text() if LEGACY_RECORDS_PATH.exists() else None
+        self.legacy_records_before = LEGACY_RECORDS_PATH.read_text()
 
     def tearDown(self):
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
@@ -96,10 +96,7 @@ class CourtCapsuleTests(unittest.TestCase):
         records = json.loads(records_path.read_text())
         self.assertIn(violation_id, records['violations'])
         self.assertEqual(records['violations'][violation_id]['org_id'], self.org_id)
-        if self.legacy_records_before is not None:
-            self.assertEqual(LEGACY_RECORDS_PATH.read_text(), self.legacy_records_before)
-        else:
-            self.assertFalse(LEGACY_RECORDS_PATH.exists())
+        self.assertEqual(LEGACY_RECORDS_PATH.read_text(), self.legacy_records_before)
 
     def test_decide_appeal_lifts_capsule_scoped_sanction(self):
         fake_registry, fake_audit = self._fake_modules()

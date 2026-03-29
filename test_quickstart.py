@@ -3,7 +3,10 @@ from unittest.mock import patch, MagicMock
 import os
 import sys
 
+# Save original sys.path before quickstart pollutes it
+_original_sys_path = sys.path.copy()
 import quickstart
+sys.path[:] = _original_sys_path
 
 class TestInitKernel(unittest.TestCase):
 

@@ -20,7 +20,11 @@ class TestSanctionsRestrictions(unittest.TestCase):
         self.spec = importlib.util.spec_from_file_location('kernel_capsule_test', ROOT / 'kernel' / 'capsule.py')
         self.capsule = importlib.util.module_from_spec(self.spec)
         self.spec.loader.exec_module(self.capsule)
-        self.capsule.init_capsule(self.org_id)
+
+        try:
+            self.capsule.init_capsule(self.org_id)
+        except FileExistsError:
+            pass
 
         self.ledger_path = self.capsule_dir / 'ledger.json'
 

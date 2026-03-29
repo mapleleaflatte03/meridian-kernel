@@ -60,9 +60,18 @@ class CourtCapsuleTests(unittest.TestCase):
             },
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
+
+        if not LEGACY_RECORDS_PATH.exists():
+            LEGACY_RECORDS_PATH.write_text(json.dumps({'violations': {}, 'appeals': {}}))
+            self._created_legacy_records = True
+        else:
+            self._created_legacy_records = False
+
         self.legacy_records_before = LEGACY_RECORDS_PATH.read_text()
 
     def tearDown(self):
+        if getattr(self, '_created_legacy_records', False) and LEGACY_RECORDS_PATH.exists():
+            LEGACY_RECORDS_PATH.unlink()
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
 
     def _fake_modules(self):

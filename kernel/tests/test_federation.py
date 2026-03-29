@@ -250,11 +250,6 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     shutil.copytree(kernel_src, kernel_dst, ignore_dangling_symlinks=True)
     shutil.copytree(economy_src, economy_dst, ignore_dangling_symlinks=True)
 
-    # Remove copied ledger.json so init_capsule does not fail or auto-alias
-    ledger_dst = os.path.join(economy_dst, 'ledger.json')
-    if os.path.exists(ledger_dst):
-        os.remove(ledger_dst)
-
     _write_json(
         os.path.join(kernel_dst, 'organizations.json'),
         {

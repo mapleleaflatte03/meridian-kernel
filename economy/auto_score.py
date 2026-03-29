@@ -25,12 +25,12 @@ except ImportError:
         return os.path.join(ECONOMY_DIR, filename)
 
 # Optional: import brief_quality from examples if available
-_assess_brief_content = None
+_analyze_brief = None
 try:
     _examples_dir = os.path.join(WORKSPACE, 'examples', 'intelligence')
     sys.path.insert(0, _examples_dir)
-    from brief_quality import assess_brief_content
-    _assess_brief_content = assess_brief_content
+    from brief_quality import analyze_brief
+    _analyze_brief = analyze_brief
 except ImportError:
     pass
 
@@ -178,15 +178,15 @@ def latest_findings():
     findings.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return findings[0]
 
-def detect_outcomes(jobs, report_text, brief_text):
+def detect_outcomes(jobs, report_text, brief_text, brief_path=""):
     """Return list of (outcome_key, evidence) based on real artifacts."""
     outcomes = []
     lo_report = report_text.lower()
     lo_brief  = brief_text.lower()
     brief_audit = None
 
-    if brief_text and _assess_brief_content:
-        brief_audit = _assess_brief_content(brief_text, brief_date=_today())
+    if brief_path and _analyze_brief:
+        brief_audit = _analyze_brief(brief_path)
 
     # 1. Deliver job
     deliver, deliver_name = find_deliver_job(jobs)
@@ -332,7 +332,7 @@ def run(dry_run=False, org_id=None):
         log("Already scored this deliver run -- skipping. (dedup guard)", org_id=org_id)
         return
 
-    outcomes = detect_outcomes(jobs, rtxt, btxt)
+    outcomes = detect_outcomes(jobs, rtxt, btxt, brief_path=bpath)
     if not outcomes:
         log("No scoreable outcomes detected -- check report files and cron state.", org_id=org_id)
         return

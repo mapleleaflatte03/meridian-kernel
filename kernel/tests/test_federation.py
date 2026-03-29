@@ -247,12 +247,8 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     economy_src = os.path.join(WORKSPACE, 'economy')
     kernel_dst = os.path.join(root_dir, 'kernel')
     economy_dst = os.path.join(root_dir, 'economy')
-    shutil.copytree(kernel_src, kernel_dst, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns('*.pyc', '__pycache__', 'capsules', 'economy/capsules'))
-    shutil.copytree(economy_src, economy_dst, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns('*.pyc', '__pycache__', 'capsules'))
-
-    # Clean up ledger state to ensure a clean slate
-    if os.path.exists(os.path.join(economy_dst, 'ledger.json')):
-        os.remove(os.path.join(economy_dst, 'ledger.json'))
+    shutil.copytree(kernel_src, kernel_dst, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns('*.pyc', '__pycache__', 'capsules', 'economy/capsules', 'organizations.json', 'agent_registry.json'))
+    shutil.copytree(economy_src, economy_dst, ignore_dangling_symlinks=True, ignore=shutil.ignore_patterns('*.pyc', '__pycache__', 'capsules', 'ledger.json', 'transactions.jsonl', 'authority_queue.json', 'court_records.json'))
 
     _write_json(
         os.path.join(kernel_dst, 'organizations.json'),

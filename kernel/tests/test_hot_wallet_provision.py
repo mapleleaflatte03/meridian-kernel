@@ -5,10 +5,13 @@ import json
 import pathlib
 import shutil
 import tempfile
+import sys
 import threading
 import unittest
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
+import io
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -158,6 +161,37 @@ class HotWalletProvisionTests(unittest.TestCase):
         self.assertEqual(secret_payload['address'], result['address'])
         self.assertTrue(secret_payload['private_key_hex'].startswith('0x'))
 
+    def test_provision_hot_wallet_fails_if_wallet_already_exists(self):
+        private_key = '0x1234567890123456789012345678901234567890123456789012345678901234'
+        self._register_hot_wallet(private_key)
+        with self.assertRaisesRegex(ValueError, 'Wallet already exists'):
+            ops.provision_hot_wallet(
+                org_id=self.org_id,
+                actor_id='ops:test',
+                secret_dir=self.secret_dir,
+            )
+
+    def test_provision_hot_wallet_fails_if_treasury_account_already_exists(self):
+        treasury.register_treasury_account('automated_loom_settlement', org_id=self.org_id)
+        with self.assertRaisesRegex(ValueError, 'Treasury account already exists'):
+            ops.provision_hot_wallet(
+                org_id=self.org_id,
+                actor_id='ops:test',
+                secret_dir=self.secret_dir,
+            )
+
+    def test_provision_hot_wallet_fails_if_secret_file_already_exists(self):
+        secret_path = pathlib.Path(self.secret_dir) / 'automated_loom_settlement_v1.json'
+        secret_path.parent.mkdir(parents=True, exist_ok=True)
+        secret_path.write_text('existing')
+
+        with self.assertRaisesRegex(ValueError, 'Secret file already exists'):
+            ops.provision_hot_wallet(
+                org_id=self.org_id,
+                actor_id='ops:test',
+                secret_dir=self.secret_dir,
+            )
+
     def test_sign_x402_transfer_from_wallet_generates_signed_raw_hex_offline(self):
         private_key = '0x59c6995e998f97a5a0044966f09453870d6ea5d61ff6d1bc1b3b76b5f3c4f8f7'
         sender_address = self._register_hot_wallet(private_key)
@@ -252,6 +286,49 @@ class HotWalletProvisionTests(unittest.TestCase):
         self.assertEqual(submitted_raw, [result['signed_transaction']['raw_transaction_hex']])
         self.assertEqual(rpc_calls[-1]['method'], 'eth_sendRawTransaction')
         self.assertIn('Base Sepolia or another non-mainnet/local RPC endpoint', result['truth_boundary'])
+
+    @mock.patch('sys.stdout', new_callable=io.StringIO)
+    def test_main_executes_provisioning(self, mock_stdout):
+        args = [
+            '--org_id', self.org_id,
+            '--actor_id', 'ops:test_main',
+            '--secret_dir', self.secret_dir,
+        ]
+        self.assertEqual(ops.main(args), 0)
+        output = json.loads(mock_stdout.getvalue())
+        self.assertIn('wallet', output)
+        self.assertIn('account', output)
+        self.assertIn('address', output)
+        self.assertIn('secret_path', output)
+
+    def test_main_fails_with_partial_x402_args(self):
+        args = [
+            '--org_id', self.org_id,
+            '--actor_id', 'ops:test_main_partial',
+            '--secret_dir', self.secret_dir,
+            '--recipient_address', '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        ]
+        with self.assertRaisesRegex(SystemExit, 'Missing required x402 signing arguments'):
+            ops.main(args)
+
+    @mock.patch('sys.stdout', new_callable=io.StringIO)
+    def test_main_generates_x402_signing(self, mock_stdout):
+        args = [
+            '--org_id', self.org_id,
+            '--actor_id', 'ops:test_main_signing',
+            '--secret_dir', self.secret_dir,
+            '--recipient_address', '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            '--amount_usdc', '1',
+            '--token_contract_address', '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+            '--chain_id', '84532',
+            '--nonce', '0',
+            '--gas_limit', '65000',
+            '--gas_price_wei', '1000000000',
+        ]
+        self.assertEqual(ops.main(args), 0)
+        output = json.loads(mock_stdout.getvalue())
+        self.assertIn('x402_signing', output)
+        self.assertTrue(output['x402_signing']['signing_performed'])
 
 
 if __name__ == '__main__':

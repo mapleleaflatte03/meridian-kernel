@@ -108,9 +108,6 @@ def payment_lock():
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def stable_short_id(seed: str) -> str:
-    return hashlib.sha256(seed.encode()).hexdigest()[:8]
-
 def load_revenue(org_id=None):
     path = _require_readable(_revenue_path(org_id), org_id)
     if os.path.exists(path):
@@ -213,19 +210,6 @@ def _ensure_processed_payment_keys(ledger):
     return keys
 
 
-def _payment_tx_exists(transactions, payment_key, tx_hash='', payment_ref=''):
-    for entry in transactions:
-        if entry.get('type') != 'customer_payment':
-            continue
-        if entry.get('payment_key') == payment_key:
-            return True
-        if tx_hash and entry.get('tx_hash') == tx_hash:
-            return True
-        if payment_ref and entry.get('payment_ref') == payment_ref:
-            return True
-    return False
-
-
 def _support_tx_exists(transactions, payment_key, tx_hash='', payment_ref=''):
     for entry in transactions:
         if entry.get('type') != 'support_contribution':
@@ -276,113 +260,6 @@ def customer_payment_evidence_exists(*, payment_ref='', tx_hash='', min_amount_u
         transactions=transactions,
         org_id=org_id,
     ) is not None
-
-
-def record_external_customer_payment(product, amount_usd, *, payment_key, client_name,
-                                     client_contact, note='', tx_hash='',
-                                     payment_ref='', payment_source='external',
-                                     org_id=None):
-    """Idempotently record an externally settled customer payment."""
-    if not payment_key:
-        raise ValueError('payment_key is required')
-    amount = float(amount_usd)
-    if amount <= 0:
-        raise ValueError('amount_usd must be greater than 0')
-
-    with payment_lock():
-        revenue_data = load_revenue(org_id)
-        ledger = load_ledger(org_id)
-        transactions = load_transactions(org_id)
-
-        client_id = stable_short_id(f'client:{client_contact or client_name or payment_key}')
-        order_id = stable_short_id(f'order:{product}:{payment_key}')
-        now = now_ts()
-
-        revenue_changed = False
-        ledger_changed = False
-
-        client = revenue_data['clients'].get(client_id)
-        if client is None:
-            revenue_data['clients'][client_id] = {
-                'name': client_name,
-                'contact': client_contact,
-                'created_at': now,
-            }
-            revenue_changed = True
-
-        order = revenue_data['orders'].get(order_id)
-        if order is None:
-            revenue_data['orders'][order_id] = {
-                'client': client_id,
-                'product': product,
-                'amount_usd': amount,
-                'status': 'paid',
-                'note': note,
-                'payment_key': payment_key,
-                'payment_ref': payment_ref,
-                'tx_hash': tx_hash,
-                'payment_source': payment_source,
-                'history': [
-                    {'status': 'proposed', 'at': now},
-                    {'status': 'paid', 'at': now},
-                ],
-                'created_at': now,
-            }
-            revenue_changed = True
-        else:
-            if abs(float(order.get('amount_usd', 0.0)) - amount) > 1e-9:
-                raise ValueError(f'order {order_id} amount mismatch for {payment_key}')
-            if order.get('status') != 'paid':
-                order['status'] = 'paid'
-                order.setdefault('history', []).append({'status': 'paid', 'at': now})
-                revenue_changed = True
-            for key, value in (
-                ('payment_key', payment_key),
-                ('payment_ref', payment_ref),
-                ('tx_hash', tx_hash),
-                ('payment_source', payment_source),
-            ):
-                if value and order.get(key) != value:
-                    order[key] = value
-                    revenue_changed = True
-            if note and order.get('note') != note:
-                order['note'] = note
-                revenue_changed = True
-
-        processed_keys = _ensure_processed_payment_keys(ledger)
-        if payment_key not in processed_keys:
-            treasury = ledger['treasury']
-            treasury['cash_usd'] += amount
-            treasury['total_revenue_usd'] = treasury.get('total_revenue_usd', 0) + amount
-            processed_keys.append(payment_key)
-            ledger_changed = True
-
-        tx_exists = _payment_tx_exists(transactions, payment_key, tx_hash=tx_hash, payment_ref=payment_ref)
-
-        if revenue_changed:
-            save_revenue(revenue_data, org_id)
-        if ledger_changed:
-            save_ledger(ledger, org_id)
-        if not tx_exists:
-            append_tx({
-                'type': 'customer_payment',
-                'order_id': order_id,
-                'amount': amount,
-                'client': client_id,
-                'product': product,
-                'payment_key': payment_key,
-                'payment_ref': payment_ref,
-                'tx_hash': tx_hash,
-                'payment_source': payment_source,
-                'note': note,
-            }, org_id)
-
-        return {
-            'client_id': client_id,
-            'order_id': order_id,
-            'payment_key': payment_key,
-            'duplicate': not revenue_changed and not ledger_changed and tx_exists,
-        }
 
 
 def record_external_support_contribution(amount_usd, *, payment_key, supporter_name='',

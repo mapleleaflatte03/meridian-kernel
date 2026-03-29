@@ -62,59 +62,6 @@ class ExternalSettlementTests(unittest.TestCase):
             if line.strip()
         ]
 
-    def test_external_customer_payment_is_idempotent_and_capsule_scoped(self):
-        result = self.revenue_mod.record_external_customer_payment(
-            'capsule-product',
-            2.5,
-            payment_key='ref:pay_123',
-            payment_ref='pay_123',
-            client_name='Capsule Customer',
-            client_contact='capsule@example.com',
-            tx_hash='0xabc',
-            payment_source='integration_test',
-            org_id=self.org_id,
-        )
-        self.assertFalse(result['duplicate'])
-
-        second = self.revenue_mod.record_external_customer_payment(
-            'capsule-product',
-            2.5,
-            payment_key='ref:pay_123',
-            payment_ref='pay_123',
-            client_name='Capsule Customer',
-            client_contact='capsule@example.com',
-            tx_hash='0xabc',
-            payment_source='integration_test',
-            org_id=self.org_id,
-        )
-        self.assertTrue(second['duplicate'])
-        self.assertEqual(second['order_id'], result['order_id'])
-
-        ledger = self._load_capsule_ledger()
-        revenue = self._load_capsule_revenue()
-        txs = self._load_capsule_txs()
-
-        self.assertAlmostEqual(ledger['treasury']['cash_usd'], 2.5, places=2)
-        self.assertAlmostEqual(ledger['treasury']['total_revenue_usd'], 2.5, places=2)
-        self.assertIn('ref:pay_123', ledger['treasury']['processed_payment_keys'])
-        self.assertEqual(revenue['orders'][result['order_id']]['status'], 'paid')
-
-        evidence = self.revenue_mod.find_customer_payment_evidence(
-            payment_ref='pay_123',
-            min_amount_usd=2.5,
-            org_id=self.org_id,
-        )
-        self.assertIsNotNone(evidence)
-        self.assertEqual(evidence['payment_key'], 'ref:pay_123')
-
-        customer_txs = [tx for tx in txs if tx.get('type') == 'customer_payment']
-        self.assertEqual(len(customer_txs), 1)
-        self.assertEqual((ECONOMY_DIR / 'transactions.jsonl').read_text(), self.default_tx_before)
-        self.assertEqual(
-            json.loads((ECONOMY_DIR / 'ledger.json').read_text())['treasury']['cash_usd'],
-            self.default_ledger_before['treasury']['cash_usd'],
-        )
-
     def test_support_contribution_does_not_create_customer_revenue(self):
         result = self.revenue_mod.record_external_support_contribution(
             1.75,

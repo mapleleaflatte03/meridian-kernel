@@ -165,14 +165,6 @@ def customer_client_ids(revenue_data):
     }
 
 
-def customer_orders(revenue_data):
-    return {
-        oid: order
-        for oid, order in revenue_data.get('orders', {}).items()
-        if is_customer_order(order)
-    }
-
-
 def reclassified_order_ids(transactions=None, org_id=None):
     transactions = transactions if transactions is not None else load_transactions(org_id)
     return {

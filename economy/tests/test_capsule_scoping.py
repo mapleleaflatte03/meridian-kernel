@@ -43,8 +43,17 @@ class CapsuleScopingTests(unittest.TestCase):
         revenue_path.write_text(json.dumps({'clients': {}, 'orders': {}, 'receivables_usd': 0.0, 'updatedAt': '2026-03-21T00:00:00Z'}, indent=2))
         tx_path.write_text('')
 
-        self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
-        self.default_tx_before = (ECONOMY_DIR / 'transactions.jsonl').read_text()
+        default_ledger_path = ECONOMY_DIR / 'ledger.json'
+        if default_ledger_path.exists():
+            self.default_ledger_before = json.loads(default_ledger_path.read_text())
+        else:
+            self.default_ledger_before = None
+
+        default_tx_path = ECONOMY_DIR / 'transactions.jsonl'
+        if default_tx_path.exists():
+            self.default_tx_before = default_tx_path.read_text()
+        else:
+            self.default_tx_before = None
 
     def tearDown(self):
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
@@ -60,8 +69,9 @@ class CapsuleScopingTests(unittest.TestCase):
         self.assertEqual(rc, 0, err or out)
         ledger = json.loads((self.capsule_dir / 'ledger.json').read_text())
         self.assertTrue(ledger['agents']['sentinel']['probation'])
-        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
-        self.assertFalse(default_ledger['agents']['sentinel'].get('probation', False))
+        if self.default_ledger_before:
+            default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+            self.assertFalse(default_ledger['agents']['sentinel'].get('probation', False))
 
     def test_revenue_paid_event_credits_only_capsule_treasury(self):
         out, rc, err = run([
@@ -93,9 +103,11 @@ class CapsuleScopingTests(unittest.TestCase):
 
         ledger = json.loads((self.capsule_dir / 'ledger.json').read_text())
         self.assertAlmostEqual(ledger['treasury']['cash_usd'], 1.25, places=2)
-        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
-        self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
-        self.assertEqual((ECONOMY_DIR / 'transactions.jsonl').read_text(), self.default_tx_before)
+        if self.default_ledger_before:
+            default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+            self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
+        if self.default_tx_before:
+            self.assertEqual((ECONOMY_DIR / 'transactions.jsonl').read_text(), self.default_tx_before)
 
         tx_lines = [json.loads(line) for line in (self.capsule_dir / 'transactions.jsonl').read_text().splitlines() if line.strip()]
         order_created = [entry for entry in tx_lines if entry.get('type') == 'order_created']

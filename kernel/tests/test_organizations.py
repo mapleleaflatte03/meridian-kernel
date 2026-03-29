@@ -1,5 +1,11 @@
+import os
+import sys
 import unittest
 from unittest.mock import patch
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, ROOT)
+
 from kernel.organizations import update_org
 
 class TestOrganizationsUpdateOrg(unittest.TestCase):

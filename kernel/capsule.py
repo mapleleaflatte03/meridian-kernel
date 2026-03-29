@@ -507,10 +507,6 @@ def ledger_path(org_id=None):
     return capsule_path(org_id, 'ledger.json')
 
 
-def revenue_path(org_id=None):
-    return capsule_path(org_id, 'revenue.json')
-
-
 def transactions_path(org_id=None):
     return capsule_path(org_id, 'transactions.jsonl')
 

@@ -5362,7 +5362,7 @@ def _blocking_case_for_delivery(*, org_id, commitment_id='', target_host_id='', 
             if commitment_case:
                 return commitment_case
         return blocking_peer_case(target_host_id, org_id=org_id, _blocking_cases=cases)
-    except (SystemExit, ValueError):
+    except (SystemExit, ValueError, AttributeError):
         return None
 
 

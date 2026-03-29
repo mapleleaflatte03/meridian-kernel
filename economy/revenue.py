@@ -157,14 +157,6 @@ def is_customer_order(order):
     return order.get('product') not in NON_CUSTOMER_PRODUCTS and order.get('payment_kind') != 'owner_capital'
 
 
-def customer_client_ids(revenue_data):
-    return {
-        order['client']
-        for order in revenue_data.get('orders', {}).values()
-        if is_customer_order(order)
-    }
-
-
 def customer_orders(revenue_data):
     return {
         oid: order

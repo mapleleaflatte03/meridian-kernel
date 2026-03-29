@@ -119,7 +119,13 @@ def _manual_init():
     orgs = load_orgs()
     if not orgs.get('organizations'):
         orgs['organizations'] = {}
-    if not any(o.get('slug') == 'demo-org' for o in orgs.get('organizations', {}).values()):
+    existing_meridian_org_id = next(
+        (oid for oid, o in orgs.get('organizations', {}).items() if o.get('slug') == 'meridian'),
+        '',
+    )
+    if existing_meridian_org_id:
+        org_id = existing_meridian_org_id
+    elif not any(o.get('slug') == 'demo-org' for o in orgs.get('organizations', {}).values()):
         import uuid
         org_id = f'org_{uuid.uuid4().hex[:8]}'
         orgs['organizations'][org_id] = {
@@ -149,6 +155,8 @@ def _manual_init():
         }
         save_orgs(orgs)
         step(f"Created institution: Demo Org ({org_id})")
+    else:
+        org_id = next((oid for oid, o in orgs['organizations'].items() if o.get('slug') == 'demo-org'), '')
 
     # Register agents
     AGENTS = [
@@ -162,8 +170,6 @@ def _manual_init():
     ]
     reg = load_registry()
     existing_names = {a['name'] for a in reg.get('agents', {}).values()}
-    org_id = next((oid for oid, o in orgs['organizations'].items() if o.get('slug') == 'demo-org'), '')
-
     for name, role, ekey, purpose in AGENTS:
         if name not in existing_names:
             agent_id = f'agent_{name.lower()}'

@@ -24,7 +24,7 @@ sys.path.insert(0, PLATFORM_DIR)
 from organizations import load_orgs, save_orgs, create_org, _now, DEFAULT_POLICY_DEFAULTS
 from agent_registry import load_registry, save_registry, _now as _reg_now
 from audit import log_event
-from capsule import capsule_path
+from capsule import capsule_path, init_capsule
 from authority import _load_queue, _save_queue
 from court import _load_records, _save_records
 from treasury import (load_wallets, load_treasury_accounts, load_maintainers,
@@ -58,12 +58,27 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
     # -- 1. Create founding organization --------------------------------------
     orgs = load_orgs()
     founding_org_id = None
+    reuse_meridian = (
+        not name and not owner_id and not slug and not charter and org_slug == _DEFAULT_ORG_SLUG
+    )
 
-    for oid, org in orgs['organizations'].items():
-        if org.get('slug') == org_slug:
-            founding_org_id = oid
-            print(f'Founding org already exists: {oid}')
-            break
+    if reuse_meridian:
+        for oid, org in orgs['organizations'].items():
+            if org.get('slug') == 'meridian':
+                founding_org_id = oid
+                org_name = org.get('name') or 'Meridian'
+                org_owner = org.get('owner_id') or org_owner
+                org_slug = org.get('slug') or 'meridian'
+                org_charter = org.get('charter') or org_charter
+                print(f'Reusing existing Meridian org: {oid}')
+                break
+
+    if not founding_org_id:
+        for oid, org in orgs['organizations'].items():
+            if org.get('slug') == org_slug:
+                founding_org_id = oid
+                print(f'Founding org already exists: {oid}')
+                break
 
     if not founding_org_id:
         founding_org_id = create_org(
@@ -128,6 +143,11 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
 
     with open(LEDGER_FILE) as f:
         ledger = json.load(f)
+
+    founding_ledger_path = capsule_path(founding_org_id, 'ledger.json')
+    if not os.path.exists(founding_ledger_path):
+        init_capsule(founding_org_id, ledger_template=ledger)
+        print(f'  Initialized capsule for {founding_org_id}')
 
     registry = load_registry()
 

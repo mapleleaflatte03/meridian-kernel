@@ -2444,7 +2444,11 @@ def _json_rpc_request(rpc_url, method, params=None, *, timeout_seconds=10):
     req = urllib_request.Request(
         rpc_url,
         data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'},
+        headers={
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'MeridianKernel/1.0',
+        },
         method='POST',
     )
     try:

@@ -3,12 +3,17 @@ from unittest.mock import patch, MagicMock
 import os
 import sys
 
-# Save original sys.path before quickstart pollutes it
-_original_sys_path = sys.path.copy()
-import quickstart
-sys.path[:] = _original_sys_path
-
 class TestInitKernel(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # Import quickstart within a controlled scope to prevent test runner pollution
+        # since quickstart globally inserts into sys.path upon module loading.
+        import sys
+        original_path = sys.path.copy()
+        import quickstart
+        sys.path[:] = original_path
+        cls.quickstart = quickstart
 
     @patch('quickstart.step')
     @patch('quickstart.subprocess.run')
@@ -19,7 +24,7 @@ class TestInitKernel(unittest.TestCase):
         mock_kernel_bootstrap.bootstrap = mock_bootstrap_func
 
         with patch.dict('sys.modules', {'kernel.bootstrap': mock_kernel_bootstrap}):
-            quickstart.init_kernel()
+            self.quickstart.init_kernel()
 
             mock_bootstrap_func.assert_called_once()
             mock_subprocess_run.assert_not_called()
@@ -40,12 +45,12 @@ class TestInitKernel(unittest.TestCase):
         mock_subprocess_run.return_value = mock_subprocess_result
 
         with patch.dict('sys.modules', {'kernel.bootstrap': mock_kernel_bootstrap}):
-            quickstart.init_kernel()
+            self.quickstart.init_kernel()
 
             mock_bootstrap_func.assert_called_once()
             mock_subprocess_run.assert_called_once_with(
-                [sys.executable, os.path.join(quickstart.KERNEL_DIR, 'bootstrap.py')],
-                capture_output=True, text=True, cwd=quickstart.ROOT
+                [sys.executable, os.path.join(self.quickstart.KERNEL_DIR, 'bootstrap.py')],
+                capture_output=True, text=True, cwd=self.quickstart.ROOT
             )
             mock_print.assert_called_with("Fallback bootstrap success")
             mock_manual_init.assert_not_called()
@@ -65,12 +70,12 @@ class TestInitKernel(unittest.TestCase):
         mock_subprocess_run.return_value = mock_subprocess_result
 
         with patch.dict('sys.modules', {'kernel.bootstrap': mock_kernel_bootstrap}):
-            quickstart.init_kernel()
+            self.quickstart.init_kernel()
 
             mock_bootstrap_func.assert_called_once()
             mock_subprocess_run.assert_called_once_with(
-                [sys.executable, os.path.join(quickstart.KERNEL_DIR, 'bootstrap.py')],
-                capture_output=True, text=True, cwd=quickstart.ROOT
+                [sys.executable, os.path.join(self.quickstart.KERNEL_DIR, 'bootstrap.py')],
+                capture_output=True, text=True, cwd=self.quickstart.ROOT
             )
             mock_print.assert_any_call("  Bootstrap error: Fallback bootstrap failed")
             mock_print.assert_any_call("  Attempting manual initialization...")

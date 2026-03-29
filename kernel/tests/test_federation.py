@@ -306,6 +306,10 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     )
     capsule_mod = importlib.util.module_from_spec(capsule_spec)
     capsule_spec.loader.exec_module(capsule_mod)
+
+    ledger_path = os.path.join(economy_dst, 'ledger.json')
+    if os.path.exists(ledger_path):
+        os.remove(ledger_path)
     capsule_mod.init_capsule(org_id)
 
     _write_json(

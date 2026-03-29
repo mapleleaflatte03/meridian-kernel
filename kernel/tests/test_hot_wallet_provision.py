@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import contextlib
 import importlib.util
+import io
 import json
 import pathlib
 import shutil
@@ -252,6 +253,65 @@ class HotWalletProvisionTests(unittest.TestCase):
         self.assertEqual(submitted_raw, [result['signed_transaction']['raw_transaction_hex']])
         self.assertEqual(rpc_calls[-1]['method'], 'eth_sendRawTransaction')
         self.assertIn('Base Sepolia or another non-mainnet/local RPC endpoint', result['truth_boundary'])
+
+
+
+    def test_main_provisions_wallet_and_outputs_json(self):
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            ops.main([
+                '--org_id', self.org_id,
+                '--actor_id', 'ops:test',
+                '--secret_dir', self.secret_dir,
+            ])
+
+        output = json.loads(stdout.getvalue())
+        self.assertIn('wallet', output)
+        self.assertIn('account', output)
+        self.assertIn('address', output)
+        self.assertIn('secret_path', output)
+        self.assertIn('secret_file_mode', output)
+        self.assertEqual(output['secret_file_mode'], '0o600')
+
+        wallet = treasury.get_wallet('automated_loom_settlement_v1', self.org_id)
+        self.assertEqual(output['address'], wallet['address'])
+
+    def test_main_with_x402_signing_args(self):
+        token_contract = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
+        recipient_address = '0x9999999999999999999999999999999999999999'
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            ops.main([
+                '--org_id', self.org_id,
+                '--actor_id', 'ops:test',
+                '--secret_dir', self.secret_dir,
+                '--recipient_address', recipient_address,
+                '--amount_usdc', '1.25',
+                '--token_contract_address', token_contract,
+                '--chain_id', '84532',
+                '--nonce', '0',
+                '--gas_limit', '65000',
+                '--gas_price_wei', '1000000000',
+                '--host_supported_adapter', 'base_usdc_x402',
+            ])
+
+        output = json.loads(stdout.getvalue())
+        self.assertIn('wallet', output)
+        self.assertIn('x402_signing', output)
+
+        signing = output['x402_signing']
+        self.assertTrue(signing['unsigned_transaction_prepared'])
+        self.assertTrue(signing['signing_performed'])
+        self.assertFalse(signing['broadcast']['attempted'])
+
+    def test_main_missing_x402_args_raises_system_exit(self):
+        with self.assertRaises(SystemExit) as cm:
+            ops.main([
+                '--org_id', self.org_id,
+                '--actor_id', 'ops:test',
+                '--secret_dir', self.secret_dir,
+                '--recipient_address', '0x123',
+                # Missing amount_usdc and token_contract_address
+            ])
+        self.assertIn('Missing required x402 signing arguments', str(cm.exception))
 
 
 if __name__ == '__main__':

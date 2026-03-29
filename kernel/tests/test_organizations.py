@@ -1,3 +1,9 @@
+import os
+import sys
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import unittest
 from unittest.mock import patch
 from kernel.organizations import update_org

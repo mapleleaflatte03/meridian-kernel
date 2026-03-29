@@ -249,18 +249,6 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     economy_dst = os.path.join(root_dir, 'economy')
     shutil.copytree(kernel_src, kernel_dst, ignore_dangling_symlinks=True)
     shutil.copytree(economy_src, economy_dst, ignore_dangling_symlinks=True)
-    shutil.rmtree(os.path.join(economy_dst, 'capsules'), ignore_errors=True)
-    shutil.rmtree(os.path.join(root_dir, 'capsules'), ignore_errors=True)
-    try:
-        os.remove(os.path.join(economy_dst, 'ledger.json'))
-    except OSError:
-        pass
-    shutil.rmtree(os.path.join(economy_dst, 'capsules'), ignore_errors=True)
-    shutil.rmtree(os.path.join(root_dir, 'capsules'), ignore_errors=True)
-    try:
-        os.remove(os.path.join(economy_dst, 'ledger.json'))
-    except OSError:
-        pass
 
     _write_json(
         os.path.join(kernel_dst, 'organizations.json'),

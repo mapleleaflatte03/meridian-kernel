@@ -2981,7 +2981,7 @@ class FederationTests(unittest.TestCase):
             )
             commitment_id = 'cmt_replay_settlement'
             _seed_commitments(
-                os.path.join(beta['economy'], 'commitments.json'),
+                os.path.join(beta['root'], 'capsules', 'org_beta', 'commitments.json'),
                 [
                     _accepted_commitment_record(
                         org_id='org_beta',
@@ -3068,7 +3068,7 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(inbox_body['summary']['total'], 1)
                 self.assertEqual(inbox_body['summary']['processed'], 1)
 
-            with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+            with open(os.path.join(beta['root'], 'capsules', 'org_beta', 'commitments.json')) as f:
                 beta_commitments = json.load(f)
             beta_record = beta_commitments['commitments'][commitment_id]
             self.assertEqual(len(beta_record['settlement_refs']), 1)
@@ -3206,7 +3206,7 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(inbox_body['summary']['processed'], 0)
                 self.assertEqual(inbox_body['entries'][0]['state'], 'received')
 
-            with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+            with open(os.path.join(beta['root'], 'capsules', 'org_beta', 'commitments.json')) as f:
                 beta_commitments = json.load(f)
             beta_record = beta_commitments['commitments'][commitment_id]
             self.assertEqual(beta_record['state'], 'accepted')
@@ -6730,7 +6730,7 @@ class FederationTests(unittest.TestCase):
                 signing_secret='alpha-secret',
             )
 
-            economy_dir = os.path.join(alpha['root'], 'economy')
+            economy_dir = os.path.join(alpha['root'], 'capsules', 'org_alpha')
             with open(os.path.join(economy_dir, 'ledger.json')) as f:
                 ledger = json.load(f)
             ledger['treasury']['cash_usd'] = 140.0

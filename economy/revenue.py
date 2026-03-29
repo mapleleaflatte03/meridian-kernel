@@ -226,19 +226,6 @@ def _payment_tx_exists(transactions, payment_key, tx_hash='', payment_ref=''):
     return False
 
 
-def _support_tx_exists(transactions, payment_key, tx_hash='', payment_ref=''):
-    for entry in transactions:
-        if entry.get('type') != 'support_contribution':
-            continue
-        if entry.get('payment_key') == payment_key:
-            return True
-        if tx_hash and entry.get('tx_hash') == tx_hash:
-            return True
-        if payment_ref and entry.get('payment_ref') == payment_ref:
-            return True
-    return False
-
-
 def find_customer_payment_evidence(*, payment_ref='', tx_hash='', min_amount_usd=0.0, transactions=None, org_id=None):
     """Return the matched non-reclassified customer payment entry, or None."""
     if not payment_ref and not tx_hash:
@@ -384,51 +371,6 @@ def record_external_customer_payment(product, amount_usd, *, payment_key, client
             'duplicate': not revenue_changed and not ledger_changed and tx_exists,
         }
 
-
-def record_external_support_contribution(amount_usd, *, payment_key, supporter_name='',
-                                         supporter_contact='', note='', tx_hash='',
-                                         payment_ref='', payment_source='external_support',
-                                         org_id=None):
-    """Idempotently record externally received support without creating customer traction."""
-    if not payment_key:
-        raise ValueError('payment_key is required')
-    amount = float(amount_usd)
-    if amount <= 0:
-        raise ValueError('amount_usd must be greater than 0')
-
-    with payment_lock():
-        ledger = load_ledger(org_id)
-        transactions = load_transactions(org_id)
-        treasury = ledger['treasury']
-        processed_keys = _ensure_processed_payment_keys(ledger)
-
-        ledger_changed = False
-        if payment_key not in processed_keys:
-            treasury['cash_usd'] += amount
-            treasury['support_received_usd'] = treasury.get('support_received_usd', 0) + amount
-            processed_keys.append(payment_key)
-            ledger_changed = True
-
-        tx_exists = _support_tx_exists(transactions, payment_key, tx_hash=tx_hash, payment_ref=payment_ref)
-        if ledger_changed:
-            save_ledger(ledger, org_id)
-        if not tx_exists:
-            append_tx({
-                'type': 'support_contribution',
-                'amount': amount,
-                'payment_key': payment_key,
-                'payment_ref': payment_ref,
-                'tx_hash': tx_hash,
-                'payment_source': payment_source,
-                'supporter_name': supporter_name,
-                'supporter_contact': supporter_contact,
-                'note': note,
-            }, org_id)
-
-        return {
-            'payment_key': payment_key,
-            'duplicate': not ledger_changed and tx_exists,
-        }
 
 # ── Client management ────────────────────────────────────────────────────────
 

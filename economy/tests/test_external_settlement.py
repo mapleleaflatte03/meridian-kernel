@@ -115,37 +115,6 @@ class ExternalSettlementTests(unittest.TestCase):
             self.default_ledger_before['treasury']['cash_usd'],
         )
 
-    def test_support_contribution_does_not_create_customer_revenue(self):
-        result = self.revenue_mod.record_external_support_contribution(
-            1.75,
-            payment_key='support:abc',
-            payment_ref='support_abc',
-            supporter_name='Backer',
-            supporter_contact='supporter@example.com',
-            payment_source='integration_test',
-            org_id=self.org_id,
-        )
-        self.assertFalse(result['duplicate'])
-
-        second = self.revenue_mod.record_external_support_contribution(
-            1.75,
-            payment_key='support:abc',
-            payment_ref='support_abc',
-            supporter_name='Backer',
-            supporter_contact='supporter@example.com',
-            payment_source='integration_test',
-            org_id=self.org_id,
-        )
-        self.assertTrue(second['duplicate'])
-
-        ledger = self._load_capsule_ledger()
-        txs = self._load_capsule_txs()
-        self.assertAlmostEqual(ledger['treasury']['cash_usd'], 1.75, places=2)
-        self.assertAlmostEqual(ledger['treasury']['support_received_usd'], 1.75, places=2)
-        self.assertEqual(ledger['treasury'].get('total_revenue_usd', 0.0), 0.0)
-        support_txs = [tx for tx in txs if tx.get('type') == 'support_contribution']
-        self.assertEqual(len(support_txs), 1)
-
 
 if __name__ == '__main__':
     unittest.main()

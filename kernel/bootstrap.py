@@ -24,7 +24,7 @@ sys.path.insert(0, PLATFORM_DIR)
 from organizations import load_orgs, save_orgs, create_org, _now, DEFAULT_POLICY_DEFAULTS
 from agent_registry import load_registry, save_registry, _now as _reg_now
 from audit import log_event
-from capsule import capsule_path
+from capsule import capsule_path, init_capsule
 from authority import _load_queue, _save_queue
 from court import _load_records, _save_records
 from treasury import (load_wallets, load_treasury_accounts, load_maintainers,
@@ -128,6 +128,11 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
 
     with open(LEDGER_FILE) as f:
         ledger = json.load(f)
+
+    founding_ledger_path = capsule_path(founding_org_id, 'ledger.json')
+    if not os.path.exists(founding_ledger_path):
+        init_capsule(founding_org_id, ledger_template=ledger)
+        print(f'  Initialized capsule for {founding_org_id}')
 
     registry = load_registry()
 

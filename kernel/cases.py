@@ -13,6 +13,7 @@ It does not claim the full network court program. It does establish:
 from __future__ import annotations
 
 import datetime
+import copy
 import json
 import os
 import sys
@@ -83,14 +84,23 @@ def _empty_store():
     }
 
 
+_STORE_CACHE = {}
+
+
 def _load_store(org_id=None):
     path = _store_path(org_id)
     parent = os.path.dirname(path)
     if org_id and not os.path.isdir(parent):
         _missing_org_error(org_id)
     if os.path.exists(path):
+        mtime = os.path.getmtime(path)
+        cached = _STORE_CACHE.get(path)
+        if cached and cached['mtime'] == mtime:
+            return copy.deepcopy(cached['data'])
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        _STORE_CACHE[path] = {'mtime': mtime, 'data': copy.deepcopy(data)}
+        return copy.deepcopy(data)
     return _empty_store()
 
 
@@ -103,6 +113,7 @@ def _save_store(data, org_id=None):
     os.makedirs(parent, exist_ok=True)
     with open(path, 'w') as f:
         json.dump(data, f, indent=2, sort_keys=True)
+    _STORE_CACHE[path] = {'mtime': os.path.getmtime(path), 'data': copy.deepcopy(data)}
 
 
 def open_case(org_id, claim_type, actor_id, *, target_host_id='',

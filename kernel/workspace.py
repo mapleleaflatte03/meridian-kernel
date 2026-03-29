@@ -5356,13 +5356,12 @@ def _blocking_case_for_delivery(*, org_id, commitment_id='', target_host_id='', 
     try:
         if message_type in ('commitment_breach_notice', 'case_notice'):
             return None
-        cases = cases_module.blocking_cases(org_id)
         if message_type != 'commitment_breach_notice':
-            commitment_case = blocking_commitment_case(commitment_id, org_id=org_id, _blocking_cases=cases)
+            commitment_case = blocking_commitment_case(commitment_id, org_id=org_id)
             if commitment_case:
                 return commitment_case
-        return blocking_peer_case(target_host_id, org_id=org_id, _blocking_cases=cases)
-    except (SystemExit, ValueError, AttributeError):
+        return blocking_peer_case(target_host_id, org_id=org_id)
+    except (SystemExit, ValueError):
         return None
 
 

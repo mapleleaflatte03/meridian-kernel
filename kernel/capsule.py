@@ -515,18 +515,6 @@ def transactions_path(org_id=None):
     return capsule_path(org_id, 'transactions.jsonl')
 
 
-def subscriptions_path(org_id=None):
-    return capsule_path(org_id, 'subscriptions.json')
-
-
-def subscriptions_backup_path(org_id=None):
-    return capsule_path(org_id, 'subscriptions.json.bak')
-
-
-def subscriptions_lock_path(org_id=None):
-    return capsule_path(org_id, '.subscriptions.lock')
-
-
 def owner_ledger_path(org_id=None):
     return capsule_path(org_id, 'owner_ledger.json')
 

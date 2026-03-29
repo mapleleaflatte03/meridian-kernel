@@ -306,7 +306,10 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     )
     capsule_mod = importlib.util.module_from_spec(capsule_spec)
     capsule_spec.loader.exec_module(capsule_mod)
-    capsule_mod.init_capsule(org_id)
+    try:
+        capsule_mod.init_capsule(org_id)
+    except FileExistsError:
+        pass
 
     _write_json(
         os.path.join(kernel_dst, 'institution_admissions.json'),

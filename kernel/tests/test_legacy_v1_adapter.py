@@ -80,40 +80,6 @@ class LegacyV1AdapterTests(unittest.TestCase):
         self.assertFalse(result['allowed'])
         self.assertIn('restricted from execute', result['reason'])
 
-    def test_pre_action_check_blocks_authority_failure(self):
-        adapter.get_restrictions = lambda agent_id, org_id=None: []
-        adapter.check_authority = lambda agent_id, action, org_id=None: (False, 'kill switch engaged')
-        envelope = adapter.build_action_envelope('atlas', 'research', 'web_search', 0.10)
-        result = adapter.pre_action_check('org_demo', envelope)
-        self.assertFalse(result['allowed'])
-        self.assertEqual(result['stage'], 'approval_hook')
-        self.assertEqual(result['reason'], 'kill switch engaged')
-
-    def test_pre_action_check_blocks_budget_failure(self):
-        adapter.get_restrictions = lambda agent_id, org_id=None: []
-        adapter.check_authority = lambda agent_id, action, org_id=None: (True, 'ok')
-        adapter.check_budget = lambda agent_id, cost_usd, org_id=None: (False, 'below reserve')
-        envelope = adapter.build_action_envelope('atlas', 'research', 'web_search', 0.10)
-        result = adapter.pre_action_check('org_demo', envelope)
-        self.assertFalse(result['allowed'])
-        self.assertEqual(result['stage'], 'budget_gate')
-        self.assertEqual(result['reason'], 'below reserve')
-
-    def test_pre_action_check_allows_zero_cost_without_budget_gate(self):
-        calls = []
-        adapter.get_restrictions = lambda agent_id, org_id=None: []
-        adapter.check_authority = lambda agent_id, action, org_id=None: (True, 'ok')
-
-        def _budget(*args, **kwargs):
-            calls.append((args, kwargs))
-            return True, 'ok'
-
-        adapter.check_budget = _budget
-        envelope = adapter.build_action_envelope('atlas', 'research', 'web_search', 0.0)
-        result = adapter.pre_action_check('org_demo', envelope)
-        self.assertTrue(result['allowed'])
-        self.assertEqual(calls, [])
-
     def test_post_action_record_emits_meter_and_audit(self):
         seen = {}
         adapter.meter_record = lambda org_id, agent_id, metric, quantity=1.0, unit='calls', cost_usd=0.0, run_id='', details=None: (

@@ -268,16 +268,6 @@ def find_customer_payment_evidence(*, payment_ref='', tx_hash='', min_amount_usd
     return None
 
 
-def customer_payment_evidence_exists(*, payment_ref='', tx_hash='', min_amount_usd=0.0, transactions=None, org_id=None):
-    return find_customer_payment_evidence(
-        payment_ref=payment_ref,
-        tx_hash=tx_hash,
-        min_amount_usd=min_amount_usd,
-        transactions=transactions,
-        org_id=org_id,
-    ) is not None
-
-
 def record_external_customer_payment(product, amount_usd, *, payment_key, client_name,
                                      client_contact, note='', tx_hash='',
                                      payment_ref='', payment_source='external',

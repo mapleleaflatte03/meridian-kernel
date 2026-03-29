@@ -241,22 +241,24 @@ def case_targets_peer(case_record):
     )
 
 
-def blocking_commitment_case(commitment_id, org_id=None):
+def blocking_commitment_case(commitment_id, org_id=None, *, _blocking_cases=None):
     commitment_id = (commitment_id or '').strip()
     if not commitment_id:
         return None
-    for row in blocking_cases(org_id):
+    cases = _blocking_cases if _blocking_cases is not None else blocking_cases(org_id)
+    for row in cases:
         if row.get('linked_commitment_id') == commitment_id:
             return row
     return None
 
 
-def blocking_peer_case(peer_host_id, org_id=None, *, claim_types=None):
+def blocking_peer_case(peer_host_id, org_id=None, *, claim_types=None, _blocking_cases=None):
     peer_host_id = (peer_host_id or '').strip()
     if not peer_host_id:
         return None
     allowed_claim_types = set(claim_types or PEER_SUSPENSION_CLAIM_TYPES)
-    for row in blocking_cases(org_id):
+    cases = _blocking_cases if _blocking_cases is not None else blocking_cases(org_id)
+    for row in cases:
         if (
             row.get('target_host_id') == peer_host_id
             and row.get('claim_type') in allowed_claim_types

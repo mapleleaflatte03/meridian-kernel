@@ -95,57 +95,6 @@ def pre_session_check(org_id, agent_id):
     }
 
 
-def pre_action_check(org_id, envelope):
-    envelope = validate_action_envelope(envelope)
-    session_gate = pre_session_check(org_id, envelope['agent_id'])
-    if not session_gate['allowed']:
-        return {
-            'allowed': False,
-            'reason': session_gate['reason'],
-            'stage': 'sanction_controls',
-            'envelope': envelope,
-            'restrictions': session_gate['restrictions'],
-        }
-
-    allowed, reason = check_authority(
-        envelope['agent_id'],
-        envelope['action_type'],
-        org_id=org_id,
-    )
-    if not allowed:
-        return {
-            'allowed': False,
-            'reason': reason,
-            'stage': 'approval_hook',
-            'envelope': envelope,
-            'restrictions': session_gate['restrictions'],
-        }
-
-    estimated_cost = envelope['estimated_cost_usd']
-    if estimated_cost > 0:
-        allowed, reason = check_budget(
-            envelope['agent_id'],
-            estimated_cost,
-            org_id=org_id,
-        )
-        if not allowed:
-            return {
-                'allowed': False,
-                'reason': reason,
-                'stage': 'budget_gate',
-                'envelope': envelope,
-                'restrictions': session_gate['restrictions'],
-            }
-
-    return {
-        'allowed': True,
-        'reason': 'ok',
-        'stage': 'ok',
-        'envelope': envelope,
-        'restrictions': session_gate['restrictions'],
-    }
-
-
 def post_action_record(org_id, envelope, *, outcome='success', actual_cost_usd=None,
                        metric='runtime_action', quantity=1.0, unit='calls',
                        actor_type='agent'):

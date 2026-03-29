@@ -119,7 +119,15 @@ class CapsuleScopingTests(unittest.TestCase):
         self.assertIn('below lead threshold', out)
 
     def test_explicit_founding_org_alias_resolves_to_legacy_economy(self):
-        founding_org = 'org_b7d95bae'
+        # We need to find the currently registered founding org in the real orgs file
+        # because quickstart assigns a random UUID hex.
+        orgs_file = pathlib.Path(self.capsule.ORGS_FILE)
+        founding_org = 'org_b7d95bae' # default fallback
+        if orgs_file.exists():
+            orgs_data = json.loads(orgs_file.read_text())
+            if 'organizations' in orgs_data and orgs_data['organizations']:
+                founding_org = list(orgs_data['organizations'].keys())[0]
+
         self.assertEqual(
             pathlib.Path(self.capsule.capsule_path(founding_org, 'ledger.json')),
             ECONOMY_DIR / 'ledger.json',

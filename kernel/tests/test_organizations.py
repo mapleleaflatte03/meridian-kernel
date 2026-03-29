@@ -1,5 +1,12 @@
+import os
+import sys
 import unittest
 from unittest.mock import patch
+
+WORKSPACE = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+if WORKSPACE not in sys.path:
+    sys.path.insert(0, WORKSPACE)
+
 from kernel.organizations import update_org
 
 class TestOrganizationsUpdateOrg(unittest.TestCase):

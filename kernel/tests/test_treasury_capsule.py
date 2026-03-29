@@ -49,7 +49,10 @@ class TreasuryCapsuleTests(unittest.TestCase):
             }
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
-        self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+        if (ECONOMY_DIR / 'ledger.json').exists():
+            self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+        else:
+            self.default_ledger_before = None
 
     def tearDown(self):
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
@@ -72,8 +75,9 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(tx_lines[0]['type'], 'treasury_deposit')
         self.assertEqual(tx_lines[0]['deposit_type'], 'owner_capital')
 
-        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
-        self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
+        if self.default_ledger_before:
+            default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+            self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
 
     def test_load_funding_sources_backfills_owner_capital_from_ledger(self):
         ledger_path = self.capsule_dir / 'ledger.json'

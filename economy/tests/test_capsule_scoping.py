@@ -63,6 +63,35 @@ class CapsuleScopingTests(unittest.TestCase):
         default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
         self.assertFalse(default_ledger['agents']['sentinel'].get('probation', False))
 
+    def test_sanctions_lift_writes_only_to_capsule(self):
+        # First apply a sanction
+        out, rc, err = run([
+            'python3', 'economy/sanctions.py', 'apply',
+            '--org_id', self.org_id,
+            '--agent', 'sentinel',
+            '--type', 'probation',
+            '--note', 'capsule test apply',
+        ])
+        self.assertEqual(rc, 0, err or out)
+
+        # Now lift the sanction
+        out, rc, err = run([
+            'python3', 'economy/sanctions.py', 'lift',
+            '--org_id', self.org_id,
+            '--agent', 'sentinel',
+            '--type', 'probation',
+            '--note', 'capsule test lift',
+        ])
+        self.assertEqual(rc, 0, err or out)
+
+        # Verify it is lifted in the capsule
+        ledger = json.loads((self.capsule_dir / 'ledger.json').read_text())
+        self.assertFalse(ledger['agents']['sentinel'].get('probation', False))
+
+        # Verify default ledger is unaffected
+        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+        self.assertFalse(default_ledger['agents']['sentinel'].get('probation', False))
+
     def test_revenue_paid_event_credits_only_capsule_treasury(self):
         out, rc, err = run([
             'python3', 'economy/revenue.py', 'client', 'add',
@@ -119,7 +148,18 @@ class CapsuleScopingTests(unittest.TestCase):
         self.assertIn('below lead threshold', out)
 
     def test_explicit_founding_org_alias_resolves_to_legacy_economy(self):
-        founding_org = 'org_b7d95bae'
+        # Read the org ID from organizations.json since it's randomly generated
+        orgs_file = ROOT / 'kernel' / 'organizations.json'
+        if orgs_file.exists():
+            orgs_data = json.loads(orgs_file.read_text())
+            orgs = orgs_data.get('organizations', {})
+            if orgs:
+                founding_org = list(orgs.keys())[0]
+            else:
+                founding_org = 'org_b7d95bae'
+        else:
+            founding_org = 'org_b7d95bae'
+
         self.assertEqual(
             pathlib.Path(self.capsule.capsule_path(founding_org, 'ledger.json')),
             ECONOMY_DIR / 'ledger.json',

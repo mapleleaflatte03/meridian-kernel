@@ -247,8 +247,15 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     economy_src = os.path.join(WORKSPACE, 'economy')
     kernel_dst = os.path.join(root_dir, 'kernel')
     economy_dst = os.path.join(root_dir, 'economy')
-    shutil.copytree(kernel_src, kernel_dst, ignore_dangling_symlinks=True)
-    shutil.copytree(economy_src, economy_dst, ignore_dangling_symlinks=True)
+
+    # Exclude global runtime state initialized by quickstart.py so each federation node is clean
+    ignore_patterns = shutil.ignore_patterns(
+        'ledger.json', 'revenue.json', 'transactions.jsonl',
+        'organizations.json', 'authority_queue.json', 'court_records.json',
+        '*.lock', 'capsules', 'agent_registry.json', 'audit_log.jsonl', 'metering.jsonl'
+    )
+    shutil.copytree(kernel_src, kernel_dst, ignore=ignore_patterns, ignore_dangling_symlinks=True)
+    shutil.copytree(economy_src, economy_dst, ignore=ignore_patterns, ignore_dangling_symlinks=True)
 
     _write_json(
         os.path.join(kernel_dst, 'organizations.json'),
@@ -306,7 +313,10 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     )
     capsule_mod = importlib.util.module_from_spec(capsule_spec)
     capsule_spec.loader.exec_module(capsule_mod)
-    capsule_mod.init_capsule(org_id)
+    try:
+        capsule_mod.init_capsule(org_id)
+    except FileExistsError:
+        pass
 
     _write_json(
         os.path.join(kernel_dst, 'institution_admissions.json'),

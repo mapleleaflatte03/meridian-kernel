@@ -30,7 +30,9 @@
 
 Meridian enforces cryptographic audit trails for Wasm host-calls and settles governed execution evidence on EVM, so execution claims can be verified instead of trusted. The full technical draft RFC is available in the Meridian Loom docs at [`docs/MERIDIAN_PoGE_PROTOCOL.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/MERIDIAN_PoGE_PROTOCOL.md).
 
-**Five primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**
+**Five kernel primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**
+
+The full Meridian platform composes a sixth platform primitive, **Commitment**, above this kernel boundary. This repo stays intentionally scoped to the five governance primitives so the kernel remains runtime-neutral and reusable.
 
 Pure Python. No external dependencies. Apache-2.0.
 
@@ -52,7 +54,7 @@ Meridian is intentionally split into three layers so each part can evolve withou
 | **Intelligence** | [`meridian-intelligence`](https://github.com/mapleleaflatte03/meridian-intelligence) | Governed work, planning, analysis, and operational intelligence on top of the kernel |
 | **Loom** | [`meridian-loom`](https://github.com/mapleleaflatte03/meridian-loom) | The runtime/runtime-adjacent execution scaffold that consumes the kernel contract |
 
-The kernel and intelligence layers can be exercised entirely locally. Loom remains a separate runtime surface so the governance contract stays independent of any one runner.
+The kernel and intelligence layers can be exercised entirely locally. Loom remains a separate runtime surface so the governance contract stays independent of any one runner. Commitment lives at the Meridian platform layer above this repo; it is not a sixth kernel primitive.
 
 ---
 

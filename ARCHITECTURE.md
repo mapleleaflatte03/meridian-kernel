@@ -32,8 +32,10 @@
 ## Design Thesis
 
 AI agents need governance the same way processes need an operating system.
-Meridian provides five composable primitives that any agent runtime can adopt
-to enforce identity, authority, budget, and accountability.
+Meridian Kernel provides five composable governance primitives that any agent
+runtime can adopt to enforce identity, authority, budget, and accountability.
+The broader Meridian platform composes a sixth platform primitive,
+**Commitment**, above this kernel boundary.
 
 **Meridian does not run agents. It governs them.**
 

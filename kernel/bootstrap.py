@@ -58,12 +58,27 @@ def bootstrap(name=None, owner_id=None, slug=None, charter=None, plan='enterpris
     # -- 1. Create founding organization --------------------------------------
     orgs = load_orgs()
     founding_org_id = None
+    reuse_meridian = (
+        not name and not owner_id and not slug and not charter and org_slug == _DEFAULT_ORG_SLUG
+    )
 
-    for oid, org in orgs['organizations'].items():
-        if org.get('slug') == org_slug:
-            founding_org_id = oid
-            print(f'Founding org already exists: {oid}')
-            break
+    if reuse_meridian:
+        for oid, org in orgs['organizations'].items():
+            if org.get('slug') == 'meridian':
+                founding_org_id = oid
+                org_name = org.get('name') or 'Meridian'
+                org_owner = org.get('owner_id') or org_owner
+                org_slug = org.get('slug') or 'meridian'
+                org_charter = org.get('charter') or org_charter
+                print(f'Reusing existing Meridian org: {oid}')
+                break
+
+    if not founding_org_id:
+        for oid, org in orgs['organizations'].items():
+            if org.get('slug') == org_slug:
+                founding_org_id = oid
+                print(f'Founding org already exists: {oid}')
+                break
 
     if not founding_org_id:
         founding_org_id = create_org(

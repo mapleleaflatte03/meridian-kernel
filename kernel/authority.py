@@ -289,15 +289,6 @@ def get_sprint_lead(org_id=None):
     return _econ_sprint_lead(ledger)
 
 
-def get_pending_approvals(agent_id=None, org_id=None):
-    """List pending approvals, optionally filtered by agent."""
-    queue = _load_queue(org_id)
-    approvals = list(queue['pending_approvals'].values())
-    if agent_id:
-        approvals = [a for a in approvals if a['requester_agent_id'] == agent_id]
-    return [a for a in approvals if a['status'] == 'pending']
-
-
 def is_kill_switch_engaged(org_id=None):
     """Check if kill switch is active."""
     queue = _load_queue(org_id)

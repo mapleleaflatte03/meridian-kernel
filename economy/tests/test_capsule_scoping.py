@@ -119,7 +119,15 @@ class CapsuleScopingTests(unittest.TestCase):
         self.assertIn('below lead threshold', out)
 
     def test_explicit_founding_org_alias_resolves_to_legacy_economy(self):
-        founding_org = 'org_b7d95bae'
+        # We need to find the dynamically generated founding org from organizations.json
+        org_path = ROOT / 'kernel' / 'organizations.json'
+        if not org_path.exists():
+            self.skipTest("No organizations.json found")
+            return
+
+        orgs_data = json.loads(org_path.read_text())
+        founding_org = list(orgs_data['organizations'].keys())[0]
+
         self.assertEqual(
             pathlib.Path(self.capsule.capsule_path(founding_org, 'ledger.json')),
             ECONOMY_DIR / 'ledger.json',

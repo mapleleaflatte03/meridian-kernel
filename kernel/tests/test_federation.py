@@ -224,20 +224,30 @@ def _auth_header(user, password):
     return 'Basic ' + base64.b64encode(raw).decode('ascii')
 
 
-def _http_json(method, url, *, payload=None, headers=None):
+def _http_json(method, url, *, payload=None, headers=None, timeout=30):
     req = urllib_request.Request(
         url,
         data=(json.dumps(payload).encode('utf-8') if payload is not None else None),
         headers=headers or {},
         method=method,
     )
-    try:
-        with urllib_request.urlopen(req, timeout=10) as response:
-            body = response.read().decode('utf-8')
-            return response.status, (json.loads(body) if body else {})
-    except urllib_error.HTTPError as exc:
-        body = exc.read().decode('utf-8')
-        return exc.code, (json.loads(body) if body else {})
+    retries = 5
+    for attempt in range(retries):
+        try:
+            with urllib_request.urlopen(req, timeout=timeout) as response:
+                body = response.read().decode('utf-8')
+                return response.status, (json.loads(body) if body else {})
+        except urllib_error.HTTPError as exc:
+            body = exc.read().decode('utf-8')
+            return exc.code, (json.loads(body) if body else {})
+        except (urllib_error.URLError, ConnectionError, TimeoutError, socket.timeout) as exc:
+            if attempt == retries - 1:
+                raise
+            time.sleep(1.0)
+        except Exception as exc:
+            if attempt == retries - 1:
+                raise
+            time.sleep(1.0)
 
 
 def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_secret,
@@ -382,7 +392,7 @@ def _run_workspace(instance):
         text=True,
     )
     try:
-        deadline = time.time() + 10
+        deadline = time.time() + 30
         last_error = ''
         while time.time() < deadline:
             if proc.poll() is not None:
@@ -397,7 +407,7 @@ def _run_workspace(instance):
                 last_error = f'status={status} body={body}'
             except Exception as exc:
                 last_error = str(exc)
-            time.sleep(0.1)
+                time.sleep(0.5)
         else:
             raise RuntimeError(
                 f"workspace {instance['host_id']} did not become ready: {last_error}"

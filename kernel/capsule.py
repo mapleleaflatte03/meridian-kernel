@@ -150,16 +150,6 @@ def capsule_path(org_id, filename):
     return os.path.join(CAPSULES_DIR, org_id, filename)
 
 
-def capsule_dir(org_id):
-    """Return the capsule directory for an institution (or ECONOMY_DIR if None)."""
-    if org_id is None:
-        return ECONOMY_DIR
-    _maybe_auto_alias_legacy_org(org_id)
-    if org_id in _CAPSULE_ALIASES:
-        return _CAPSULE_ALIASES[org_id]
-    return os.path.join(CAPSULES_DIR, org_id)
-
-
 def ensure_capsule(org_id):
     """Create the capsule directory for *org_id* if it does not exist.
 

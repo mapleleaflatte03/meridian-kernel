@@ -32,6 +32,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import uuid
 from decimal import Decimal
 from urllib import error as urllib_error
@@ -169,8 +170,20 @@ def _save_budget_reservation_store(store, org_id=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     payload = _normalize_budget_reservation_store(store)
     payload['updatedAt'] = _now()
-    with open(path, 'w') as f:
-        json.dump(payload, f, indent=2)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix='.runtime-budget-reservations.',
+        suffix='.tmp',
+        dir=os.path.dirname(path),
+    )
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 def _ensure_runtime_budget_fields(ledger):

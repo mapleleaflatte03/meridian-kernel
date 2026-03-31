@@ -710,7 +710,12 @@ def reserve_runtime_budget(agent_id, estimated_cost_usd, *, org_id=None, action=
         }
 
     lookup_id = resolved_agent['id']
-    auth_allowed, auth_reason = check_authority(lookup_id, action or 'runtime_budget_reservation', org_id=org_id)
+    authority_ref = resolved_agent.get('economy_key') or lookup_id
+    auth_allowed, auth_reason = check_authority(
+        authority_ref,
+        action or 'runtime_budget_reservation',
+        org_id=org_id,
+    )
     if not auth_allowed:
         stage = 'sanction_controls'
         if 'kill switch' in auth_reason.lower() or 'delegat' in auth_reason.lower():
@@ -747,6 +752,7 @@ def reserve_runtime_budget(agent_id, estimated_cost_usd, *, org_id=None, action=
         'reservation_id': reservation_id,
         'org_id': org_id,
         'agent_id': lookup_id,
+        'economy_key': resolved_agent.get('economy_key') or '',
         'requested_agent_ref': agent_id,
         'status': 'reserved',
         'estimated_cost_usd': estimated_cost_usd,
@@ -798,6 +804,7 @@ def commit_runtime_budget(reservation_id, actual_cost_usd=None, *, org_id=None, 
         raise LookupError(f'Budget reservation not found: {reservation_id}')
     if reservation.get('status') not in ('reserved',):
         raise ValueError(f"Reservation {reservation_id} is already {reservation.get('status')}")
+    effective_org_id = org_id or reservation.get('org_id')
 
     expires_at = _reservation_datetime(reservation.get('expires_at'))
     if expires_at and datetime.datetime.utcnow() > expires_at:
@@ -814,15 +821,15 @@ def commit_runtime_budget(reservation_id, actual_cost_usd=None, *, org_id=None, 
     reservation['commit_reason'] = note or 'runtime budget committed'
     reservation['committed_at'] = _now()
     store['reservations'][reservation_id] = reservation
-    _save_budget_reservation_store(store, org_id)
+    _save_budget_reservation_store(store, effective_org_id)
     _update_runtime_budget_ledger(
-        org_id,
+        effective_org_id,
         reserved_delta=-estimated,
         committed_delta=actual,
         active_delta=-1,
     )
     _append_runtime_budget_audit_event(
-        org_id,
+        effective_org_id,
         reservation.get('agent_id'),
         'runtime_budget_committed',
         reservation,
@@ -833,7 +840,7 @@ def commit_runtime_budget(reservation_id, actual_cost_usd=None, *, org_id=None, 
         'reservation': reservation,
         'status': 'committed',
         'overage_usd': overage,
-        'budget': budget_reservation_summary(org_id, agent_id=reservation.get('agent_id')),
+        'budget': budget_reservation_summary(effective_org_id, agent_id=reservation.get('agent_id')),
     }
 
 
@@ -848,20 +855,21 @@ def release_runtime_budget(reservation_id, *, org_id=None, reason=''):
         raise LookupError(f'Budget reservation not found: {reservation_id}')
     if reservation.get('status') not in ('reserved',):
         raise ValueError(f"Reservation {reservation_id} is already {reservation.get('status')}")
+    effective_org_id = org_id or reservation.get('org_id')
     estimated = float(reservation.get('estimated_cost_usd', 0.0) or 0.0)
     reservation['status'] = 'released'
     reservation['released_at'] = _now()
     reservation['release_reason'] = reason or 'released'
     store['reservations'][reservation_id] = reservation
-    _save_budget_reservation_store(store, org_id)
+    _save_budget_reservation_store(store, effective_org_id)
     _update_runtime_budget_ledger(
-        org_id,
+        effective_org_id,
         reserved_delta=-estimated,
         released_delta=estimated,
         active_delta=-1,
     )
     _append_runtime_budget_audit_event(
-        org_id,
+        effective_org_id,
         reservation.get('agent_id'),
         'runtime_budget_released',
         reservation,
@@ -872,7 +880,7 @@ def release_runtime_budget(reservation_id, *, org_id=None, reason=''):
         'allowed': True,
         'reservation': reservation,
         'status': 'released',
-        'budget': budget_reservation_summary(org_id, agent_id=reservation.get('agent_id')),
+        'budget': budget_reservation_summary(effective_org_id, agent_id=reservation.get('agent_id')),
     }
 
 
@@ -3632,7 +3640,7 @@ def payout_execution_queue_snapshot(org_id=None, *, state=None, limit=50):
     return _payout_execution_queue_snapshot(org_id, state=state, limit=limit)
 
 
-def treasury_snapshot(org_id=None):
+def treasury_snapshot(org_id=None, *, host_supported_adapters=None):
     """Combined view: balance, revenue, spend, runway, reserve status."""
     ledger = load_ledger(org_id)
     t = ledger['treasury']
@@ -3680,6 +3688,8 @@ def treasury_snapshot(org_id=None):
         'funding_sources': len(load_funding_sources(org_id).get('sources', {})),
     }
 
+    host_supported = [item for item in (host_supported_adapters or []) if item]
+
     return {
         'balance_usd': balance,
         'reserve_floor_usd': floor,
@@ -3694,7 +3704,10 @@ def treasury_snapshot(org_id=None):
         'clients': rev_summary['clients'],
         'paid_orders': rev_summary['paid_orders'],
         'protocol': protocol,
-        'settlement_adapter_summary': settlement_adapter_summary(org_id),
+        'settlement_adapter_summary': settlement_adapter_summary(
+            org_id,
+            host_supported_adapters=host_supported,
+        ),
         'settlement_adapters': list_settlement_adapters(org_id),
         'plan_preview_queue_summary': payout_plan_preview_queue_summary(org_id),
         'plan_approval_candidate_queue_summary': payout_plan_approval_candidate_queue_summary(org_id),

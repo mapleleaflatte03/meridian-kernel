@@ -306,7 +306,16 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     )
     capsule_mod = importlib.util.module_from_spec(capsule_spec)
     capsule_spec.loader.exec_module(capsule_mod)
+    # The checked-in reference economy can carry founding-host live state at
+    # the root economy/ boundary. Strip all root capsule files before seeding
+    # temp hosts so tests run against isolated capsules/<org_id>/ state instead
+    # of inheriting stale execution jobs, inbox entries, or ledgers.
+    for filename in capsule_mod.CAPSULE_FILES:
+        copied_path = os.path.join(economy_dst, filename)
+        if os.path.exists(copied_path):
+            os.remove(copied_path)
     capsule_mod.init_capsule(org_id)
+    capsule_dir = capsule_mod.capsule_dir(org_id)
 
     _write_json(
         os.path.join(kernel_dst, 'institution_admissions.json'),
@@ -351,7 +360,8 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     return {
         'root': root_dir,
         'kernel': kernel_dst,
-        'economy': economy_dst,
+        'economy': capsule_dir,
+        'economy_root': economy_dst,
         'port': port,
         'org_id': org_id,
         'user_id': user_id,
@@ -465,6 +475,627 @@ def _issue_workspace_warrant(instance, token, request_payload, *, auto_issue=Fal
             )
         warrant = body['warrant']
     return warrant
+
+
+def _wait_for_execution_job(instance, envelope_id, *, timeout=5.0):
+    deadline = time.time() + timeout
+    last_body = {}
+    while time.time() < deadline:
+        status, body = _http_json(
+            'GET',
+            instance['base_url'] + '/api/federation/execution-jobs',
+            headers={'Authorization': instance['auth_header']},
+        )
+        if status == 200:
+            last_body = body
+            for job in body.get('jobs') or []:
+                if (job.get('envelope_id') or '').strip() == (envelope_id or '').strip():
+                    return body, job
+        time.sleep(0.1)
+    raise AssertionError(
+        f"timed out waiting for execution job envelope={envelope_id}: {last_body}"
+    )
+
+
+def _wait_for_warrant(instance, warrant_id, *, timeout=5.0):
+    deadline = time.time() + timeout
+    last_body = {}
+    while time.time() < deadline:
+        status, body = _http_json(
+            'GET',
+            instance['base_url'] + '/api/warrants',
+            headers={'Authorization': instance['auth_header']},
+        )
+        if status == 200:
+            last_body = body
+            for warrant in body.get('warrants') or []:
+                if (warrant.get('warrant_id') or '').strip() == (warrant_id or '').strip():
+                    return warrant
+        time.sleep(0.1)
+    raise AssertionError(
+        f"timed out waiting for warrant {warrant_id}: {last_body}"
+    )
+
+
+def _run_handoff_dispatch_proof():
+    try:
+        port_alpha = _find_free_port()
+        port_beta = _find_free_port()
+    except PermissionError as exc:
+        raise unittest.SkipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        alpha = _seed_workspace_root(
+            os.path.join(tmp, 'alpha'),
+            org_id='org_alpha',
+            user_id='user_owner_alpha',
+            host_id='host_alpha',
+            port=port_alpha,
+            signing_secret='alpha-secret',
+            peer_entries={
+                'host_beta': {
+                    'label': 'Beta Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'beta-secret',
+                    'admitted_org_ids': ['org_beta'],
+                },
+            },
+        )
+        beta = _seed_workspace_root(
+            os.path.join(tmp, 'beta'),
+            org_id='org_beta',
+            user_id='user_owner_beta',
+            host_id='host_beta',
+            port=port_beta,
+            signing_secret='beta-secret',
+            peer_entries={
+                'host_alpha': {
+                    'label': 'Alpha Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'alpha-secret',
+                    'admitted_org_ids': ['org_alpha'],
+                },
+            },
+        )
+        with _run_workspace(beta), _run_workspace(alpha):
+            session = _issue_workspace_session(alpha)
+            federation_status, federation_body = _http_json(
+                'GET',
+                alpha['base_url'] + '/api/federation',
+                headers={'Authorization': f"Bearer {session['token']}"},
+            )
+            if federation_status != 200:
+                raise AssertionError(f'failed reading federation state: {federation_status} {federation_body}')
+            remote_handoff = next(
+                item for item in federation_body['handoff_preview']['handoff_candidates']
+                if item['requested_org_id'] == 'org_beta'
+            )
+            handoff_id = remote_handoff['handoff_id']
+
+            acknowledge_status, acknowledge_body = _http_json(
+                'POST',
+                alpha['base_url'] + '/api/federation/handoff-preview-queue/acknowledge',
+                payload={'handoff_id': handoff_id, 'note': 'operator reviewed'},
+                headers={
+                    'Authorization': f"Bearer {session['token']}",
+                    'Content-Type': 'application/json',
+                },
+            )
+            if acknowledge_status != 200:
+                raise AssertionError(f'failed acknowledging handoff: {acknowledge_status} {acknowledge_body}')
+            dispatch_id = acknowledge_body['dispatch_record']['dispatch_id']
+
+            request_payload = {'task': 'remote handoff capsule'}
+            warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
+            dispatch_status, dispatch_body = _http_json(
+                'POST',
+                alpha['base_url'] + '/api/federation/handoff-dispatch-queue/run',
+                payload={
+                    'dispatch_id': dispatch_id,
+                    'payload': request_payload,
+                    'warrant_id': warrant['warrant_id'],
+                    'note': 'send queued handoff to remote host',
+                },
+                headers={
+                    'Authorization': f"Bearer {session['token']}",
+                    'Content-Type': 'application/json',
+                },
+            )
+            if dispatch_status != 200:
+                raise AssertionError(f'failed running handoff dispatch: {dispatch_status} {dispatch_body}')
+
+            queue_status, queue_body = _http_json(
+                'GET',
+                alpha['base_url'] + '/api/federation/handoff-dispatch-queue',
+                headers={'Authorization': alpha['auth_header']},
+            )
+            if queue_status != 200:
+                raise AssertionError(f'failed reading dispatch queue: {queue_status} {queue_body}')
+            queue_record = next(
+                item for item in queue_body['handoff_dispatch_records']
+                if item['dispatch_id'] == dispatch_id
+            )
+
+            jobs_status, jobs_body = _http_json(
+                'GET',
+                beta['base_url'] + '/api/federation/execution-jobs',
+                headers={'Authorization': beta['auth_header']},
+            )
+            if jobs_status != 200:
+                raise AssertionError(f'failed reading execution jobs: {jobs_status} {jobs_body}')
+
+            inbox_status, inbox_body = _http_json(
+                'GET',
+                beta['base_url'] + '/api/federation/inbox',
+                headers={'Authorization': beta['auth_header']},
+            )
+            if inbox_status != 200:
+                raise AssertionError(f'failed reading federation inbox: {inbox_status} {inbox_body}')
+
+        alpha_events = _read_jsonl(alpha['audit_log'])
+        beta_events = _read_jsonl(beta['audit_log'])
+        return {
+            'handoff_id': handoff_id,
+            'dispatch_id': dispatch_id,
+            'route_kind': remote_handoff.get('route_kind', ''),
+            'dispatch_ready': bool(remote_handoff.get('dispatch_ready')),
+            'dispatch_runner': dispatch_body.get('dispatch_runner', ''),
+            'delivery': {
+                'envelope_id': (((dispatch_body.get('delivery') or {}).get('claims') or {}).get('envelope_id', '')),
+                'receipt_id': (((dispatch_body.get('delivery') or {}).get('receipt') or {}).get('receipt_id', '')),
+                'receiver_host_id': (((dispatch_body.get('delivery') or {}).get('receipt') or {}).get('receiver_host_id', '')),
+                'receiver_institution_id': (((dispatch_body.get('delivery') or {}).get('receipt') or {}).get('receiver_institution_id', '')),
+            },
+            'dispatch_record': {
+                'state': queue_record.get('state', ''),
+                'execution_job_state': queue_record.get('execution_job_state', ''),
+                'dispatch_runner': queue_record.get('dispatch_runner', ''),
+            },
+            'execution_job': {
+                'job_id': ((dispatch_body.get('execution_job') or {}).get('job_id', '')),
+                'state': ((dispatch_body.get('execution_job') or {}).get('state', '')),
+                'local_warrant_id': (((jobs_body.get('jobs') or [{}])[0]).get('local_warrant_id', '')),
+            },
+            'inbox': {
+                'message_type_counts': (inbox_body.get('summary') or {}).get('message_type_counts', {}),
+                'entry_state': ((inbox_body.get('entries') or [{}])[0]).get('state', ''),
+            },
+            'audit_markers': {
+                'alpha_sent': 'federation_envelope_sent' in [event.get('action') for event in alpha_events],
+                'beta_received': 'federation_envelope_received' in [event.get('action') for event in beta_events],
+                'beta_job_created': 'federation_execution_job_created' in [event.get('action') for event in beta_events],
+            },
+        }
+
+
+def _run_execution_settlement_loop_proof():
+    try:
+        port_alpha = _find_free_port()
+        port_beta = _find_free_port()
+        port_gamma = _find_free_port()
+    except PermissionError as exc:
+        raise unittest.SkipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        alpha = _seed_workspace_root(
+            os.path.join(tmp, 'alpha'),
+            org_id='org_alpha',
+            user_id='user_owner_alpha',
+            host_id='host_alpha',
+            port=port_alpha,
+            signing_secret='alpha-secret',
+            peer_entries={
+                'host_beta': {
+                    'label': 'Beta Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'beta-secret',
+                    'admitted_org_ids': ['org_beta'],
+                },
+                'host_gamma': {
+                    'label': 'Gamma Witness',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_gamma}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'gamma-secret',
+                    'witness_archive_user': 'org_gamma_user',
+                    'witness_archive_pass': 'org_gamma_pass',
+                    'admitted_org_ids': ['org_gamma'],
+                },
+            },
+        )
+        beta = _seed_workspace_root(
+            os.path.join(tmp, 'beta'),
+            org_id='org_beta',
+            user_id='user_owner_beta',
+            host_id='host_beta',
+            port=port_beta,
+            signing_secret='beta-secret',
+            peer_entries={
+                'host_alpha': {
+                    'label': 'Alpha Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'alpha-secret',
+                    'admitted_org_ids': ['org_alpha'],
+                },
+            },
+        )
+        gamma = _seed_workspace_root(
+            os.path.join(tmp, 'gamma'),
+            org_id='org_gamma',
+            user_id='user_witness_gamma',
+            host_id='host_gamma',
+            port=port_gamma,
+            signing_secret='gamma-secret',
+            host_role='witness_host',
+            peer_entries={
+                'host_alpha': {
+                    'label': 'Alpha Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'alpha-secret',
+                    'admitted_org_ids': ['org_alpha'],
+                },
+                'host_beta': {
+                    'label': 'Beta Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'beta-secret',
+                    'admitted_org_ids': ['org_beta'],
+                },
+            },
+        )
+        commitment_id = 'cmt_execution_loop'
+        _seed_commitments(
+            os.path.join(alpha['economy'], 'commitments.json'),
+            [
+                _accepted_commitment_record(
+                    org_id='org_alpha',
+                    commitment_id=commitment_id,
+                    target_host_id='host_beta',
+                    target_institution_id='org_beta',
+                ),
+            ],
+        )
+        _seed_commitments(
+            os.path.join(beta['economy'], 'commitments.json'),
+            [
+                _accepted_commitment_record(
+                    org_id='org_beta',
+                    commitment_id=commitment_id,
+                    target_host_id='host_alpha',
+                    target_institution_id='org_alpha',
+                ),
+            ],
+        )
+        _write_json(
+            os.path.join(beta['economy'], 'wallets.json'),
+            {
+                'wallets': {
+                    'wallet_beta': {
+                        'id': 'wallet_beta',
+                        'verification_level': 3,
+                        'verification_label': 'self_custody_verified',
+                        'payout_eligible': True,
+                        'status': 'active',
+                    },
+                },
+                'verification_levels': {},
+            },
+        )
+        _write_json(
+            os.path.join(beta['economy'], 'contributors.json'),
+            {
+                'contributors': {
+                    'contrib_beta': {
+                        'id': 'contrib_beta',
+                        'name': 'Beta Contributor',
+                        'payout_wallet_id': 'wallet_beta',
+                    },
+                },
+                'contribution_types': ['code'],
+                'registration_requirements': {},
+            },
+        )
+        _write_json(
+            os.path.join(beta['economy'], 'payout_proposals.json'),
+            {
+                'proposals': {
+                    'ppo_demo_beta': _executed_payout_proposal_record(
+                        proposal_id='ppo_demo_beta',
+                        commitment_id=commitment_id,
+                    ),
+                },
+                'state_machine': json.loads(
+                    json.dumps(
+                        {
+                            'states': [
+                                'draft',
+                                'submitted',
+                                'under_review',
+                                'approved',
+                                'dispute_window',
+                                'executed',
+                                'rejected',
+                                'cancelled',
+                            ],
+                            'transitions': {
+                                'draft': ['submitted', 'cancelled'],
+                                'submitted': ['under_review', 'rejected', 'cancelled'],
+                                'under_review': ['approved', 'rejected'],
+                                'approved': ['dispute_window'],
+                                'dispute_window': ['executed', 'rejected'],
+                                'executed': [],
+                                'rejected': [],
+                                'cancelled': [],
+                            },
+                            'dispute_window_hours': 72,
+                            'notes': 'Seeded executed payout proof for federated execution tests.',
+                        }
+                    )
+                ),
+                'proposal_schema': {},
+                'updatedAt': _now_stub(),
+            },
+        )
+
+        with _run_workspace(gamma), _run_workspace(beta), _run_workspace(alpha):
+            session = _issue_workspace_session(alpha)
+            request_payload = {'task': 'demo'}
+            warrant = _issue_workspace_warrant(alpha, session['token'], request_payload)
+            status, body = _http_json(
+                'POST',
+                alpha['base_url'] + '/api/federation/send',
+                payload={
+                    'target_host_id': 'host_beta',
+                    'target_org_id': 'org_beta',
+                    'message_type': 'execution_request',
+                    'commitment_id': commitment_id,
+                    'payload': request_payload,
+                    'warrant_id': warrant['warrant_id'],
+                },
+                headers={
+                    'Authorization': f"Bearer {session['token']}",
+                    'Content-Type': 'application/json',
+                },
+            )
+            if status != 200:
+                raise AssertionError(f'failed sending execution request: {status} {body}')
+            delivery = body['delivery']
+            jobs_body, execution_job = _wait_for_execution_job(
+                beta,
+                ((delivery.get('claims') or {}).get('envelope_id') or '').strip(),
+            )
+            job_id = execution_job['job_id']
+            local_warrant_id = execution_job['local_warrant_id']
+            _wait_for_warrant(beta, local_warrant_id)
+
+            status, review_body = _http_json(
+                'POST',
+                beta['base_url'] + '/api/warrants/approve',
+                payload={'warrant_id': local_warrant_id},
+                headers={'Authorization': beta['auth_header']},
+            )
+            if status != 200:
+                raise AssertionError(f'failed approving local warrant: {status} {review_body}')
+
+            status, execute_body = _http_json(
+                'POST',
+                beta['base_url'] + '/api/federation/execution-jobs/execute',
+                payload={'job_id': job_id},
+                headers={
+                    'Authorization': beta['auth_header'],
+                    'Content-Type': 'application/json',
+                },
+            )
+            if status != 200:
+                raise AssertionError(f'failed executing job: {status} {execute_body}')
+
+            inbox_status, inbox_body = _http_json(
+                'GET',
+                alpha['base_url'] + '/api/federation/inbox',
+                headers={'Authorization': alpha['auth_header']},
+            )
+            if inbox_status != 200:
+                raise AssertionError(f'failed reading sender inbox: {inbox_status} {inbox_body}')
+
+            beta_jobs_status, beta_jobs_body = _http_json(
+                'GET',
+                beta['base_url'] + '/api/federation/execution-jobs',
+                headers={'Authorization': beta['auth_header']},
+            )
+            if beta_jobs_status != 200:
+                raise AssertionError(f'failed reading post-execution jobs: {beta_jobs_status} {beta_jobs_body}')
+
+        with open(os.path.join(alpha['economy'], 'commitments.json')) as f:
+            alpha_commitments = json.load(f)
+        alpha_record = alpha_commitments['commitments'][commitment_id]
+
+        with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+            beta_commitments = json.load(f)
+        beta_record = beta_commitments['commitments'][commitment_id]
+
+        return {
+            'commitment_id': commitment_id,
+            'delivery': {
+                'envelope_id': (((delivery.get('claims') or {}).get('envelope_id')) or ''),
+                'receipt_id': (((delivery.get('receipt') or {}).get('receipt_id')) or ''),
+            },
+            'execution_job': {
+                'job_id': job_id,
+                'local_warrant_id': local_warrant_id,
+                'state': ((execute_body.get('execution_job') or {}).get('state', '')),
+                'proposal_id': (((execute_body.get('execution_job') or {}).get('execution_refs') or {}).get('proposal_id', '')),
+            },
+            'settlement_notice': {
+                'envelope_id': ((execute_body.get('settlement_notice') or {}).get('envelope_id', '')),
+                'message_type': ((execute_body.get('settlement_notice') or {}).get('message_type', '')),
+            },
+            'sender_inbox': {
+                'processed': (inbox_body.get('summary') or {}).get('processed', 0),
+                'message_type_counts': (inbox_body.get('summary') or {}).get('message_type_counts', {}),
+            },
+            'receiver_jobs': {
+                'executed': (beta_jobs_body.get('summary') or {}).get('executed', 0),
+                'ready': (beta_jobs_body.get('summary') or {}).get('ready', 0),
+            },
+            'commitment_states': {
+                'sender_state': alpha_record.get('state', ''),
+                'receiver_delivery_ref_message_type': ((beta_record.get('delivery_refs') or [{}])[0]).get('message_type', ''),
+            },
+        }
+
+
+def _run_base_usdc_x402_settlement_proof():
+    try:
+        port_alpha = _find_free_port()
+        port_beta = _find_free_port()
+    except PermissionError as exc:
+        raise unittest.SkipTest(f'localhost socket bind unavailable in sandbox: {exc}')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        alpha = _seed_workspace_root(
+            os.path.join(tmp, 'alpha'),
+            org_id='org_alpha',
+            user_id='user_owner_alpha',
+            host_id='host_alpha',
+            port=port_alpha,
+            signing_secret='alpha-secret',
+            settlement_adapters=['base_usdc_x402'],
+            peer_entries={
+                'host_beta': {
+                    'label': 'Beta Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_beta}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'beta-secret',
+                    'admitted_org_ids': ['org_beta'],
+                },
+            },
+        )
+        beta = _seed_workspace_root(
+            os.path.join(tmp, 'beta'),
+            org_id='org_beta',
+            user_id='user_owner_beta',
+            host_id='host_beta',
+            port=port_beta,
+            signing_secret='beta-secret',
+            settlement_adapters=['base_usdc_x402'],
+            peer_entries={
+                'host_alpha': {
+                    'label': 'Alpha Host',
+                    'transport': 'https',
+                    'endpoint_url': f'http://127.0.0.1:{port_alpha}',
+                    'trust_state': 'trusted',
+                    'shared_secret': 'alpha-secret',
+                    'admitted_org_ids': ['org_alpha'],
+                },
+            },
+        )
+        commitment_id = 'cmt_base_x402_settlement'
+        _seed_commitments(
+            os.path.join(alpha['economy'], 'commitments.json'),
+            [
+                _accepted_commitment_record(
+                    org_id='org_alpha',
+                    commitment_id=commitment_id,
+                    target_host_id='host_beta',
+                    target_institution_id='org_beta',
+                ),
+            ],
+        )
+        _seed_commitments(
+            os.path.join(beta['economy'], 'commitments.json'),
+            [
+                _accepted_commitment_record(
+                    org_id='org_beta',
+                    commitment_id=commitment_id,
+                    target_host_id='host_alpha',
+                    target_institution_id='org_alpha',
+                ),
+            ],
+        )
+        adapter_store = {
+            'default_payout_adapter': 'base_usdc_x402',
+            'adapters': {
+                'base_usdc_x402': {
+                    'status': 'active',
+                    'payout_execution_enabled': True,
+                    'verification_ready': True,
+                },
+            },
+        }
+        _write_json(os.path.join(alpha['economy'], 'settlement_adapters.json'), adapter_store)
+        _write_json(os.path.join(beta['economy'], 'settlement_adapters.json'), adapter_store)
+
+        with _run_workspace(beta), _run_workspace(alpha):
+            session = _issue_workspace_session(alpha)
+            status, body = _http_json(
+                'POST',
+                alpha['base_url'] + '/api/federation/send',
+                payload={
+                    'target_host_id': 'host_beta',
+                    'target_org_id': 'org_beta',
+                    'message_type': 'settlement_notice',
+                    'commitment_id': commitment_id,
+                    'payload': {
+                        'proposal_id': 'ppo_chain_demo',
+                        'tx_ref': 'tx_base_x402_demo',
+                        'tx_hash': '0xbase123',
+                        'settlement_adapter': 'base_usdc_x402',
+                        'settlement_adapter_contract_snapshot': _base_usdc_x402_contract_snapshot(),
+                        'settlement_adapter_contract_digest': _contract_digest(
+                            _base_usdc_x402_contract_snapshot()
+                        ),
+                        'proof': {
+                            'reference': 'base://receipt/demo',
+                            'payer_wallet': '0xabc123',
+                            'verification_attestation': {
+                                'type': 'x402_settlement_verifier',
+                                'reference': 'attest://base/demo',
+                            },
+                        },
+                    },
+                },
+                headers={
+                    'Authorization': f"Bearer {session['token']}",
+                    'Content-Type': 'application/json',
+                },
+            )
+            if status != 200:
+                raise AssertionError(f'failed sending x402 settlement notice: {status} {body}')
+            processing = ((body.get('delivery') or {}).get('response') or {}).get('processing', {})
+
+        with open(os.path.join(beta['economy'], 'commitments.json')) as f:
+            beta_commitments = json.load(f)
+        beta_ref = beta_commitments['commitments'][commitment_id]['settlement_refs'][0]
+        return {
+            'commitment_id': commitment_id,
+            'processing': {
+                'applied': bool(processing.get('applied')),
+                'reason': processing.get('reason', ''),
+                'settlement_adapter': ((processing.get('settlement_ref') or {}).get('settlement_adapter', '')),
+                'proof_type': ((processing.get('settlement_ref') or {}).get('proof_type', '')),
+                'verification_state': ((processing.get('settlement_ref') or {}).get('verification_state', '')),
+                'finality_state': ((processing.get('settlement_ref') or {}).get('finality_state', '')),
+                'settlement_path': ((((processing.get('settlement_ref') or {}).get('settlement_adapter_contract') or {}).get('settlement_path')) or ''),
+                'accepted_attestation_type': (((processing.get('settlement_ref') or {}).get('proof') or {}).get('verification_attestation', {}).get('type', '')),
+            },
+            'recorded_ref': {
+                'settlement_adapter': beta_ref.get('settlement_adapter', ''),
+                'proof_type': beta_ref.get('proof_type', ''),
+                'tx_hash': beta_ref.get('tx_hash', ''),
+            },
+        }
 
 
 class FederationTests(unittest.TestCase):
@@ -2228,16 +2859,15 @@ class FederationTests(unittest.TestCase):
                     if item['warrant_id'] == warrant['warrant_id']
                 )
                 self.assertEqual(sender_warrant['execution_state'], 'ready')
-
-                jobs_status, jobs_body = _http_json(
-                    'GET',
-                    beta['base_url'] + '/api/federation/execution-jobs',
-                    headers={'Authorization': beta['auth_header']},
+                jobs_body, execution_job = _wait_for_execution_job(
+                    beta,
+                    delivery['claims']['envelope_id'],
                 )
-                self.assertEqual(jobs_status, 200, jobs_body)
-                self.assertEqual(jobs_body['summary']['pending_local_warrant'], 1)
-                job_id = jobs_body['jobs'][0]['job_id']
-                local_warrant_id = jobs_body['jobs'][0]['local_warrant_id']
+                self.assertEqual(execution_job['state'], 'pending_local_warrant')
+                job_id = execution_job['job_id']
+                local_warrant_id = execution_job['local_warrant_id']
+                self.assertTrue(local_warrant_id)
+                _wait_for_warrant(beta, local_warrant_id)
 
                 status, review_body = _http_json(
                     'POST',
@@ -2345,12 +2975,16 @@ class FederationTests(unittest.TestCase):
                 self.assertEqual(beta_jobs_status, 200, beta_jobs_body)
                 self.assertEqual(beta_jobs_body['summary']['executed'], 1)
                 self.assertEqual(beta_jobs_body['summary']['ready'], 0)
+                receiver_job = next(
+                    item for item in beta_jobs_body['jobs']
+                    if item['job_id'] == job_id
+                )
                 self.assertEqual(
-                    beta_jobs_body['jobs'][0]['execution_refs']['settlement_notice_envelope_id'],
+                    receiver_job['execution_refs']['settlement_notice_envelope_id'],
                     first_notice_id,
                 )
                 self.assertEqual(
-                    beta_jobs_body['jobs'][0]['execution_refs']['proposal_id'],
+                    receiver_job['execution_refs']['proposal_id'],
                     'ppo_demo_beta',
                 )
 
@@ -6730,7 +7364,7 @@ class FederationTests(unittest.TestCase):
                 signing_secret='alpha-secret',
             )
 
-            economy_dir = os.path.join(alpha['root'], 'economy')
+            economy_dir = alpha['economy']
             with open(os.path.join(economy_dir, 'ledger.json')) as f:
                 ledger = json.load(f)
             ledger['treasury']['cash_usd'] = 140.0

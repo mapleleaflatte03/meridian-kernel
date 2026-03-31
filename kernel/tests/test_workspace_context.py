@@ -1228,6 +1228,39 @@ class WorkspaceContextTests(unittest.TestCase):
         self.assertEqual(payload['payload'], {'task': 'demo'})
         self.assertEqual(payload['evidence_refs'], ['federation_envelope:fed_exec_demo', 'federation_receipt:fedrcpt_demo'])
 
+    def test_execution_job_warrant_validation_payload_uses_persisted_request_object(self):
+        request_object = {
+            'request_id': 'fed_exec_demo',
+            'request_type': 'execution_request',
+            'claims': {
+                'source_host_id': 'host_alpha',
+                'source_institution_id': 'org_alpha',
+                'target_host_id': 'host_beta',
+                'target_institution_id': 'org_beta',
+                'message_type': 'execution_request',
+                'boundary_name': 'federation_gateway',
+                'identity_model': 'signed_host_service',
+                'sender_warrant_id': 'war_sender_demo',
+                'commitment_id': 'cmt_demo',
+                'payload_hash': 'hash_demo',
+            },
+            'receipt': {
+                'receipt_id': 'fedrcpt_demo',
+                'accepted_at': '2026-03-22T00:00:00Z',
+            },
+            'payload': {'task': 'demo'},
+            'payload_hash': 'hash_demo',
+            'evidence_refs': [
+                'federation_envelope:fed_exec_demo',
+                'federation_receipt:fedrcpt_demo',
+            ],
+        }
+        payload = self.workspace._execution_job_warrant_validation_payload({
+            'request': request_object,
+            'payload': {'task': 'stale'},
+        })
+        self.assertEqual(payload, request_object)
+
     def test_execute_federated_execution_job_records_settlement_notice_once(self):
         job = {
             'job_id': 'fej_demo',

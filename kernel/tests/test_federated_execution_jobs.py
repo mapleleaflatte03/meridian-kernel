@@ -99,6 +99,53 @@ class FederatedExecutionJobTests(unittest.TestCase):
         self.assertEqual(fetched['gap']['status'], 'pending_local_warrant')
         self.assertEqual(fetched['gap']['metadata'], {'demo': True})
 
+    def test_normalize_store_preserves_persisted_request_hash_domain(self):
+        request_object = {
+            'request_id': 'fed_job_hash',
+            'request_type': 'execution_request',
+            'claims': {
+                'envelope_id': 'fed_job_hash',
+                'source_host_id': 'host_alpha',
+                'source_institution_id': 'org_alpha',
+                'target_host_id': 'host_beta',
+                'target_institution_id': 'org_beta',
+                'actor_type': 'service',
+                'actor_id': 'peer:host_alpha',
+                'session_id': 'ses_demo',
+                'boundary_name': 'federation_gateway',
+                'identity_model': 'signed_host_service',
+                'message_type': 'execution_request',
+                'sender_warrant_id': 'war_sender',
+                'commitment_id': 'cmt_demo',
+                'payload_hash': 'hash_demo',
+            },
+            'receipt': {
+                'receipt_id': 'fedrcpt_demo',
+                'accepted_at': '2026-03-22T00:00:00Z',
+                'receiver_host_id': 'host_beta',
+                'receiver_institution_id': 'org_beta',
+                'message_type': 'execution_request',
+                'boundary_name': 'federation_gateway',
+                'identity_model': 'signed_host_service',
+            },
+            'payload': {'task': 'demo'},
+            'payload_hash': 'hash_demo',
+            'evidence_refs': [
+                'federation_envelope:fed_job_hash',
+                'federation_receipt:fedrcpt_demo',
+                'payload_hash:hash_demo',
+            ],
+        }
+        created = jobs.upsert_execution_job(
+            self.org_id,
+            self._job('fed_job_hash'),
+            local_warrant_id='war_local_demo',
+            request=request_object,
+        )
+        self.assertEqual(created['request'], request_object)
+        fetched = jobs.get_execution_job('fed_job_hash', self.org_id)
+        self.assertEqual(fetched['request'], request_object)
+
     def test_upsert_is_idempotent_by_envelope_id_and_tracks_state(self):
         jobs.upsert_execution_job(self.org_id, self._job('fed_job_2'))
         updated = jobs.upsert_execution_job(

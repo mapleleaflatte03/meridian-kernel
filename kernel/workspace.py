@@ -493,6 +493,9 @@ _WORKSPACE_POST_SERVICES = (
 )
 
 
+_SERVICE_HANDLED = object()
+
+
 def _dispatch_workspace_get_service(handler, path, *, org_id, inst_ctx=None, request_context=None, auth_context=None):
     for service_module, deps_factory in _WORKSPACE_GET_SERVICES:
         result = service_module.handle_get(
@@ -505,7 +508,7 @@ def _dispatch_workspace_get_service(handler, path, *, org_id, inst_ctx=None, req
             deps=deps_factory(),
         )
         if result is not service_module.NOT_HANDLED:
-            return result
+            return _SERVICE_HANDLED if result is None else result
     return None
 
 
@@ -522,7 +525,7 @@ def _dispatch_workspace_ingress_post_service(handler, path, *, body, inst_ctx):
             deps=deps_factory(),
         )
         if result is not service_module.NOT_HANDLED:
-            return result
+            return _SERVICE_HANDLED if result is None else result
     return None
 
 
@@ -540,7 +543,7 @@ def _dispatch_workspace_post_service(handler, path, *, body, org_id, actor_id, s
             deps=deps_factory(),
         )
         if result is not service_module.NOT_HANDLED:
-            return result
+            return _SERVICE_HANDLED if result is None else result
     return None
 
 # Optional: CI vertical import from the example vertical if present
@@ -1230,6 +1233,14 @@ def _receiver_execution_warrant_payload_from_job(job):
     }
 
 
+def _execution_job_warrant_validation_payload(job):
+    record = dict(job or {})
+    request = record.get('request')
+    if isinstance(request, dict) and request:
+        return dict(request)
+    return _receiver_execution_warrant_payload_from_job(record)
+
+
 def _execution_job_view(bound_org_id, job):
     record = dict(job or {})
     local_warrant_id = (record.get('local_warrant_id') or '').strip()
@@ -1720,11 +1731,21 @@ def _federated_execution_job_ref(job, *, execution_refs=None, settlement_notice=
     if settlement_notice:
         claims = dict(settlement_notice.get('claims') or {})
         receipt = dict(settlement_notice.get('receipt') or {})
-        refs['settlement_notice_envelope_id'] = claims.get('envelope_id', '')
-        refs['settlement_notice_receipt_id'] = receipt.get('receipt_id', '')
-        refs['settlement_notice_target_host_id'] = claims.get('target_host_id', '')
-        refs['settlement_notice_target_institution_id'] = claims.get('target_institution_id', '')
-        refs['settlement_notice_sent_at'] = receipt.get('accepted_at', '') or settlement_notice.get('sent_at', '') or _now()
+        refs['settlement_notice_envelope_id'] = (
+            claims.get('envelope_id', '') or settlement_notice.get('envelope_id', '')
+        )
+        refs['settlement_notice_receipt_id'] = (
+            receipt.get('receipt_id', '') or settlement_notice.get('receipt_id', '')
+        )
+        refs['settlement_notice_target_host_id'] = (
+            claims.get('target_host_id', '') or settlement_notice.get('target_host_id', '')
+        )
+        refs['settlement_notice_target_institution_id'] = (
+            claims.get('target_institution_id', '') or settlement_notice.get('target_institution_id', '')
+        )
+        refs['settlement_notice_sent_at'] = (
+            receipt.get('accepted_at', '') or settlement_notice.get('sent_at', '') or _now()
+        )
         refs['settlement_notice_response'] = dict(settlement_notice.get('response') or {})
     return refs
 
@@ -1886,7 +1907,7 @@ def _complete_federated_execution_job(bound_org_id, job, *, actor_id='', session
             org_id=bound_org_id,
             action_class='federated_execution',
             boundary_name='federation_gateway',
-            request_payload=_receiver_execution_warrant_payload_from_job(record),
+            request_payload=_execution_job_warrant_validation_payload(record),
         )
         warrant = mark_warrant_executed(
             local_warrant_id,
@@ -5665,6 +5686,18 @@ def _scoped_registry(org_id):
 
 # -- API data builders --------------------------------------------------------
 
+def _treasury_snapshot_with_host_adapters(org_id, host_identity):
+    host_supported_adapters = getattr(host_identity, 'settlement_adapters', [])
+    try:
+        return treasury_snapshot(
+            org_id,
+            host_supported_adapters=host_supported_adapters,
+        )
+    except TypeError as exc:
+        if 'host_supported_adapters' not in str(exc):
+            raise
+        return treasury_snapshot(org_id)
+
 def api_status(org_id=None, context_source='founding_default', institution_context=None,
                request_routing=None):
     if institution_context is not None:
@@ -5682,7 +5715,7 @@ def api_status(org_id=None, context_source='founding_default', institution_conte
 
     reg = _scoped_registry(org_id)
     queue = _load_queue(org_id)
-    snap = treasury_snapshot(org_id)
+    snap = _treasury_snapshot_with_host_adapters(org_id, host_identity)
     records = _load_records(org_id)
     lead_id, lead_auth = get_sprint_lead(org_id)
     auth_context = _resolve_auth_context(org_id)
@@ -6355,7 +6388,13 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         elif path == '/api/accounting':
             return self._json(accounting_snapshot(org_id))
         elif path == '/api/treasury':
-            return self._json(treasury_snapshot(org_id))
+            host_identity, _admission_registry = _runtime_host_state(org_id)
+            return self._json(
+                treasury_snapshot(
+                    org_id,
+                    host_supported_adapters=getattr(host_identity, 'settlement_adapters', []),
+                )
+            )
         elif path == '/api/treasury/wallets':
             return self._json(load_wallets(org_id))
         elif path == '/api/treasury/accounts':
@@ -6762,16 +6801,25 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         by = auth_context.get('actor_id') or 'owner'  # server-enforced — never trust client-supplied actor identity
         _sid = auth_context.get('session_id')  # session traceability for audit
 
-        service_response = _dispatch_workspace_post_service(
-            self,
-            path,
-            body=body,
-            org_id=org_id,
-            actor_id=by,
-            session_id=_sid,
-            auth_context=auth_context,
-            inst_ctx=inst_ctx,
-        )
+        try:
+            service_response = _dispatch_workspace_post_service(
+                self,
+                path,
+                body=body,
+                org_id=org_id,
+                actor_id=by,
+                session_id=_sid,
+                auth_context=auth_context,
+                inst_ctx=inst_ctx,
+            )
+        except RuntimeError as e:
+            return self._json({'error': str(e)}, 503)
+        except LookupError as e:
+            return self._json({'error': str(e)}, 404)
+        except ValueError as e:
+            return self._json({'error': str(e)}, 400)
+        except PermissionError as e:
+            return self._json({'error': str(e)}, 403)
         if service_response is not None:
             return service_response
 
@@ -6866,7 +6914,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                           details=result, session_id=_sid)
                 return self._json({
                     'message': f'Owner capital recorded: +${result["amount_usd"]:.2f}',
-                    'snapshot': treasury_snapshot(org_id),
+                    'snapshot': treasury_snapshot(
+                        org_id,
+                        host_supported_adapters=getattr(_runtime_host_state(org_id)[0], 'settlement_adapters', []),
+                    ),
                 })
 
             elif path == '/api/treasury/reserve-floor':
@@ -6876,7 +6927,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                           outcome='success', details=result, session_id=_sid)
                 return self._json({
                     'message': 'Reserve floor updated',
-                    'snapshot': treasury_snapshot(org_id),
+                    'snapshot': treasury_snapshot(
+                        org_id,
+                        host_supported_adapters=getattr(_runtime_host_state(org_id)[0], 'settlement_adapters', []),
+                    ),
                 })
 
             elif path == '/api/treasury/settlement-adapters/preflight':
@@ -7996,6 +8050,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     evidence_refs=body.get('evidence_refs') or [],
                     note=body.get('note', ''),
                     metadata=body.get('metadata'),
+                    dedupe_existing=True,
                 )
                 log_event(
                     org_id,

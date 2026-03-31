@@ -127,44 +127,60 @@ def _execution_request_evidence_refs(record):
 
 def _execution_request_snapshot(record):
     record = dict(record or {})
-    request = dict(record.get('request') or {})
+    persisted_request = record.get('request')
+    has_persisted_request = isinstance(persisted_request, dict) and bool(persisted_request)
+    request = dict(persisted_request or {})
     claims = dict(request.get('claims') or {})
     receipt = dict(request.get('receipt') or {})
-    request['request_id'] = (request.get('request_id') or record.get('envelope_id') or record.get('job_id') or '').strip()
-    request['request_type'] = (request.get('request_type') or record.get('message_type') or 'execution_request').strip()
-    claims.update({
-        'envelope_id': (record.get('envelope_id') or '').strip(),
-        'source_host_id': (record.get('source_host_id') or '').strip(),
-        'source_institution_id': (record.get('source_institution_id') or '').strip(),
-        'target_host_id': (record.get('target_host_id') or '').strip(),
-        'target_institution_id': (record.get('target_institution_id') or '').strip(),
-        'actor_type': (record.get('actor_type') or '').strip(),
-        'actor_id': (record.get('actor_id') or '').strip(),
-        'session_id': (record.get('session_id') or '').strip(),
-        'boundary_name': (record.get('boundary_name') or '').strip(),
-        'identity_model': (record.get('identity_model') or '').strip(),
-        'message_type': (record.get('message_type') or '').strip(),
-        'sender_warrant_id': (record.get('sender_warrant_id') or '').strip(),
-        'local_warrant_id': (record.get('local_warrant_id') or '').strip(),
-        'commitment_id': (record.get('commitment_id') or '').strip(),
-        'payload_hash': (record.get('payload_hash') or '').strip(),
-        'received_at': (record.get('received_at') or '').strip(),
-    })
-    receipt.update({
-        'receipt_id': (record.get('receipt_id') or '').strip(),
-        'accepted_at': (record.get('received_at') or '').strip(),
-        'receiver_host_id': (record.get('target_host_id') or '').strip(),
-        'receiver_institution_id': (record.get('target_institution_id') or '').strip(),
-        'message_type': (record.get('message_type') or '').strip(),
-        'boundary_name': (record.get('boundary_name') or '').strip(),
-        'identity_model': (record.get('identity_model') or '').strip(),
-    })
+    request.setdefault('request_id', (record.get('envelope_id') or record.get('job_id') or '').strip())
+    request.setdefault('request_type', (record.get('message_type') or 'execution_request').strip())
+    claim_defaults = (
+        ('envelope_id', (record.get('envelope_id') or '').strip()),
+        ('source_host_id', (record.get('source_host_id') or '').strip()),
+        ('source_institution_id', (record.get('source_institution_id') or '').strip()),
+        ('target_host_id', (record.get('target_host_id') or '').strip()),
+        ('target_institution_id', (record.get('target_institution_id') or '').strip()),
+        ('actor_type', (record.get('actor_type') or '').strip()),
+        ('actor_id', (record.get('actor_id') or '').strip()),
+        ('session_id', (record.get('session_id') or '').strip()),
+        ('boundary_name', (record.get('boundary_name') or '').strip()),
+        ('identity_model', (record.get('identity_model') or '').strip()),
+        ('message_type', (record.get('message_type') or '').strip()),
+        ('sender_warrant_id', (record.get('sender_warrant_id') or '').strip()),
+        ('commitment_id', (record.get('commitment_id') or '').strip()),
+        ('payload_hash', (record.get('payload_hash') or '').strip()),
+    )
+    if not has_persisted_request:
+        claim_defaults += (
+            ('local_warrant_id', (record.get('local_warrant_id') or '').strip()),
+            ('received_at', (record.get('received_at') or '').strip()),
+        )
+    for key, value in claim_defaults:
+        if value:
+            claims.setdefault(key, value)
+    receipt_defaults = (
+        ('receipt_id', (record.get('receipt_id') or '').strip()),
+        ('accepted_at', (record.get('received_at') or '').strip()),
+        ('receiver_host_id', (record.get('target_host_id') or '').strip()),
+        ('receiver_institution_id', (record.get('target_institution_id') or '').strip()),
+    )
+    if not has_persisted_request:
+        receipt_defaults += (
+            ('message_type', (record.get('message_type') or '').strip()),
+            ('boundary_name', (record.get('boundary_name') or '').strip()),
+            ('identity_model', (record.get('identity_model') or '').strip()),
+        )
+    for key, value in receipt_defaults:
+        if value:
+            receipt.setdefault(key, value)
     request['claims'] = claims
     request['receipt'] = receipt
-    request['payload'] = record.get('payload') if 'payload' in record else request.get('payload')
+    if 'payload' not in request and 'payload' in record:
+        request['payload'] = record.get('payload')
     if not (request.get('payload_hash') or '').strip():
         request['payload_hash'] = (record.get('payload_hash') or '').strip()
-    request['evidence_refs'] = list(request.get('evidence_refs') or _execution_request_evidence_refs(record))
+    if not request.get('evidence_refs'):
+        request['evidence_refs'] = list(_execution_request_evidence_refs(record))
     return request
 
 
@@ -328,6 +344,16 @@ def _normalize_job(job, org_id, existing=None):
         record['metadata'] = dict(job.get('metadata') or {})
     elif 'metadata' not in record:
         record['metadata'] = {}
+
+    if 'request' in job:
+        record['request'] = dict(job.get('request') or {})
+    elif 'request' not in record:
+        record['request'] = {}
+
+    if 'gap' in job:
+        record['gap'] = dict(job.get('gap') or {})
+    elif 'gap' not in record:
+        record['gap'] = {}
 
     if job.get('payload_hash') in (None, ''):
         record['payload_hash'] = record.get('payload_hash') or _payload_hash(record.get('payload'))

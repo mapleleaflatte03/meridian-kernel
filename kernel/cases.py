@@ -105,10 +105,31 @@ def _save_store(data, org_id=None):
         json.dump(data, f, indent=2, sort_keys=True)
 
 
+def _matching_active_case(
+    org_id,
+    *,
+    claim_type,
+    target_host_id='',
+    target_institution_id='',
+    linked_commitment_id='',
+    linked_warrant_id='',
+):
+    for existing in blocking_cases(org_id):
+        if (
+            existing.get('claim_type') == claim_type
+            and (existing.get('target_host_id') or '').strip() == target_host_id
+            and (existing.get('target_institution_id') or '').strip() == target_institution_id
+            and (existing.get('linked_commitment_id') or '').strip() == linked_commitment_id
+            and (existing.get('linked_warrant_id') or '').strip() == linked_warrant_id
+        ):
+            return existing
+    return None
+
+
 def open_case(org_id, claim_type, actor_id, *, target_host_id='',
               target_institution_id='', linked_commitment_id='',
               linked_warrant_id='', evidence_refs=None, note='',
-              metadata=None):
+              metadata=None, dedupe_existing=False):
     claim_type = (claim_type or '').strip()
     actor_id = (actor_id or '').strip()
     target_host_id = (target_host_id or '').strip()
@@ -117,6 +138,17 @@ def open_case(org_id, claim_type, actor_id, *, target_host_id='',
         raise ValueError(f'Unknown claim_type {claim_type!r}. Must be one of {CLAIM_TYPES}')
     if not actor_id:
         raise ValueError('actor_id is required')
+    if dedupe_existing:
+        existing = _matching_active_case(
+            org_id,
+            claim_type=claim_type,
+            target_host_id=target_host_id,
+            target_institution_id=target_institution_id,
+            linked_commitment_id=(linked_commitment_id or '').strip(),
+            linked_warrant_id=(linked_warrant_id or '').strip(),
+        )
+        if existing:
+            return existing
     timestamp = _now()
     case_id = f'case_{uuid.uuid4().hex[:12]}'
     record = {

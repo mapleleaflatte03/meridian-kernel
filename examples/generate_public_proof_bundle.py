@@ -14,8 +14,18 @@ ROOT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file_
 TESTS_DIR = os.path.join(ROOT_DIR, 'kernel', 'tests')
 sys.path.insert(0, TESTS_DIR)
 
-from test_legacy_v1_federation_proof import (  # noqa: E402
-    _run_legacy_reference_adapter_federation_proof,
+try:  # noqa: E402
+    from test_legacy_v1_federation_proof import (
+        _run_legacy_reference_adapter_federation_proof,
+    )
+except ImportError:  # noqa: E402
+    from test_legacy_v1_federation_proof import (
+        _run_legacy_v1_reference_adapter_federation_proof as _run_legacy_reference_adapter_federation_proof,
+    )
+from test_federation import (  # noqa: E402
+    _run_base_usdc_x402_settlement_proof,
+    _run_execution_settlement_loop_proof,
+    _run_handoff_dispatch_proof,
 )
 from test_three_host_federation_proof import _run_three_host_federation_proof  # noqa: E402
 
@@ -268,6 +278,42 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
             'reason': str(exc),
         }
     try:
+        handoff_dispatch = {
+            'passed': True,
+            'skipped': False,
+            'summary': _run_handoff_dispatch_proof(),
+        }
+    except unittest.SkipTest as exc:
+        handoff_dispatch = {
+            'passed': False,
+            'skipped': True,
+            'reason': str(exc),
+        }
+    try:
+        execution_loop = {
+            'passed': True,
+            'skipped': False,
+            'summary': _run_execution_settlement_loop_proof(),
+        }
+    except unittest.SkipTest as exc:
+        execution_loop = {
+            'passed': False,
+            'skipped': True,
+            'reason': str(exc),
+        }
+    try:
+        external_settlement = {
+            'passed': True,
+            'skipped': False,
+            'summary': _run_base_usdc_x402_settlement_proof(),
+        }
+    except unittest.SkipTest as exc:
+        external_settlement = {
+            'passed': False,
+            'skipped': True,
+            'reason': str(exc),
+        }
+    try:
         legacy_proof = {
             'passed': True,
             'skipped': False,
@@ -282,10 +328,13 @@ def build_bundle(live_manifest_url=None, live_runtime_proof_url=None):
             'reason': str(exc),
         }
     return {
-        'proof_bundle_version': 3,
+        'proof_bundle_version': 4,
         'generated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         'reference_scope': 'oss_kernel_reference',
         'three_host_federation': three_host,
+        'handoff_dispatch_reference': handoff_dispatch,
+        'execution_settlement_loop_reference': execution_loop,
+        'external_settlement_adapter_reference': external_settlement,
         'legacy_reference_adapter_federation': legacy_proof,
         'live_host_receipt': (
             _fetch_live_manifest(live_manifest_url)
@@ -387,6 +436,9 @@ def _render_live_receipt_summary(item, title, identity_path, detail_path):
 
 def render_bundle_human(bundle):
     three_host = bundle.get('three_host_federation', {}) or {}
+    handoff_dispatch = bundle.get('handoff_dispatch_reference', {}) or {}
+    execution_loop = bundle.get('execution_settlement_loop_reference', {}) or {}
+    external_settlement = bundle.get('external_settlement_adapter_reference', {}) or {}
     legacy_proof = bundle.get('legacy_reference_adapter_federation', {}) or {}
     live_host = bundle.get('live_host_receipt', {}) or {}
     live_runtime = bundle.get('live_runtime_receipt', {}) or {}
@@ -394,6 +446,9 @@ def render_bundle_human(bundle):
     not_live_proven = bundle.get('not_live_proven', []) or []
 
     three_host_summary = three_host.get('summary', {}) or {}
+    handoff_summary = handoff_dispatch.get('summary', {}) or {}
+    execution_loop_summary = execution_loop.get('summary', {}) or {}
+    external_settlement_summary = external_settlement.get('summary', {}) or {}
     legacy_summary = legacy_proof.get('summary', {}) or {}
 
     lines = [
@@ -420,6 +475,45 @@ def render_bundle_human(bundle):
         )
     else:
         lines.append(f"  reason:                            {three_host.get('reason', 'not available')}")
+
+    lines.append(f"handoff_dispatch_reference:         {_proof_status_label(handoff_dispatch)}")
+    if handoff_dispatch.get('passed'):
+        lines.extend(
+            [
+                f"  route_kind:                       {handoff_summary.get('route_kind', '')}",
+                f"  dispatch_runner:                  {handoff_summary.get('dispatch_runner', '')}",
+                f"  execution_job_state:              {(handoff_summary.get('execution_job') or {}).get('state', '')}",
+                f"  inbox_message_counts:             {(handoff_summary.get('inbox') or {}).get('message_type_counts', {})}",
+            ]
+        )
+    else:
+        lines.append(f"  reason:                            {handoff_dispatch.get('reason', 'not available')}")
+
+    lines.append(f"execution_settlement_loop:          {_proof_status_label(execution_loop)}")
+    if execution_loop.get('passed'):
+        lines.extend(
+            [
+                f"  execution_job_state:              {(execution_loop_summary.get('execution_job') or {}).get('state', '')}",
+                f"  settlement_notice_type:           {(execution_loop_summary.get('settlement_notice') or {}).get('message_type', '')}",
+                f"  sender_inbox_counts:              {(execution_loop_summary.get('sender_inbox') or {}).get('message_type_counts', {})}",
+                f"  sender_commitment_state:          {(execution_loop_summary.get('commitment_states') or {}).get('sender_state', '')}",
+            ]
+        )
+    else:
+        lines.append(f"  reason:                            {execution_loop.get('reason', 'not available')}")
+
+    lines.append(f"external_settlement_adapter:        {_proof_status_label(external_settlement)}")
+    if external_settlement.get('passed'):
+        lines.extend(
+            [
+                f"  settlement_adapter:               {(external_settlement_summary.get('processing') or {}).get('settlement_adapter', '')}",
+                f"  proof_type:                       {(external_settlement_summary.get('processing') or {}).get('proof_type', '')}",
+                f"  settlement_path:                  {(external_settlement_summary.get('processing') or {}).get('settlement_path', '')}",
+                f"  attestation_type:                 {(external_settlement_summary.get('processing') or {}).get('accepted_attestation_type', '')}",
+            ]
+        )
+    else:
+        lines.append(f"  reason:                            {external_settlement.get('reason', 'not available')}")
 
     lines.append(f"legacy_reference_adapter:            {_proof_status_label(legacy_proof)}")
     if legacy_proof.get('passed'):

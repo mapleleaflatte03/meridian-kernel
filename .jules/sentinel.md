@@ -1,0 +1,4 @@
+## 2024-04-03 - Added Scheme Validation for urllib requests (SSRF Prevention)
+**Vulnerability:** Server-Side Request Forgery (SSRF) and Local File Inclusion (LFI). `urllib.request.urlopen` in `kernel/federation.py` and `kernel/treasury.py` was used to fetch URLs (e.g. peer manifests or RPC endpoints) without validating the URL scheme. An attacker controlling a peer configuration could provide a `file://` or `ftp://` URL.
+**Learning:** Python's standard `urllib.request.urlopen` blindly follows internal and file protocols unless explicitly constrained. Relying on it directly for user-provided endpoints allows internal reconnaissance and sensitive file read access (like `/etc/passwd`).
+**Prevention:** Always validate and restrict URL schemes to explicitly allowed protocols (e.g., `http://`, `https://`) before passing them to `urllib.request.urlopen`.

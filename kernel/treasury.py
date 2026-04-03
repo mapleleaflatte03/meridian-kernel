@@ -2456,6 +2456,8 @@ def _json_rpc_request(rpc_url, method, params=None, *, timeout_seconds=10):
     rpc_url = str(rpc_url or '').strip()
     if not rpc_url:
         raise ValueError('rpc_url is required')
+    if not rpc_url.startswith(('http://', 'https://')):
+        raise ValueError('Invalid scheme: RPC URL must start with http:// or https://')
     payload = {
         'jsonrpc': '2.0',
         'id': f'rpc_{uuid.uuid4().hex[:12]}',

@@ -22,7 +22,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Initialize economy ledger
-        run: python3 quickstart.py --init-only
+        run: |
+          python3 quickstart.py --init-only
+          touch kernel/authority_queue.json kernel/court_records.json economy/transactions.jsonl economy/revenue.json
 
       - name: Run test suite
         env:

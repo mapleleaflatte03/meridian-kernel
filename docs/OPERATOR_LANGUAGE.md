@@ -478,13 +478,14 @@ must convey the same information as a color terminal.
 
 ## 9. Loom-Specific Commands
 
-Meridian Loom is the planned Meridian-native execution runtime (see
-`docs/LOOM_SPEC.md`). Current status: PLANNED in the registry, with a public
-experimental scaffold in a separate repo. The scaffold already exposes `loom
+Meridian Loom is Meridian's official first-party execution runtime (see
+`docs/LOOM_SPEC.md`). Current status: public runtime with bounded local proof
+and still-bounded hosted/runtime claims. The runtime already exposes `loom
 doctor`, `loom status`, `loom contract show`, `loom job list`, `loom job inspect`,
 `loom shadow decide`, `loom shadow enforce`, `loom action execute`, and
-`loom parity report` as rehearsal surfaces. This section defines the target
-command surface and the operator language those current surfaces should grow into.
+`loom parity report` as real operator surfaces. This section defines the target
+command surface and the operator language those shipping surfaces should keep
+growing into.
 
 All Loom commands are prefixed `loom`, not `meridian`. Loom is the runtime.
 Meridian is the governance kernel. The namespaces are separate.

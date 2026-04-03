@@ -1,10 +1,10 @@
 # Meridian Loom — Repository Strategy
 
-**Status:** Decision document plus public experimental scaffold
+**Status:** Decision document plus official first-party runtime repo
 
-A separate `meridian-loom` scaffold now exists publicly at
+A separate `meridian-loom` runtime repo now exists publicly at
 `https://github.com/mapleleaflatte03/meridian-loom` to validate the repo
-shape, Rust workspace layout, CI workflow, and setup rehearsal path.
+shape, Rust workspace layout, CI workflow, and the runtime/product path.
 
 ## Decision: Separate Repository
 

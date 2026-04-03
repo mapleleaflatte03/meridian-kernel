@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  Public runtime thesis for Meridian-native execution, with strict separation between scaffold truth and future runtime claims.
+  Public runtime thesis for Meridian-native execution, with strict separation between current Loom truth and future expansion claims.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/phase-0%20public%20scaffold-0c1117?style=flat-square" alt="Phase 0 public scaffold">
+  <img src="https://img.shields.io/badge/phase-official%20first--party%20runtime-0c1117?style=flat-square" alt="Official first-party runtime">
   <img src="https://img.shields.io/badge/proven-hooks-7%2F7-0f766e?style=flat-square" alt="7 of 7 proven hooks">
   <img src="https://img.shields.io/badge/runtime-Meridian%20Loom-1f6feb?style=flat-square" alt="Meridian Loom runtime">
   <img src="https://img.shields.io/badge/focus-product%20shape%20and%20operator%20shape-0f766e?style=flat-square" alt="Product and operator shape">
@@ -23,7 +23,7 @@
 
 # Meridian Loom // Runtime Specification
 
-**Status:** PLANNED / PUBLIC EXPERIMENTAL SCAFFOLD (0/7 contract compliance)
+**Status:** OFFICIAL FIRST-PARTY RUNTIME WITH BOUNDED LOCAL PROOF
 **Core language:** Rust (supervisor / runtime core)
 **Worker languages:** Python, TypeScript (where appropriate)
 **Sandbox:** WASM for capability modules
@@ -37,14 +37,14 @@ Loom is polyglot by design: a Rust supervisor manages lifecycle, isolation, and
 governance bridging, while workers may be written in Python or TypeScript. WASM
 sandboxing is used for capability modules where isolation matters.
 
-This document began as a pure spec. An experimental public scaffold now exists
-to validate the CLI shape, setup flow, local state layout, and rehearsal path.
-The broader speculative and near-term runtime agenda now lives in the separate
+This document began as a pure spec. Loom now ships as Meridian's first-party
+runtime repo and local operator surface. The broader speculative and near-term
+runtime agenda now lives in the separate
 research docket at
 [`meridian-loom/docs/LOOM_100_IMPROVEMENTS.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md),
 so this spec can stay focused on truth boundary, contract shape, and migration.
-That scaffold now includes rehearsal surfaces for all seven contract areas.
-Several important gaps have moved forward, but not to full runtime proof:
+The runtime now includes bounded local surfaces for all seven contract areas.
+Several important gaps have moved forward, but not to broad hosted runtime proof:
 - `audit_emission` now writes runtime-side artifacts through the kernel-owned
   `audit.py log-runtime` CLI path into `kernel/runtime_audit/loom_runtime_events.jsonl`
   when a kernel is present, with a local fallback otherwise. This is still not
@@ -110,7 +110,9 @@ Several important gaps have moved forward, but not to full runtime proof:
   Wasmtime store limits and pooling profiles through a local guest path without
   claiming a hosted capability runtime already exists
 
-It still does **not** provide governed execution or any proven contract hooks.
+It does provide governed local execution and native contract coverage on the
+current local/runtime path. What remains bounded is broader hosted proof,
+transport breadth, and every future deployment mode.
 
 ---
 
@@ -149,15 +151,15 @@ Every runtime in the Meridian ecosystem must satisfy 7 contract hooks
 | 6 | `sanction_controls` | Query `get_restrictions(agent_id)` per session; enforce restrictions |
 | 7 | `budget_gate` | Call `check_budget(agent_id, cost)` before cost-bearing ops; block on `False` |
 
-Current compliance: **0/7** (all `null` — unproven).
+Current compliance: **7/7 native** on the active `loom_native` runtime entry.
 
 ---
 
 ## 3. Target Performance
 
-These are **directional goals**, not proven Meridian numbers. The current Loom
-scaffold is not yet a governed execution runtime and provides no meaningful
-performance evidence.
+These are **directional goals**, not official public benchmarks. Loom is now a
+governed execution runtime, but this section is still not claiming rigorously
+published benchmark numbers.
 Competitor observations are labeled with confidence based on source quality and
 recency.
 
@@ -166,10 +168,10 @@ recency.
 | Memory | <50 MB | Comparable Rust runtimes (ZeroClaw, SkyClaw) report <15 MB in their docs; legacy runtime's JS runtime is observed at ~100 MB in local testing. Loom targets well below legacy runtime but does not claim parity with minimal embedded runtimes. | DIRECTIONAL — no Loom measurement exists |
 | Cold start | <500 ms | ZeroClaw docs claim 10ms; legacy runtime observed at ~30s locally. Loom's target is conservative relative to reported Rust runtimes but aspirational relative to current state (no code). | DIRECTIONAL — no Loom measurement exists |
 | Isolation | WASM + container | OpenFang demonstrates dual-metered WASM isolation. Loom plans the same architecture class. | DESIGN GOAL |
-| Contract compliance | 7/7 native | The kernel defines 7 hooks. Loom aims to implement all natively without adapter translation. | DESIGN GOAL — current compliance: 0/7 |
+| Contract compliance | 7/7 native | The kernel defines 7 hooks. Loom implements them natively without adapter translation. | CURRENT RUNTIME ENTRY: 7/7 |
 
 **What these numbers are not:**
-- Not proven Meridian benchmarks (a public Loom binary scaffold exists, but no governed runtime benchmark exists)
+- Not official Meridian benchmark publications yet
 - Not guaranteed post-implementation figures
 - Not claims about competitor runtimes beyond what their public docs state
 
@@ -229,10 +231,10 @@ The supervisor never assumes all execution logic is Rust.
 
 ## 5. Phased Migration
 
-### Phase 0 — Spec + Scaffold (current)
+### Phase 0 — Spec + Runtime Foundation (complete)
 - This document
-- Registry entry with 0/7 compliance, status `"planned"`
-- Experimental public scaffold for CLI/setup rehearsal plus 7-surface rehearsal coverage
+- Registry entry with native 7/7 compliance, status `"active"`
+- Public Loom runtime repo for CLI/setup plus 7-surface local/runtime coverage
 - Experimental decision artifact (`loom shadow decide`) for operator review of the
   current effective gate outcome
 - Experimental fail-closed command (`loom shadow enforce`) for shell automation

@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  Truthful install and distribution story for a public scaffold that is inspectable before it is mature.
+  Truthful install and distribution story for Loom as a first-party runtime that is already installable before every future claim is mature.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/install-source%20first-0c1117?style=flat-square" alt="Source first">
-  <img src="https://img.shields.io/badge/repo-public%20scaffold-0f766e?style=flat-square" alt="Public scaffold">
-  <img src="https://img.shields.io/badge/runtime-not%20production-8b0000?style=flat-square" alt="Not production">
+  <img src="https://img.shields.io/badge/repo-first--party%20runtime-0f766e?style=flat-square" alt="First-party runtime">
+  <img src="https://img.shields.io/badge/runtime-bounded%20truth-8b0000?style=flat-square" alt="Bounded runtime truth">
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 
 # Meridian Loom // Packaging and Installation Strategy
 
-**Status:** Design document plus public experimental scaffold
+**Status:** Design document plus official first-party runtime packaging story
 
 ## Build Requirements
 
@@ -45,20 +45,20 @@ cargo build --release
 Binary lands at `target/release/loom`. This is the expected path during
 Phase 0–2 when the audience is the Meridian team and early contributors.
 
-**Current truth:** a public experimental scaffold already exists at
+**Current truth:** a public Loom runtime already exists at
 `https://github.com/mapleleaflatte03/meridian-loom` and builds in the founder
-workspace. It is publishable and testable as a CLI/setup scaffold, but not as a
-governed runtime. The current scaffold now exposes rehearsal surfaces for all
+workspace. It is installable and testable as a governed local runtime surface,
+but broader hosted/runtime claims remain bounded. The current runtime now exposes local surfaces for all
 seven contract areas. `loom action execute` materializes a fail-closed runtime
-receipt, a runtime-side audit artifact, and a parity stream. The scaffold can
+receipt, a runtime-side audit artifact, and a parity stream. Loom can
 also capture a live legacy runtime proof snapshot on the founder host. `loom service`
 now exposes a local service shell with truthful file-backed ingress fallback,
 and it can optionally bind a tokenized local HTTP control plane for
 `GET /status`, `POST /submit`, and `POST /stop` when the host permits local
 binding. `loom service import-commitments` can import sender-side
 `execution_request` delivery refs from a commitments snapshot into the local
-queue. These are runtime rehearsal surfaces, not proof of a governed hosted
-runtime. All seven hooks still remain unproven in the runtime registry.
+queue. These are runtime-local proof surfaces, not proof of every governed hosted
+deployment mode. Hosted and broad deployment claims remain intentionally bounded.
 
 ### 2. Pre-built binary (Phase 3+)
 
@@ -149,7 +149,7 @@ cd meridian-loom && cargo build --release
 
 In **embedded mode** (see `CLI_AND_MODES.md`), Loom is expected to ship a
 vendored copy of the kernel's governance checks as a compiled library. The
-current scaffold does not implement that bundling yet. The canonical install
+current runtime does not implement that bundling yet. The canonical install
 path still keeps kernel and Loom separate.
 
 ## Versioning
@@ -160,12 +160,12 @@ not carry its own version number today. Compatibility is expressed as
 the count of proven hooks:
 
 ```
-Loom 0.1.0 — 0/7 hooks proven (Phase 0, spec + public scaffold)
-Loom 0.2.0 — 2/7 hooks proven (Phase 1, shadow mode)
+Loom 0.1.x — first-party runtime packaging, local proof receipts, and bounded runtime claims
+Loom 0.2.0 — deeper personal-agent/runtime proof and broader delivery surfaces
 ```
 
 Loom's version number does not imply kernel version compatibility beyond
-the hook count it has proven against the current contract definition.
+the current contract definition and proof surfaces it has actually shipped.
 
 ## Maturity Gates
 
@@ -174,10 +174,12 @@ just elapsed time.
 
 | Gate | Requirement | What it unlocks |
 |------|-------------|-----------------|
-| **Pre-alpha** (current) | Spec exists, registry entry at 0/7, public scaffold builds | CLI/setup rehearsal only |
-| **Alpha** | 2+/7 hooks proven, shadow mode runs | Evaluation by contributors |
-| **Beta** | 5+/7 hooks proven, governed worker cells pass | Opt-in use alongside primary runtime |
-| **GA** | 7/7 hooks proven, 7 consecutive clean night-shift runs | Production use, legacy runtime retirement eligible |
+| **Pre-alpha** (historical) | Spec exists, registry entry at 0/7, public scaffold builds | CLI/setup rehearsal only |
+| **Runtime v0.1** (current) | Installable first-party runtime, local proof surfaces, bounded public claims | Loom as the product front door |
+| **Alpha** | Personal-agent loop, channels, and memory feel solid under repeated local use | Evaluation by contributors |
+| **Beta** | Broader hosted/runtime proof, shadow hardening, and richer delivery surfaces | Opt-in use alongside other runtime paths |
+| **GA** | Durable hosted/runtime proof, stable packaging, and repeated clean runs across the declared surface | Production use, broader runtime replacement claims |
 
-No gate is reached until the corresponding `contract_compliance` fields
-in `runtimes.json` are set to `true` by passing tests. `null` = unproven.
+Contract compliance is already native 7/7 for `loom_native` in
+`runtimes.json`. The remaining gates are about product maturity, hosted/runtime
+breadth, and proof of the broader runtime claim surface.

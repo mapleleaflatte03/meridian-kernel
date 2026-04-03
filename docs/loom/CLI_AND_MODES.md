@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  Current scaffold commands, operating modes, and the honest “user only needs Loom” path.
+  Current Loom commands, operating modes, and the honest “user only needs Loom” path.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/cli-public%20scaffold-0c1117?style=flat-square" alt="CLI public scaffold">
+  <img src="https://img.shields.io/badge/cli-official%20runtime%20surface-0c1117?style=flat-square" alt="CLI official runtime surface">
   <img src="https://img.shields.io/badge/modes-embedded%20shadow%20standalone-1f6feb?style=flat-square" alt="Embedded, shadow, standalone">
   <img src="https://img.shields.io/badge/operator-human%20grammar%20implemented-0f766e?style=flat-square" alt="Human grammar implemented">
 </p>
@@ -21,20 +21,20 @@
 
 # Meridian Loom // CLI and Operating Modes
 
-**Status:** Design document plus public experimental scaffold
+**Status:** Design document plus official first-party runtime surface
 
 ## CLI Surface
 
-The public `loom` binary already exists as an experimental scaffold. It is not
-yet a runtime supervisor, but it does provide a real command surface for setup,
-inspection, shadow rehearsal, fail-closed runtime rehearsal, runtime-side audit
-artifacts, and parity reporting.
+The public `loom` binary already exists as Meridian's first-party runtime CLI.
+It is still bounded in some hosted/runtime claims, but it does provide a real
+command surface for setup, inspection, shadow rehearsal, fail-closed runtime
+execution, runtime-side audit artifacts, and parity reporting.
 
-### Current scaffold commands
+### Current runtime commands
 
 ```
 loom init              Create loom.toml and initialize local state
-loom help              Show the grouped scaffold command surface
+loom help              Show the grouped runtime command surface
 loom doctor            Validate config, local state, kernel path, and registry access
 loom health            Structured health check
 loom status            Human-readable status summary
@@ -79,7 +79,7 @@ headers and status cues. `NO_COLOR=1` disables it without changing the
 underlying artifact grammar.
 
 `loom init` accepts `--mode shadow|standalone|embedded` and `--kernel-path <path>`.
-The current rehearsal path uses `embedded` plus a kernel path so the scaffold can
+The current rehearsal path uses `embedded` plus a kernel path so Loom can
 read the runtime registry and agent registry honestly. `loom init` writes a
 `loom.toml` in the target directory and refuses to overwrite an existing config.
 
@@ -110,7 +110,7 @@ governance hooks while its outputs are discarded.
 **When to use:** Phase 1 — proving that Loom's governance checks produce
 identical results to the primary runtime.
 
-**Current scaffold truth:**
+**Current runtime truth:**
 - `loom shadow preflight` captures experimental events for all 7 contract surfaces
 - `loom shadow decide` writes a standalone decision artifact (`decision.json`)
 - that decision surface unions a local sanction preview from the resolved
@@ -259,7 +259,7 @@ They do **not** get:
 - the hosted kernel's canonical audit log
 - per-action live legacy runtime parity against a real legacy runtime action execution stream
 
-Those remain future runtime work, not current scaffold truth.
+Those remain future Loom expansion work, not current runtime truth.
 
 ## CLI design principles
 

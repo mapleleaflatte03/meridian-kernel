@@ -41,17 +41,17 @@ run.
 
 ## Repository Prerequisites
 
-- [x] `meridian-loom` repository scaffold created publicly
+- [x] `meridian-loom` runtime repository created publicly
   - https://github.com/mapleleaflatte03/meridian-loom
 - [x] `Cargo.toml` with workspace structure
   - workspace root with `loom-core`, `loom-cli`, `loom-shadow` crates
 - [x] CI workflow defined for `cargo build` and `cargo test`
-  - GitHub Actions file exists in the public scaffold repository
-- [x] README with honest status: experimental scaffold, not a functional runtime
+  - GitHub Actions file exists in the public runtime repository
+- [x] README with honest status as an official first-party runtime with bounded claims
   - No aspirational feature lists; only what exists and what does not
 - [x] Experimental preflight path exists for all 7 governance surfaces
   - `agent_identity`, `action_envelope`, `cost_attribution`, `approval_hook`, `audit_emission`, `sanction_controls`, `budget_gate`
-  - still 0/7 proven in the runtime registry
+  - shadow-mode proof is still narrower than the active runtime registry entry
 - [x] Read-only reference gate surface exists for sanction/approval/budget
   - Loom can compare shadow events against kernel reference-adapter decisions
   - Loom can now also materialize a runtime-side parity stream and latest report
@@ -97,8 +97,8 @@ run.
   - must include: timestamp, hook name, primary decision, shadow decision
   - must include: input hash for reproducibility
 - [ ] Shadow divergence comparison against a primary runtime
-  - current scaffold can compare Loom shadow events against kernel reference-adapter events
-  - current scaffold can capture a live legacy runtime proof snapshot into the parity surface
+  - current runtime can compare Loom shadow events against kernel reference-adapter events
+  - current runtime can capture a live legacy runtime proof snapshot into the parity surface
   - future Phase 1 still requires pairing Loom decisions with real per-action legacy runtime runtime decisions
 
 ---
@@ -152,7 +152,7 @@ run.
 - Not a timeline or sprint plan.
   There are no dates here because dates without prerequisites are fiction.
 - Not a claim that shadow mode is near.
-  Even with a public scaffold, the hook implementation and divergence engine do
+  Even with a public runtime repo, the hook implementation and divergence engine do
   not exist yet.
 - Not a Rust tutorial.
   The runtime prerequisites assume familiarity with Rust and Cargo.

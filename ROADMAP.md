@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  Ordered programs for the kernel, public proof, Loom scaffold, and future capsule/operator work.
+  Ordered programs for the kernel, public proof, Loom runtime, and future capsule/operator work.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/current-kernel%20and%20proof-0c1117?style=flat-square" alt="Kernel and proof current">
-  <img src="https://img.shields.io/badge/loom-public%20scaffold-0f766e?style=flat-square" alt="Loom public scaffold">
+  <img src="https://img.shields.io/badge/loom-first--party%20runtime-0f766e?style=flat-square" alt="Loom first-party runtime">
   <img src="https://img.shields.io/badge/capsule-formalized%20lane-1f6feb?style=flat-square" alt="Capsule lane">
   <img src="https://img.shields.io/badge/operator-terminal--first-475569?style=flat-square" alt="Operator terminal first">
 </p>
@@ -25,7 +25,7 @@
   <img src="docs/assets/meridian_roadmap_panels.svg" alt="Meridian roadmap overview" width="960">
 </p>
 
-> The roadmap is split on purpose: current proof, near-term Loom rehearsal, and future runtime/capsule/operator programs should never be collapsed into one false “done” story.
+> The roadmap is split on purpose: current proof, current Loom runtime truth, and future capsule/operator programs should never be collapsed into one false “done” story.
 
 # Roadmap
 
@@ -124,18 +124,18 @@ Stable API, production storage, comprehensive tests, security audit.
 - [ ] Production deployment guide
 - [ ] OpenSSF Best Practices badge
 
-## Meridian Loom — Native Runtime (Planned)
+## Meridian Loom — First-Party Runtime
 
-Meridian Loom is a planned Meridian-native execution runtime designed to
-implement all 7 contract hooks natively without adapter translation. A public
-experimental scaffold now exists at
-`https://github.com/mapleleaflatte03/meridian-loom`, but no governed runtime
-exists yet. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
+Meridian Loom is Meridian's official first-party execution runtime. It is the
+runtime product that consumes the kernel contract natively and carries the
+local install, CLI, personal-agent, service, queue, memory, and proof-receipt
+surfaces. What remains bounded is not whether Loom exists, but which hosted and
+broad runtime claims have been fully proven already. See [LOOM_SPEC.md](docs/LOOM_SPEC.md).
 
 | Phase | Goal | Contract Hooks | Gate |
 |-------|------|---------------|------|
-| 0-4 (complete) | Spec, scaffold, 11 runtime planes, native 7/7 contract compliance, governed capability dispatch, session provenance, PoGE receipts | 7/7 | — |
-| 5 (current) | Native ingress (full legacy replacement) | 7/7 | 7 consecutive clean runs + owner approval |
+| 0-4 (complete) | Spec, runtime repo, 11 runtime planes, native 7/7 contract story, governed capability dispatch, session provenance, PoGE receipts | 7/7 | — |
+| 5 (current) | Native ingress and broader hosted/runtime proof hardening | 7/7 | 7 consecutive clean runs + owner approval |
 
 Architecture: Rust supervisor, Python/TypeScript workers, WASM capability
 modules. Separate repository (`meridian-loom`). Loom depends on the kernel

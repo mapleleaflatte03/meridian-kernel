@@ -52,9 +52,9 @@ Meridian is intentionally split into three layers so each part can evolve withou
 |---|---|---|
 | **Kernel** | This repo | Governance primitives, proof surfaces, capsule-backed state, and the runtime contract |
 | **Intelligence** | [`meridian-intelligence`](https://github.com/mapleleaflatte03/meridian-intelligence) | Governed work, planning, analysis, and operational intelligence on top of the kernel |
-| **Loom** | [`meridian-loom`](https://github.com/mapleleaflatte03/meridian-loom) | The runtime/runtime-adjacent execution scaffold that consumes the kernel contract |
+| **Loom** | [`meridian-loom`](https://github.com/mapleleaflatte03/meridian-loom) | Meridian's official first-party runtime: a governed local agent runtime that consumes the kernel contract |
 
-The kernel and intelligence layers can be exercised entirely locally. Loom remains a separate runtime surface so the governance contract stays independent of any one runner. Commitment lives at the Meridian platform layer above this repo; it is not a sixth kernel primitive.
+The kernel and intelligence layers can be exercised entirely locally. Loom remains a separate runtime surface so the governance contract stays independent of any one runner, even while Loom serves as Meridian's flagship runtime product. Commitment lives at the Meridian platform layer above this repo; it is not a sixth kernel primitive.
 
 ---
 
@@ -143,9 +143,9 @@ Loom.
 
 See [`examples/public-proof-bundle-human.txt`](examples/public-proof-bundle-human.txt) for a checked-in human-format example captured in a restricted environment.
 
-For the broader frontier agenda behind Loom as a future runtime, see
+For the broader frontier agenda behind Loom as Meridian's first-party runtime roadmap, see
 [`docs/LOOM_100_IMPROVEMENTS.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/LOOM_100_IMPROVEMENTS.md).
-That document is intentionally a research docket, not a present-tense product claim.
+That document is intentionally a research docket for future Loom expansion, not a present-tense product claim about every runtime feature already shipping today.
 
 The example intelligence workload proves governed work on top of the kernel. It is a good wedge, not the whole definition of Meridian.
 

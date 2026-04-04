@@ -1059,6 +1059,8 @@ class FederationAuthority:
 
 
 def _default_http_post_json(url, data):
+    if not str(url or '').lower().startswith(('http://', 'https://')):
+        raise FederationDeliveryError('URL must use http or https scheme')
     request = urllib.request.Request(
         url,
         data=json.dumps(data).encode('utf-8'),
@@ -1080,6 +1082,8 @@ def _default_http_post_json(url, data):
 
 
 def _default_http_get_json(url):
+    if not str(url or '').lower().startswith(('http://', 'https://')):
+        raise FederationDeliveryError('URL must use http or https scheme')
     request = urllib.request.Request(url, method='GET')
     try:
         with urllib.request.urlopen(request, timeout=10) as response:

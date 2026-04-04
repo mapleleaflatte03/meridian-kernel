@@ -119,7 +119,9 @@ class CapsuleScopingTests(unittest.TestCase):
         self.assertIn('below lead threshold', out)
 
     def test_explicit_founding_org_alias_resolves_to_legacy_economy(self):
-        founding_org = 'org_b7d95bae'
+        import kernel.capsule as capsule
+        orgs = capsule._load_orgs()
+        founding_org = list(orgs.keys())[0] if orgs else 'org_b7d95bae'
         self.assertEqual(
             pathlib.Path(self.capsule.capsule_path(founding_org, 'ledger.json')),
             ECONOMY_DIR / 'ledger.json',

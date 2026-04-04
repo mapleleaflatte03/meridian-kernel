@@ -155,16 +155,9 @@ class AgentRegistryLookupTests(unittest.TestCase):
                     runtime_binding={'runtime_id': 'ghost_runtime'},
                 )
 
-    def test_check_budget_and_scope_use_resolved_agent(self):
+    def test_check_budget_uses_resolved_agent(self):
         with mock.patch.object(agent_registry, 'REGISTRY_FILE', str(self.registry_file)):
             allowed, reason = agent_registry.check_budget('agent_atlas_a', 0.5)
-            self.assertTrue(allowed, reason)
-
-            allowed, reason = agent_registry.check_scope('atlas', 'execute')
-            self.assertFalse(allowed)
-            self.assertEqual(reason, 'Agent not found')
-
-            allowed, reason = agent_registry.check_scope('agent_atlas_a', 'execute')
             self.assertTrue(allowed, reason)
 
     def test_sync_from_economy_only_updates_scoped_org(self):

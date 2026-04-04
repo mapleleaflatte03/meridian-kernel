@@ -247,8 +247,11 @@ def _seed_workspace_root(root_dir, *, org_id, user_id, host_id, port, signing_se
     economy_src = os.path.join(WORKSPACE, 'economy')
     kernel_dst = os.path.join(root_dir, 'kernel')
     economy_dst = os.path.join(root_dir, 'economy')
-    shutil.copytree(kernel_src, kernel_dst, ignore_dangling_symlinks=True)
-    shutil.copytree(economy_src, economy_dst, ignore_dangling_symlinks=True)
+    shutil.copytree(kernel_src, kernel_dst, ignore=shutil.ignore_patterns('*.pyc', '__pycache__'), ignore_dangling_symlinks=True)
+    shutil.copytree(economy_src, economy_dst, ignore=shutil.ignore_patterns('*.pyc', '__pycache__', 'capsules'), ignore_dangling_symlinks=True)
+
+    if os.path.exists(os.path.join(economy_dst, 'ledger.json')):
+        os.remove(os.path.join(economy_dst, 'ledger.json'))
 
     _write_json(
         os.path.join(kernel_dst, 'organizations.json'),

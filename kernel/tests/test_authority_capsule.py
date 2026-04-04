@@ -60,7 +60,7 @@ class AuthorityCapsuleTests(unittest.TestCase):
             },
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
-        self.legacy_queue_before = LEGACY_QUEUE_PATH.read_text()
+        self.legacy_queue_before = LEGACY_QUEUE_PATH.read_text() if LEGACY_QUEUE_PATH.exists() else '{}'
 
     def tearDown(self):
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
@@ -77,7 +77,7 @@ class AuthorityCapsuleTests(unittest.TestCase):
         queue_path = pathlib.Path(capsule.capsule_path(self.org_id, 'authority_queue.json'))
         queue = json.loads(queue_path.read_text())
         self.assertIn(approval_id, queue['pending_approvals'])
-        self.assertEqual(LEGACY_QUEUE_PATH.read_text(), self.legacy_queue_before)
+        self.assertEqual(LEGACY_QUEUE_PATH.read_text() if LEGACY_QUEUE_PATH.exists() else '{}', self.legacy_queue_before)
 
     def test_check_authority_filters_economy_key_by_org_id(self):
         fake_registry = types.ModuleType('agent_registry')

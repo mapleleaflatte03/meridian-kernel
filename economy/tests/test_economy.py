@@ -100,6 +100,24 @@ class TestEconomy(unittest.TestCase):
             d = load_ledger()['agents']['sentinel']
             self.assertFalse(d.get('lead_ban'), "lead_ban should be cleared after lift")
 
+    def test_cmd_lift(self):
+        """Testing cmd_lift directly via sanctions.py lift"""
+        out, rc, _ = run(['python3', 'economy/sanctions.py', 'apply',
+                            '--agent', 'atlas', '--type', 'probation',
+                            '--note', 'test cmd_lift apply'])
+        self.assertEqual(rc, 0, f"sanctions.py apply should exit 0: {out}")
+
+        d = load_ledger()['agents']['atlas']
+        self.assertTrue(d.get('probation'), "probation should be applied")
+
+        out, rc, _ = run(['python3', 'economy/sanctions.py', 'lift',
+                            '--agent', 'atlas', '--type', 'probation',
+                            '--note', 'test cmd_lift lift'])
+        self.assertEqual(rc, 0, f"sanctions.py lift should exit 0: {out}")
+
+        d = load_ledger()['agents']['atlas']
+        self.assertFalse(d.get('probation'), "probation should be cleared after cmd_lift")
+
     def test_3_zero_authority_cannot_lead(self):
         """Zero-authority agent is blocked from leading and AUTH gain."""
         rep0, auth0 = snap('forge')

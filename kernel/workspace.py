@@ -1049,6 +1049,8 @@ def _federation_claims_dict(claims):
         return dict(claims)
     if hasattr(claims, 'to_dict'):
         return claims.to_dict()
+    if hasattr(claims, '__dict__'):
+        return vars(claims)
     return {}
 
 

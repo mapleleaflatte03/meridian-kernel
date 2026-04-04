@@ -4442,6 +4442,10 @@ def _local_dispatch_target_satisfiable(bound_org_id, dispatch_record, *, host_id
     }
 
 
+class _ClaimsNamespace(SimpleNamespace):
+    def to_dict(self):
+        return vars(self)
+
 def _run_local_federation_dispatch(bound_org_id, dispatch_id, *, actor_id, note='', session_id=None):
     dispatch_id = (dispatch_id or '').strip()
     actor_id = (actor_id or '').strip()
@@ -4468,7 +4472,7 @@ def _run_local_federation_dispatch(bound_org_id, dispatch_id, *, actor_id, note=
     target_institution_id = locality['target_institution_id'] or (bound_org_id or '').strip()
     envelope_id = dispatch_id
     request_payload = dict(draft.get('payload') or {})
-    claims = SimpleNamespace(
+    claims = _ClaimsNamespace(
         envelope_id=envelope_id,
         source_host_id=source_host_id,
         source_institution_id=source_institution_id,

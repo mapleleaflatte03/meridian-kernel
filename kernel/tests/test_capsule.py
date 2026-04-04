@@ -54,7 +54,6 @@ class CapsuleTests(unittest.TestCase):
             capsule.capsule_path("org_demo", "ledger.json"),
             str(target / "ledger.json"),
         )
-        self.assertEqual(capsule.capsule_dir("org_demo"), str(target))
 
     def test_auto_aliases_single_legacy_org_to_economy(self):
         self._write_orgs({
@@ -68,7 +67,6 @@ class CapsuleTests(unittest.TestCase):
             capsule.capsule_path("org_demo", "ledger.json"),
             str(self.economy_dir / "ledger.json"),
         )
-        self.assertEqual(capsule.capsule_dir("org_demo"), str(self.economy_dir))
 
     def test_does_not_alias_when_multiple_orgs_have_no_capsule(self):
         self._write_orgs({

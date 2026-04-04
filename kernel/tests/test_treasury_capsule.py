@@ -49,9 +49,19 @@ class TreasuryCapsuleTests(unittest.TestCase):
             }
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
-        self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+
+        self._created_default_ledger = False
+        default_ledger_path = ECONOMY_DIR / 'ledger.json'
+        if not default_ledger_path.exists():
+            ECONOMY_DIR.mkdir(parents=True, exist_ok=True)
+            default_ledger_path.write_text(json.dumps(capsule._EMPTY_LEDGER))
+            self._created_default_ledger = True
+
+        self.default_ledger_before = json.loads(default_ledger_path.read_text())
 
     def tearDown(self):
+        if getattr(self, '_created_default_ledger', False) and (ECONOMY_DIR / 'ledger.json').exists():
+            (ECONOMY_DIR / 'ledger.json').unlink()
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
 
     def test_contribute_owner_capital_writes_only_to_capsule(self):

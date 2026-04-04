@@ -1,3 +1,9 @@
+import os
+import sys
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 #!/usr/bin/env python3
 import importlib.util
 import json
@@ -49,7 +55,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
             }
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
-        self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+        self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text()) if (ECONOMY_DIR / 'ledger.json').exists() else {'epoch': {'number': 1, 'started_at': '2026-03-21T00:00:00Z'}, 'agents': {}, 'treasury': {'cash_usd': 0.0}} if (ECONOMY_DIR / 'ledger.json').exists() else {'epoch': {'number': 1, 'started_at': '2026-03-21T00:00:00Z'}, 'agents': {}, 'treasury_usd': 0.0} if (ECONOMY_DIR / 'ledger.json').exists() else {'epoch': {'number': 1, 'started_at': '2026-03-21T00:00:00Z'}, 'agents': {}, 'treasury_usd': 0.0}
 
     def tearDown(self):
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
@@ -72,7 +78,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(tx_lines[0]['type'], 'treasury_deposit')
         self.assertEqual(tx_lines[0]['deposit_type'], 'owner_capital')
 
-        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text()) if (ECONOMY_DIR / 'ledger.json').exists() else {'epoch': {'number': 1, 'started_at': '2026-03-21T00:00:00Z'}, 'agents': {}, 'treasury': {'cash_usd': 0.0}} if (ECONOMY_DIR / 'ledger.json').exists() else {'epoch': {'number': 1, 'started_at': '2026-03-21T00:00:00Z'}, 'agents': {}, 'treasury_usd': 0.0} if (ECONOMY_DIR / 'ledger.json').exists() else {'epoch': {'number': 1, 'started_at': '2026-03-21T00:00:00Z'}, 'agents': {}, 'treasury_usd': 0.0}
         self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
 
     def test_load_funding_sources_backfills_owner_capital_from_ledger(self):

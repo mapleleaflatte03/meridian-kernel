@@ -218,16 +218,6 @@ def _assess(brief_text: str, brief_date: dt.date, findings_text: str = "") -> di
     }
 
 
-def assess_brief_content(content: str, brief_date: str | None = None) -> dict[str, Any]:
-    parsed_brief_date = parse_iso_date(brief_date or "") or dt.date.today()
-    findings_text = ""
-    if brief_date:
-        findings_path = os.path.join(ARTIFACT_DIR, f"findings-{parsed_brief_date.isoformat()}.md")
-        if os.path.exists(findings_path):
-            findings_text = load_text(findings_path)
-    return _assess(content, parsed_brief_date, findings_text=findings_text)
-
-
 def analyze_brief(brief_path: str, findings_path: str | None = None) -> dict[str, Any]:
     brief_text = load_text(brief_path)
     resolved_findings_path = resolve_findings_path(brief_path, findings_path)

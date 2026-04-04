@@ -83,11 +83,6 @@ def register_capsule_alias(org_id, directory):
     _CAPSULE_ALIASES[org_id] = os.path.abspath(directory)
 
 
-def unregister_capsule_alias(org_id):
-    """Remove a capsule alias.  No-op if not registered."""
-    _CAPSULE_ALIASES.pop(org_id, None)
-
-
 def _load_orgs():
     if not os.path.exists(ORGS_FILE):
         return {}

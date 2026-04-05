@@ -185,25 +185,6 @@ def reclassified_order_ids(transactions=None, org_id=None):
     }
 
 
-def recent_customer_payment_metrics(since_days=7, transactions=None, org_id=None):
-    transactions = transactions if transactions is not None else load_transactions(org_id)
-    cutoff = (
-        datetime.datetime.utcnow() - datetime.timedelta(days=since_days)
-    ).strftime('%Y-%m-%dT%H:%M:%SZ')
-    reclassified = reclassified_order_ids(transactions, org_id=org_id)
-    total = 0
-    payments = 0
-    revenue = 0.0
-    for tx in transactions:
-        if tx.get('ts', '') < cutoff:
-            continue
-        total += 1
-        if tx.get('type') == 'customer_payment' and tx.get('order_id') not in reclassified:
-            payments += 1
-            revenue += tx.get('amount', 0)
-    return {'total': total, 'payments': payments, 'revenue_usd': revenue}
-
-
 def _ensure_processed_payment_keys(ledger):
     treasury = ledger.setdefault('treasury', {})
     keys = treasury.get('processed_payment_keys')

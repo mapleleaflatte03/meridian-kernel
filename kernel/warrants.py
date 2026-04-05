@@ -2,7 +2,7 @@
 """
 Court-first warrant primitives for Meridian Kernel.
 
-Warrants are reviewable proof objects for sensitive actions. This tranche does
+Warrants are reviewable proof objects for sensitive actions. This module does
 not pretend to complete the whole constitutional autonomy program. It does
 establish the first real object and execution gate:
 

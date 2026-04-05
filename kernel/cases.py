@@ -82,6 +82,11 @@ def _empty_store():
         'claim_types': list(CLAIM_TYPES),
     }
 
+_STORE_CACHE = {}
+
+def reset_cases_cache():
+    global _STORE_CACHE
+    _STORE_CACHE.clear()
 
 def _load_store(org_id=None):
     path = _store_path(org_id)
@@ -89,8 +94,16 @@ def _load_store(org_id=None):
     if org_id and not os.path.isdir(parent):
         _missing_org_error(org_id)
     if os.path.exists(path):
+        mtime = os.path.getmtime(path)
+        cached_mtime, cached_data = _STORE_CACHE.get(path, (0, None))
+        if cached_mtime == mtime and cached_data is not None:
+            return cached_data
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+            _STORE_CACHE[path] = (mtime, data)
+            return data
+    else:
+        pass
     return _empty_store()
 
 
@@ -103,6 +116,11 @@ def _save_store(data, org_id=None):
     os.makedirs(parent, exist_ok=True)
     with open(path, 'w') as f:
         json.dump(data, f, indent=2, sort_keys=True)
+    try:
+        mtime = os.path.getmtime(path)
+        _STORE_CACHE[path] = (mtime, data)
+    except OSError:
+        pass
 
 
 def _matching_active_case(
@@ -180,20 +198,23 @@ def open_case(org_id, claim_type, actor_id, *, target_host_id='',
 
 def list_cases(org_id=None, *, status=None, claim_type=None):
     store = _load_store(org_id)
+    # Ensure we make a shallow copy of rows so sorting doesn't mutate cached store in-place
     rows = list(store.get('cases', {}).values())
     if status:
         rows = [row for row in rows if row.get('status') == status]
     if claim_type:
         rows = [row for row in rows if row.get('claim_type') == claim_type]
     rows.sort(key=lambda row: row.get('opened_at', ''), reverse=True)
-    return rows
+    # Return shallow copies of dicts to prevent callers from mutating the cache directly
+    return [dict(row) for row in rows]
 
 
 def get_case(case_id, org_id=None):
     if not case_id:
         return None
     store = _load_store(org_id)
-    return store.get('cases', {}).get(case_id)
+    record = store.get('cases', {}).get(case_id)
+    return dict(record) if record else None
 
 
 def review_case(case_id, decision, by, *, org_id=None, note=''):

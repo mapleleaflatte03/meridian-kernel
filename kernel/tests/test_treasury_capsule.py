@@ -23,6 +23,24 @@ def _load_module(name, path):
     return module
 
 
+def _read_root_ledger_cash_snapshot():
+    path = ECONOMY_DIR / 'ledger.json'
+    if not path.exists():
+        return {'treasury': {'cash_usd': 0.0}}
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return {'treasury': {'cash_usd': 0.0}}
+    if not isinstance(payload, dict):
+        return {'treasury': {'cash_usd': 0.0}}
+    treasury_payload = payload.get('treasury')
+    if not isinstance(treasury_payload, dict):
+        payload['treasury'] = {'cash_usd': 0.0}
+    elif 'cash_usd' not in treasury_payload:
+        treasury_payload['cash_usd'] = 0.0
+    return payload
+
+
 treasury = _load_module('kernel_treasury_test', TREASURY_PATH)
 capsule = _load_module('kernel_capsule_test_for_treasury', CAPSULE_PATH)
 
@@ -49,7 +67,7 @@ class TreasuryCapsuleTests(unittest.TestCase):
             }
         }
         ledger_path.write_text(json.dumps(ledger, indent=2))
-        self.default_ledger_before = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
+        self.default_ledger_before = _read_root_ledger_cash_snapshot()
 
     def tearDown(self):
         shutil.rmtree(self.capsule_dir, ignore_errors=True)
@@ -72,8 +90,11 @@ class TreasuryCapsuleTests(unittest.TestCase):
         self.assertEqual(tx_lines[0]['type'], 'treasury_deposit')
         self.assertEqual(tx_lines[0]['deposit_type'], 'owner_capital')
 
-        default_ledger = json.loads((ECONOMY_DIR / 'ledger.json').read_text())
-        self.assertEqual(default_ledger['treasury']['cash_usd'], self.default_ledger_before['treasury']['cash_usd'])
+        default_ledger = _read_root_ledger_cash_snapshot()
+        self.assertEqual(
+            (default_ledger.get('treasury') or {}).get('cash_usd', 0.0),
+            (self.default_ledger_before.get('treasury') or {}).get('cash_usd', 0.0),
+        )
 
     def test_load_funding_sources_backfills_owner_capital_from_ledger(self):
         ledger_path = self.capsule_dir / 'ledger.json'

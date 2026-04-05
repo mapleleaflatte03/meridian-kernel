@@ -1049,6 +1049,35 @@ def _federation_claims_dict(claims):
         return dict(claims)
     if hasattr(claims, 'to_dict'):
         return claims.to_dict()
+    if hasattr(claims, '__dict__'):
+        return {
+            key: value
+            for key, value in vars(claims).items()
+            if not key.startswith('_')
+        }
+    claim_fields = (
+        'envelope_id',
+        'source_host_id',
+        'source_institution_id',
+        'target_host_id',
+        'target_institution_id',
+        'actor_type',
+        'actor_id',
+        'session_id',
+        'boundary_name',
+        'identity_model',
+        'message_type',
+        'warrant_id',
+        'commitment_id',
+        'payload_hash',
+        'nonce',
+    )
+    extracted = {}
+    for field in claim_fields:
+        if hasattr(claims, field):
+            extracted[field] = getattr(claims, field)
+    if extracted:
+        return extracted
     return {}
 
 

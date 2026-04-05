@@ -23,6 +23,65 @@ def run(cmd):
     return r.stdout.strip(), r.returncode, r.stderr.strip()
 
 
+def ensure_legacy_economy_state():
+    os.makedirs(ECONOMY_DIR, exist_ok=True)
+    if not os.path.exists(LEDGER_PATH):
+        with open(LEDGER_PATH, 'w') as f:
+            json.dump({
+                'updatedAt': '2026-03-21T00:00:00Z',
+                'epoch': {'started_at': '2026-03-21T00:00:00Z'},
+                'treasury': {
+                    'cash_usd': 0.0,
+                    'reserve_floor_usd': 0.0,
+                    'total_revenue_usd': 0.0,
+                    'support_received_usd': 0.0,
+                    'owner_capital_contributed_usd': 0.0,
+                    'expenses_recorded_usd': 0.0,
+                    'owner_draws_usd': 0.0,
+                },
+                'agents': {
+                    'atlas': {
+                        'name': 'Atlas',
+                        'role': 'analyst',
+                        'reputation_units': 50,
+                        'authority_units': 50,
+                        'probation': False,
+                        'zero_authority': False,
+                        'status': 'active',
+                    },
+                    'sentinel': {
+                        'name': 'Sentinel',
+                        'role': 'verifier',
+                        'reputation_units': 50,
+                        'authority_units': 50,
+                        'probation': False,
+                        'zero_authority': False,
+                        'status': 'active',
+                    },
+                    'forge': {
+                        'name': 'Forge',
+                        'role': 'builder',
+                        'reputation_units': 50,
+                        'authority_units': 50,
+                        'probation': False,
+                        'zero_authority': False,
+                        'status': 'active',
+                    },
+                },
+            }, f, indent=2)
+    if not os.path.exists(TX_PATH):
+        with open(TX_PATH, 'w') as f:
+            f.write('')
+    if not os.path.exists(REVENUE_PATH):
+        with open(REVENUE_PATH, 'w') as f:
+            json.dump({
+                'clients': {},
+                'orders': {},
+                'receivables_usd': 0.0,
+                'updatedAt': '2026-03-21T00:00:00Z',
+            }, f, indent=2)
+
+
 def load_ledger():
     with open(LEDGER_PATH) as f:
         return json.load(f)
@@ -50,6 +109,7 @@ def restore_score(agent_id, rep, auth):
 
 class TestEconomy(unittest.TestCase):
     def setUp(self):
+        ensure_legacy_economy_state()
         self._state_backup_dir = tempfile.mkdtemp(prefix='meridian-econ-test-')
         self._state_files = [LEDGER_PATH, TX_PATH, REVENUE_PATH]
         for path in self._state_files:

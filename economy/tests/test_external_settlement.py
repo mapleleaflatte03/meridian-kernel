@@ -19,8 +19,71 @@ def _load_module(path, name):
     return mod
 
 
+def _ensure_legacy_economy_state():
+    ECONOMY_DIR.mkdir(parents=True, exist_ok=True)
+    ledger_path = ECONOMY_DIR / 'ledger.json'
+    revenue_path = ECONOMY_DIR / 'revenue.json'
+    tx_path = ECONOMY_DIR / 'transactions.jsonl'
+
+    if not ledger_path.exists():
+        ledger_path.write_text(json.dumps({
+            'updatedAt': '2026-03-21T00:00:00Z',
+            'epoch': {'started_at': '2026-03-21T00:00:00Z'},
+            'treasury': {
+                'cash_usd': 0.0,
+                'reserve_floor_usd': 0.0,
+                'total_revenue_usd': 0.0,
+                'support_received_usd': 0.0,
+                'owner_capital_contributed_usd': 0.0,
+                'expenses_recorded_usd': 0.0,
+                'owner_draws_usd': 0.0,
+            },
+            'agents': {
+                'atlas': {
+                    'name': 'Atlas',
+                    'role': 'analyst',
+                    'reputation_units': 50,
+                    'authority_units': 50,
+                    'probation': False,
+                    'zero_authority': False,
+                    'status': 'active',
+                },
+                'sentinel': {
+                    'name': 'Sentinel',
+                    'role': 'verifier',
+                    'reputation_units': 50,
+                    'authority_units': 50,
+                    'probation': False,
+                    'zero_authority': False,
+                    'status': 'active',
+                },
+                'forge': {
+                    'name': 'Forge',
+                    'role': 'builder',
+                    'reputation_units': 50,
+                    'authority_units': 50,
+                    'probation': False,
+                    'zero_authority': False,
+                    'status': 'active',
+                },
+            },
+        }, indent=2))
+
+    if not revenue_path.exists():
+        revenue_path.write_text(json.dumps({
+            'clients': {},
+            'orders': {},
+            'receivables_usd': 0.0,
+            'updatedAt': '2026-03-21T00:00:00Z',
+        }, indent=2))
+
+    if not tx_path.exists():
+        tx_path.write_text('')
+
+
 class ExternalSettlementTests(unittest.TestCase):
     def setUp(self):
+        _ensure_legacy_economy_state()
         self.org_id = f'org_settle_{uuid.uuid4().hex[:8]}'
         self.capsule_mod = _load_module(ROOT / 'kernel' / 'capsule.py', 'kernel_capsule_external_settle')
         self.revenue_mod = _load_module(ROOT / 'economy' / 'revenue.py', 'kernel_revenue_external_settle')

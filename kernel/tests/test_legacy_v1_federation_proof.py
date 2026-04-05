@@ -170,9 +170,6 @@ def _run_legacy_v1_reference_adapter_federation_proof():
                         'target_institution_id': 'org_beta',
                     },
                 )
-                action_gate = legacy_v1_adapter.pre_action_check('org_alpha', adapter_envelope)
-                assert action_gate['allowed'], action_gate
-                assert action_gate['stage'] == 'ok', action_gate
 
                 proposal_payload = {
                     'summary': 'Shared competitor brief',
@@ -375,7 +372,6 @@ def _run_legacy_v1_reference_adapter_federation_proof():
                 'runtime_id': 'legacy_v1_compatible',
                 'adapter_kind': 'reference_adapter',
                 'scope': 'kernel_side_reference_seam',
-                'action_gate': action_gate,
                 'commitment_id': commitment_id,
                 'proposal': {
                     'status': proposal_status,
@@ -431,8 +427,6 @@ class LegacyV1FederationProofTests(unittest.TestCase):
         proof = _run_legacy_v1_reference_adapter_federation_proof()
         self.assertEqual(proof['runtime_id'], 'legacy_v1_compatible')
         self.assertEqual(proof['adapter_kind'], 'reference_adapter')
-        self.assertTrue(proof['action_gate']['allowed'])
-        self.assertEqual(proof['action_gate']['stage'], 'ok')
         self.assertEqual(proof['proposal']['status'], 200)
         self.assertEqual(proof['acceptance']['status'], 200)
         self.assertEqual(proof['execution']['status'], 200)

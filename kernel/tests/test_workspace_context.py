@@ -546,7 +546,6 @@ class WorkspaceContextTests(unittest.TestCase):
         self.workspace.blocking_commitment_ids = lambda org_id=None: ['cmt_demo']
         self.workspace.blocked_peer_host_ids = lambda org_id=None: ['host_beta']
         self.workspace.get_sprint_lead = lambda org_id: ('', 0)
-        self.workspace.get_pending_approvals = lambda org_id=None: []
         self.workspace.get_restrictions = lambda *args, **kwargs: {}
         self.workspace._ci_vertical_status = lambda reg, lead_id, org_id=None: {}
         self.workspace.get_agent_remediation = lambda economy_key, reg: None

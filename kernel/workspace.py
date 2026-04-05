@@ -183,8 +183,8 @@ import importlib.util
 # Import authority, treasury, court via their public APIs
 from authority import (check_authority, request_approval, decide_approval,
                        delegate, revoke_delegation, engage_kill_switch,
-                       disengage_kill_switch, get_pending_approvals,
-                       get_sprint_lead, is_kill_switch_engaged, _load_queue)
+                       disengage_kill_switch, get_sprint_lead,
+                       is_kill_switch_engaged, _load_queue)
 from treasury import (treasury_snapshot, get_balance, get_runway, check_budget,
                       contribute_owner_capital, set_reserve_floor_policy,
                       load_wallets, load_treasury_accounts, load_maintainers,

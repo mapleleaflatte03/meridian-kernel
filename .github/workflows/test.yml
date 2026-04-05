@@ -21,9 +21,16 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Run test suite
+      - name: Initialize economy
+        run: python quickstart.py --init-only
+
+      - name: Run kernel tests
         working-directory: kernel/tests
         run: python -m unittest discover -s . -p 'test_*.py' -v
+
+      - name: Run economy tests
+        working-directory: economy/tests
+        run: PYTHONPATH=../../ python -m unittest discover -s . -p 'test_*.py' -v
 
       - name: Run governance simulation
         run: python examples/simulate_governance.py

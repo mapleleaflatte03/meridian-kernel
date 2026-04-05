@@ -1,0 +1,14 @@
+{
+  "_meta": {
+    "bound_org_id": "org_e3f2d4a1",
+    "service_scope": "institution_owned_service"
+  },
+  "payout_plan_previews": {},
+  "states": [
+    "previewed",
+    "blocked",
+    "superseded"
+  ],
+  "updatedAt": "2026-04-03T01:11:16Z",
+  "version": 1
+}

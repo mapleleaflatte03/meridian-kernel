@@ -13,6 +13,7 @@ It does not claim the full network court program. It does establish:
 from __future__ import annotations
 
 import datetime
+import copy
 import json
 import os
 import sys
@@ -83,14 +84,23 @@ def _empty_store():
     }
 
 
+_STORE_CACHE = {}
+
+
 def _load_store(org_id=None):
     path = _store_path(org_id)
     parent = os.path.dirname(path)
     if org_id and not os.path.isdir(parent):
         _missing_org_error(org_id)
     if os.path.exists(path):
+        mtime = os.path.getmtime(path)
+        cached = _STORE_CACHE.get(path)
+        if cached and cached['mtime'] == mtime:
+            return copy.deepcopy(cached['data'])
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        _STORE_CACHE[path] = {'mtime': mtime, 'data': copy.deepcopy(data)}
+        return copy.deepcopy(data)
     return _empty_store()
 
 
@@ -103,6 +113,7 @@ def _save_store(data, org_id=None):
     os.makedirs(parent, exist_ok=True)
     with open(path, 'w') as f:
         json.dump(data, f, indent=2, sort_keys=True)
+    _STORE_CACHE[path] = {'mtime': os.path.getmtime(path), 'data': copy.deepcopy(data)}
 
 
 def _matching_active_case(
@@ -273,22 +284,24 @@ def case_targets_peer(case_record):
     )
 
 
-def blocking_commitment_case(commitment_id, org_id=None):
+def blocking_commitment_case(commitment_id, org_id=None, *, _blocking_cases=None):
     commitment_id = (commitment_id or '').strip()
     if not commitment_id:
         return None
-    for row in blocking_cases(org_id):
+    cases = _blocking_cases if _blocking_cases is not None else blocking_cases(org_id)
+    for row in cases:
         if row.get('linked_commitment_id') == commitment_id:
             return row
     return None
 
 
-def blocking_peer_case(peer_host_id, org_id=None, *, claim_types=None):
+def blocking_peer_case(peer_host_id, org_id=None, *, claim_types=None, _blocking_cases=None):
     peer_host_id = (peer_host_id or '').strip()
     if not peer_host_id:
         return None
     allowed_claim_types = set(claim_types or PEER_SUSPENSION_CLAIM_TYPES)
-    for row in blocking_cases(org_id):
+    cases = _blocking_cases if _blocking_cases is not None else blocking_cases(org_id)
+    for row in cases:
         if (
             row.get('target_host_id') == peer_host_id
             and row.get('claim_type') in allowed_claim_types

@@ -519,4 +519,4 @@ Apache-2.0. See [LICENSE](LICENSE).
 
 ---
 
-[Architecture](ARCHITECTURE.md) · [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) · [Open-Source Boundary](OPEN_SOURCE_BOUNDARY.md) · [Economy Constitution](economy/ECONOMY_CONSTITUTION.md) · [Roadmap](ROADMAP.md) · [Governance](GOVERNANCE.md)
+[Architecture](ARCHITECTURE.md) · [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) · [Scale Tranche](docs/SCALE_TRANCHE.md) · [Open-Source Boundary](OPEN_SOURCE_BOUNDARY.md) · [Economy Constitution](economy/ECONOMY_CONSTITUTION.md) · [Roadmap](ROADMAP.md) · [Governance](GOVERNANCE.md)

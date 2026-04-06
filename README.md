@@ -490,6 +490,24 @@ This uses temporary state and cleans up after itself.
 
 ---
 
+## Rust Exploration Lane
+
+Kernel remains Python-first in production. The Rust exploration lane is additive
+and exists for scale-parity validation only.
+
+Run it with:
+
+```bash
+./examples/run_rust_kernel_exploration.sh
+```
+
+This executes deterministic governance tests in `kernel-rs-explore/` covering:
+- warrant/authority/court gate ordering
+- treasury reserve-floor denial behavior
+- proof envelope emission for every decision
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). No CLA required — Apache-2.0 inbound = outbound.

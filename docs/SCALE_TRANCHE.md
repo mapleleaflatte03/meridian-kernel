@@ -5,10 +5,18 @@ This tranche isolates two scale-level tracks without weakening the existing Pyth
 ## 1) Rust-Kernel Exploration Track
 
 - Keep the current Python Kernel as canonical runtime.
-- Mirror core contracts in Rust prototypes (read-only first):
-  - institution capsule read model
-  - authority check model
-  - treasury reservation summary model
+- Mirror core contracts in Rust prototypes (read-only first).
+- Current implemented lane:
+  - `kernel-rs-explore/` crate with deterministic governance gate checks.
+  - `evaluate_action` contract models:
+    - warrant gate
+    - authority gate
+    - court gate
+    - treasury reserve-floor gate
+  - proof envelope schema:
+    - `meridian.kernel.rs.explore.proof.v1`
+- Verification command:
+  - `examples/run_rust_kernel_exploration.sh`
 - Success criteria:
   - contract parity fixtures pass against Python outputs
   - no mutation path moved until parity is stable

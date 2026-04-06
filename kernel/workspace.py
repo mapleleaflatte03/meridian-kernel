@@ -2778,6 +2778,8 @@ def _deliver_execution_job_court_notice(bound_org_id, job, warrant, decision, *,
         raise FederationDeliveryError(
             f"Peer host '{target_host_id}' does not declare endpoint_url"
         )
+    if not (peer.manifest_url.lower().startswith('http://') or peer.manifest_url.lower().startswith('https://')):
+        raise FederationDeliveryError(f"Invalid URL scheme for manifest in peer '{target_host_id}'")
     try:
         request = urllib_request.Request(peer.manifest_url, method='GET')
         with urllib_request.urlopen(request, timeout=10) as response:
@@ -2823,6 +2825,8 @@ def _deliver_execution_job_court_notice(bound_org_id, job, warrant, decision, *,
         expected_target_org_id=target_institution_id,
         expected_boundary_name='federation_gateway',
     )
+    if not (peer.receive_url.lower().startswith('http://') or peer.receive_url.lower().startswith('https://')):
+        raise FederationDeliveryError(f"Invalid URL scheme for receive_url in peer '{target_host_id}'")
     try:
         request = urllib_request.Request(
             peer.receive_url,
@@ -3627,6 +3631,8 @@ def _archive_delivery_with_witness_peers(bound_org_id, authority, delivery, payl
                     peer_host_id=witness_peer.host_id,
                     response=witness_manifest,
                 )
+            if not (witness_peer.endpoint_url.lower().startswith('http://') or witness_peer.endpoint_url.lower().startswith('https://')):
+                raise FederationDeliveryError(f"Invalid URL scheme for witness archive in peer '{witness_peer.host_id}'")
             headers = _witness_peer_archive_headers(witness_peer)
             request = urllib_request.Request(
                 witness_peer.endpoint_url + '/api/federation/witness/archive',
@@ -5093,6 +5099,8 @@ def _deliver_case_notice(bound_org_id, case_record, decision, *, actor_id, sessi
         raise FederationDeliveryError(
             f"Peer host '{target_host_id}' does not declare endpoint_url"
         )
+    if not (peer.manifest_url.lower().startswith('http://') or peer.manifest_url.lower().startswith('https://')):
+        raise FederationDeliveryError(f"Invalid URL scheme for manifest in peer '{target_host_id}'")
     try:
         request = urllib_request.Request(peer.manifest_url, method='GET')
         with urllib_request.urlopen(request, timeout=10) as response:
@@ -5136,6 +5144,8 @@ def _deliver_case_notice(bound_org_id, case_record, decision, *, actor_id, sessi
         expected_target_org_id=target_institution_id,
         expected_boundary_name='federation_gateway',
     )
+    if not (peer.receive_url.lower().startswith('http://') or peer.receive_url.lower().startswith('https://')):
+        raise FederationDeliveryError(f"Invalid URL scheme for receive_url in peer '{target_host_id}'")
     try:
         request = urllib_request.Request(
             peer.receive_url,

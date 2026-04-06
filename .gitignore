@@ -26,6 +26,23 @@ economy/owner_ledger.json
 economy/federation_inbox.json
 economy/.federation_inbox.lock
 economy/settlement_adapters.json
+economy/*.lock
+economy/*.json.lock
+economy/*.db
+economy/payment_events.log
+economy/payment_monitor_state.json
+economy/runtime_budget_reservations.json
+economy/payout_execution_queue.json
+economy/payout_plan_approval_candidate_queue.json
+economy/payout_plan_preview_queue.json
+economy/pilot_intake.json
+economy/subscription_preview_queue.json
+economy/user_session_scores.json
+economy/warrants.json
+economy/cases.json
+economy/commitments.json
+economy/capsules/
+kernel/runtime_audit/
 capsules/
 
 # Runtime

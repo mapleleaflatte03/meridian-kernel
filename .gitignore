@@ -14,6 +14,8 @@ kernel/authority_queue.json
 kernel/court_records.json
 kernel/audit_log.jsonl
 kernel/metering.jsonl
+economy/authority_queue.json
+economy/court_records.json
 economy/ledger.json
 economy/revenue.json
 economy/transactions.jsonl

@@ -28,6 +28,13 @@ import importlib
 import json
 import os
 import sys
+try:
+    from io_atomic import atomic_write_json
+except ModuleNotFoundError:
+    PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
+    if PLATFORM_DIR not in sys.path:
+        sys.path.insert(0, PLATFORM_DIR)
+    from io_atomic import atomic_write_json
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
 REGISTRY_FILE = os.path.join(PLATFORM_DIR, 'runtimes.json')
@@ -50,8 +57,7 @@ def load_runtimes():
 def save_runtimes(data):
     """Save runtime registry."""
     data['updatedAt'] = _now()
-    with open(REGISTRY_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_json(REGISTRY_FILE, data)
 
 
 def get_runtime(runtime_id):

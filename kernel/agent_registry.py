@@ -19,7 +19,15 @@ import argparse
 import datetime
 import json
 import os
+import sys
 import uuid
+try:
+    from io_atomic import atomic_write_json
+except ModuleNotFoundError:
+    PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
+    if PLATFORM_DIR not in sys.path:
+        sys.path.insert(0, PLATFORM_DIR)
+    from io_atomic import atomic_write_json
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
 REGISTRY_FILE = os.path.join(PLATFORM_DIR, 'agent_registry.json')
@@ -133,8 +141,7 @@ def load_registry():
 def save_registry(data):
     data = _normalize_registry(data)
     data['updatedAt'] = _now()
-    with open(REGISTRY_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_json(REGISTRY_FILE, data)
 
 
 def _org_matches(agent, org_id=None):

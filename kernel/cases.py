@@ -17,6 +17,13 @@ import json
 import os
 import sys
 import uuid
+try:
+    from io_atomic import atomic_write_json
+except ModuleNotFoundError:
+    PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
+    if PLATFORM_DIR not in sys.path:
+        sys.path.insert(0, PLATFORM_DIR)
+    from io_atomic import atomic_write_json
 
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -101,8 +108,7 @@ def _save_store(data, org_id=None):
     if org_id and not os.path.isdir(parent):
         _missing_org_error(org_id)
     os.makedirs(parent, exist_ok=True)
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2, sort_keys=True)
+    atomic_write_json(path, data)
 
 
 def _matching_active_case(

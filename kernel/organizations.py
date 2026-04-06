@@ -17,7 +17,15 @@ import argparse
 import datetime
 import json
 import os
+import sys
 import uuid
+try:
+    from io_atomic import atomic_write_json
+except ModuleNotFoundError:
+    PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
+    if PLATFORM_DIR not in sys.path:
+        sys.path.insert(0, PLATFORM_DIR)
+    from io_atomic import atomic_write_json
 
 PLATFORM_DIR = os.path.dirname(os.path.abspath(__file__))
 ORGS_FILE = os.path.join(PLATFORM_DIR, 'organizations.json')
@@ -52,8 +60,7 @@ def load_orgs():
 
 def save_orgs(data):
     data['updatedAt'] = _now()
-    with open(ORGS_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_json(ORGS_FILE, data)
 
 
 def create_org(name, owner_id, plan='free'):

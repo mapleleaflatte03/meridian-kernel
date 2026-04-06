@@ -23,6 +23,8 @@ KERNEL_DIR = os.path.join(ROOT_DIR, 'kernel')
 if KERNEL_DIR not in sys.path:
     sys.path.insert(0, KERNEL_DIR)
 
+from io_atomic import append_jsonl, atomic_write_json
+
 try:
     from capsule import capsule_path
 except ImportError:
@@ -42,6 +44,7 @@ def _missing_org_error(org_id):
     raise SystemExit(
         f"ERROR: institution '{org_id}' is not initialized. Run quickstart.py --init-only or bootstrap the capsule first."
     )
+
 
 # Actions blocked per sanction flag
 RESTRICTION_MAP = {
@@ -105,16 +108,14 @@ def save_ledger(data, org_id=None):
     path = _ledger_path(org_id)
     if org_id and not os.path.isdir(os.path.dirname(path)):
         _missing_org_error(org_id)
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_json(path, data)
 
 def append_tx(entry, org_id=None):
     entry['ts'] = now_ts()
     path = _tx_path(org_id)
     if org_id and not os.path.isdir(os.path.dirname(path)):
         _missing_org_error(org_id)
-    with open(path, 'a') as f:
-        f.write(json.dumps(entry) + '\n')
+    append_jsonl(path, entry)
 
 def get_restrictions(data, agent_id):
     if agent_id not in data['agents']:

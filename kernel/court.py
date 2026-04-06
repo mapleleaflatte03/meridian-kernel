@@ -31,6 +31,8 @@ LEGACY_RECORDS_FILE = os.path.join(PLATFORM_DIR, 'court_records.json')
 if PLATFORM_DIR not in sys.path:
     sys.path.insert(0, PLATFORM_DIR)
 
+from io_atomic import atomic_write_json
+
 try:
     from capsule import capsule_path
 except ImportError:
@@ -103,8 +105,7 @@ def _migrate_legacy_records_if_needed(org_id=None):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(LEGACY_RECORDS_FILE) as f:
             data = json.load(f)
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=2)
+        atomic_write_json(path, data)
         return path
     return path
 
@@ -124,8 +125,7 @@ def _save_records(data, org_id=None):
     path = _migrate_legacy_records_if_needed(org_id)
     if org_id and not os.path.isdir(os.path.dirname(path)):
         _missing_org_error(org_id)
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
+    atomic_write_json(path, data)
 
 
 # -- Core functions -----------------------------------------------------------

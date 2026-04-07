@@ -1,46 +1,17 @@
-name: Feature Request
-description: Suggest a new feature or improvement
-labels: ["enhancement"]
+name: Mirror Redirect (Feature)
+description: This repo is a mirror. Open feature requests in the canonical monorepo.
+labels: ["redirect"]
 body:
-  - type: textarea
-    id: description
+  - type: markdown
     attributes:
-      label: Description
-      description: What feature or improvement would you like?
-      placeholder: Describe the feature clearly.
+      value: |
+        This repository is a mirror.
+        Please open this request in the monorepo:
+        https://github.com/mapleleaflatte03/meridian/issues/new/choose
+  - type: input
+    id: canonical_target
+    attributes:
+      label: Canonical module path
+      placeholder: kernel/
     validations:
       required: true
-  - type: textarea
-    id: use-case
-    attributes:
-      label: Use Case
-      description: Why do you need this? What problem does it solve?
-      placeholder: Explain the real-world scenario where this would help.
-    validations:
-      required: true
-  - type: textarea
-    id: proposed-solution
-    attributes:
-      label: Proposed Solution
-      description: How would you implement this? (Optional but helpful)
-      placeholder: Describe your proposed approach.
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Alternatives Considered
-      description: What other approaches did you consider?
-  - type: dropdown
-    id: primitive
-    attributes:
-      label: Related Primitive
-      description: Which kernel primitive is this related to?
-      options:
-        - Institution
-        - Agent
-        - Authority
-        - Treasury
-        - Court
-        - Economy Layer
-        - Workspace
-        - New Primitive
-        - Other

@@ -1,39 +1,13 @@
-## Summary
+## Mirror Notice (Read Before Opening)
 
-<!-- What does this PR do? Keep it to 1-3 sentences. -->
+This repository is a mirror. Open new PRs in the canonical monorepo:
 
-## Type of Change
+- https://github.com/mapleleaflatte03/meridian
+- target path: `kernel/`
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Improvement to existing feature
-- [ ] Documentation
-- [ ] Tests
-- [ ] Other (describe below)
+## Redirect Checklist
 
-## Related Primitive
+- [ ] I opened the canonical PR in `mapleleaflatte03/meridian`.
+- [ ] I linked the canonical PR URL below.
 
-- [ ] Institution
-- [ ] Agent
-- [ ] Authority
-- [ ] Treasury
-- [ ] Court
-- [ ] Economy Layer
-- [ ] Workspace
-- [ ] Other
-
-## Testing
-
-<!-- How did you verify this works? -->
-
-- [ ] Ran `python3 quickstart.py --init-only` successfully
-- [ ] Ran existing tests (`python3 -m pytest economy/tests/`)
-- [ ] Added new tests for changed behavior
-- [ ] Tested manually (describe what you did)
-
-## Checklist
-
-- [ ] Code uses only Python stdlib (no external dependencies)
-- [ ] No credentials, secrets, or private data included
-- [ ] Existing functionality is not broken
-- [ ] Documentation updated if needed
+Canonical PR URL:

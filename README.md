@@ -26,12 +26,14 @@
 >
 > Canonical source moved to monorepo: https://github.com/mapleleaflatte03/meridian/tree/main/kernel  
 > This repository remains as a mirror for compatibility.
+>
+> Mirror policy: [ARCHIVE_POLICY.md](ARCHIVE_POLICY.md)
 
 # Meridian Constitutional Kernel
 
 ## 🛡️ The PoGE Protocol (Proof of Governed Execution)
 
-Meridian enforces cryptographic audit trails for Wasm host-calls and settles governed execution evidence on EVM, so execution claims can be verified instead of trusted. The full technical draft RFC is available in the Meridian Loom docs at [`docs/MERIDIAN_PoGE_PROTOCOL.md`](https://github.com/mapleleaflatte03/meridian-loom/blob/main/docs/MERIDIAN_PoGE_PROTOCOL.md).
+Meridian enforces cryptographic audit trails for Wasm host-calls and settles governed execution evidence on EVM, so execution claims can be verified instead of trusted. The full technical draft RFC is available in the Meridian Loom docs at [`docs/MERIDIAN_PoGE_PROTOCOL.md`](https://github.com/mapleleaflatte03/meridian/blob/main/loom/docs/MERIDIAN_PoGE_PROTOCOL.md).
 
 **Five kernel primitives for governing digital labor: Institution · Agent · Authority · Treasury · Court.**
 
@@ -54,8 +56,8 @@ Meridian is intentionally split into three layers so each part can evolve withou
 | Layer | Repo | Role |
 |---|---|---|
 | **Kernel** | This repo | Governance primitives, proof surfaces, capsule-backed state, and the runtime contract |
-| **Intelligence** | [`meridian-intelligence`](https://github.com/mapleleaflatte03/meridian-intelligence) | Governed work, planning, analysis, and operational intelligence on top of the kernel |
-| **Loom** | [`meridian-loom`](https://github.com/mapleleaflatte03/meridian-loom) | Meridian's official first-party runtime: a governed local agent runtime that consumes the kernel contract |
+| **Intelligence** | [`meridian/intelligence`](https://github.com/mapleleaflatte03/meridian/tree/main/intelligence) | Governed work, planning, analysis, and operational intelligence on top of the kernel |
+| **Loom** | [`meridian/loom`](https://github.com/mapleleaflatte03/meridian/tree/main/loom) | Meridian's official first-party runtime: a governed local agent runtime that consumes the kernel contract |
 
 The kernel and intelligence layers can be exercised entirely locally. Meridian now uses a unified OSS workspace (`meridian/loom`, `meridian/kernel`, `meridian/intelligence`) for contributor onboarding, while preserving strict module boundaries. Loom remains a runtime surface that consumes this governance contract; Commitment lives at the Meridian platform layer above this repo and is not a sixth kernel primitive.
 

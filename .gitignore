@@ -74,3 +74,4 @@ Thumbs.db
 .coverage
 htmlcov/
 capsules/
+kernel-rs-explore/target/

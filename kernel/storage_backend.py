@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import subprocess
 import threading
 from abc import ABC, abstractmethod
 from typing import Any
@@ -240,18 +241,95 @@ class SqliteBackend(StorageBackend):
         return row is not None
 
 
+def _default_rust_kv_bridge_bin() -> str:
+    env_path = os.environ.get('MERIDIAN_KERNEL_RUST_KV_BRIDGE_BIN')
+    if env_path:
+        return env_path
+    kernel_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(kernel_dir)
+    candidates = [
+        os.path.join(repo_root, 'kernel-rs-explore', 'target', 'release', 'storage_bridge'),
+        os.path.join(repo_root, 'kernel-rs-explore', 'target', 'debug', 'storage_bridge'),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    raise FileNotFoundError(
+        'rust_kv_bridge binary not found; run '
+        '"cargo build --release --bin storage_bridge" in kernel-rs-explore '
+        'or set MERIDIAN_KERNEL_RUST_KV_BRIDGE_BIN'
+    )
+
+
+class RustKvBridgeBackend(StorageBackend):
+    """Rust KV bridge backend via kernel-rs-explore/storage_bridge."""
+
+    def __init__(
+        self,
+        db_path: str,
+        bridge_bin: str | None = None,
+        timeout_seconds: float = 15.0,
+    ) -> None:
+        self._db_path = db_path
+        self._bridge_bin = bridge_bin or _default_rust_kv_bridge_bin()
+        self._timeout_seconds = timeout_seconds
+        if not os.path.exists(self._bridge_bin):
+            raise FileNotFoundError(f'rust_kv_bridge binary not found: {self._bridge_bin}')
+
+    def _run(self, operation: str, *args: str) -> Any:
+        cmd = [self._bridge_bin, '--db-path', self._db_path, operation, *args]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=self._timeout_seconds,
+            check=False,
+        )
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip()
+            raise RuntimeError(f'rust_kv_bridge {operation} failed: {stderr or proc.stdout.strip()}')
+        raw = proc.stdout.strip()
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    def load(self, key: str, default: Any) -> Any:
+        value = self._run('load', '--key', key)
+        return default if value is None else value
+
+    def save(self, key: str, data: Any) -> None:
+        self._run('save', '--key', key, '--json', json.dumps(data, sort_keys=True))
+
+    def append(self, key: str, entry: dict[str, Any]) -> None:
+        self._run('append', '--key', key, '--json', json.dumps(entry, sort_keys=True))
+
+    def read_log(self, key: str, tail: int | None = None) -> list[dict[str, Any]]:
+        args = ['--key', key]
+        if tail is not None and tail > 0:
+            args.extend(['--tail', str(tail)])
+        value = self._run('read-log', *args)
+        if isinstance(value, list):
+            return [entry for entry in value if isinstance(entry, dict)]
+        return []
+
+    def exists(self, key: str) -> bool:
+        value = self._run('exists', '--key', key)
+        return bool(value)
+
+
 def create_backend(
     backend_type: str,
     *,
     base_dir: str | None = None,
     db_path: str | None = None,
+    rust_kv_bridge_bin: str | None = None,
 ) -> StorageBackend:
     """Factory function for storage backends.
 
     Args:
-        backend_type: 'json' or 'sqlite'
+        backend_type: 'json', 'sqlite', or 'rust_kv_bridge'
         base_dir: Required for 'json' backend
-        db_path: Required for 'sqlite' backend
+        db_path: Required for 'sqlite' and 'rust_kv_bridge' backends
     """
     if backend_type == 'json':
         if base_dir is None:
@@ -261,4 +339,10 @@ def create_backend(
         if db_path is None:
             raise ValueError('db_path is required for sqlite backend')
         return SqliteBackend(db_path)
-    raise ValueError(f'unknown backend type: {backend_type!r}; supported: json, sqlite')
+    if backend_type in {'rust_kv_bridge', 'rust-kv', 'rust_kv'}:
+        if db_path is None:
+            raise ValueError('db_path is required for rust_kv_bridge backend')
+        return RustKvBridgeBackend(db_path=db_path, bridge_bin=rust_kv_bridge_bin)
+    raise ValueError(
+        f'unknown backend type: {backend_type!r}; supported: json, sqlite, rust_kv_bridge'
+    )

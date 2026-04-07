@@ -3,6 +3,8 @@
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -13,7 +15,35 @@ KERNEL_DIR = os.path.dirname(THIS_DIR)
 if KERNEL_DIR not in sys.path:
     sys.path.insert(0, KERNEL_DIR)
 
-from storage_backend import JsonFileBackend, SqliteBackend, create_backend
+from storage_backend import (
+    JsonFileBackend,
+    RustKvBridgeBackend,
+    SqliteBackend,
+    create_backend,
+)
+
+
+_RUST_BRIDGE_BIN: str | None = None
+
+
+def _ensure_rust_bridge_bin() -> str:
+    global _RUST_BRIDGE_BIN
+    if _RUST_BRIDGE_BIN:
+        return _RUST_BRIDGE_BIN
+    if shutil.which('cargo') is None:
+        raise unittest.SkipTest('cargo is required for rust_kv_bridge backend tests')
+    repo_root = os.path.dirname(KERNEL_DIR)
+    crate_dir = os.path.join(repo_root, 'kernel-rs-explore')
+    bridge_bin = os.path.join(crate_dir, 'target', 'release', 'storage_bridge')
+    subprocess.run(
+        ['cargo', 'build', '--quiet', '--release', '--bin', 'storage_bridge'],
+        cwd=crate_dir,
+        check=True,
+    )
+    if not os.path.exists(bridge_bin):
+        raise unittest.SkipTest(f'compiled storage bridge missing at {bridge_bin}')
+    _RUST_BRIDGE_BIN = bridge_bin
+    return bridge_bin
 
 
 class BackendContractTests:
@@ -102,6 +132,18 @@ class TestSqliteBackend(BackendContractTests, unittest.TestCase):
         return SqliteBackend(os.path.join(tmp_dir, 'state.db'))
 
 
+class TestRustKvBridgeBackend(BackendContractTests, unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bridge_bin = _ensure_rust_bridge_bin()
+
+    def make_backend(self, tmp_dir):
+        return RustKvBridgeBackend(
+            db_path=os.path.join(tmp_dir, 'state.sled'),
+            bridge_bin=self.bridge_bin,
+        )
+
+
 class TestCreateBackend(unittest.TestCase):
     def test_create_json_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,6 +158,15 @@ class TestCreateBackend(unittest.TestCase):
     def test_unknown_backend_raises(self):
         with self.assertRaises(ValueError):
             create_backend('postgres')
+
+    def test_create_rust_kv_bridge_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = create_backend(
+                'rust_kv_bridge',
+                db_path=os.path.join(tmp, 'state.sled'),
+                rust_kv_bridge_bin=_ensure_rust_bridge_bin(),
+            )
+            self.assertIsInstance(backend, RustKvBridgeBackend)
 
 
 class TestMigration(unittest.TestCase):

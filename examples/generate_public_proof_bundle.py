@@ -94,6 +94,17 @@ def _public_manifest_receipt(payload):
 
 
 def _fetch_live_manifest(url):
+    if not url or not (url.lower().startswith('http://') or url.lower().startswith('https://')):
+        return {
+            'included': False,
+            'attempted': True,
+            'route': url,
+            'http_status': 0,
+            'fetched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            'body_sha256': '',
+            'error': f"Invalid URL scheme in {url!r}",
+            'manifest': {},
+        }
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
             raw = response.read()
@@ -124,6 +135,17 @@ def _derive_sibling_url(url, old_suffix, new_suffix):
 
 
 def _fetch_live_runtime_proof(url):
+    if not url or not (url.lower().startswith('http://') or url.lower().startswith('https://')):
+        return {
+            'included': False,
+            'attempted': True,
+            'route': url,
+            'http_status': 0,
+            'fetched_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            'body_sha256': '',
+            'error': f"Invalid URL scheme in {url!r}",
+            'receipt': {},
+        }
     try:
         with urllib.request.urlopen(url, timeout=15) as response:
             raw = response.read()

@@ -1,0 +1,4 @@
+## 2023-10-24 - [CRITICAL] Prevent SSRF in urllib.request.urlopen
+**Vulnerability:** The functions `_fetch_live_manifest` and `_fetch_live_runtime_proof` in `examples/generate_public_proof_bundle.py` use `urllib.request.urlopen` to fetch data from URLs provided via arguments. There was no validation to ensure the URL scheme was `http` or `https`. This could allow an attacker to pass a `file://` or `ftp://` scheme, potentially reading arbitrary local files or making unexpected requests.
+**Learning:** Python's `urllib.request.urlopen` handles various protocols like `file://` by default. When using URLs from unverified sources, we must explicitly whitelist acceptable schemes.
+**Prevention:** Always validate that URLs start with `http://` or `https://` (case-insensitive) before passing them to `urllib.request.urlopen` or similar functions.

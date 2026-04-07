@@ -197,12 +197,55 @@ def _ensure_runtime_budget_fields(ledger):
 
 
 def _resolve_budget_agent(agent_id, org_id=None):
-    from agent_registry import get_agent_by_economy_key, resolve_agent
-
-    agent = get_agent_by_economy_key(agent_id, org_id=org_id)
+    agent = _registry_get_agent_by_economy_key(agent_id, org_id=org_id)
     if agent:
         return agent
-    return resolve_agent(agent_id, org_id=org_id)
+    return _registry_resolve_agent(agent_id, org_id=org_id)
+
+
+def _registry_get_agent_by_economy_key(agent_id, org_id=None):
+    from agent_registry import get_agent_by_economy_key
+
+    if org_id is None:
+        return get_agent_by_economy_key(agent_id)
+    try:
+        return get_agent_by_economy_key(agent_id, org_id=org_id)
+    except TypeError:
+        # Compatibility path for legacy registries that do not accept org_id.
+        return get_agent_by_economy_key(agent_id)
+
+
+def _registry_resolve_agent(agent_ref, org_id=None):
+    try:
+        from agent_registry import resolve_agent as _resolve_agent
+    except Exception:
+        _resolve_agent = None
+
+    if _resolve_agent is not None:
+        if org_id is None:
+            return _resolve_agent(agent_ref)
+        try:
+            return _resolve_agent(agent_ref, org_id=org_id)
+        except TypeError:
+            return _resolve_agent(agent_ref)
+
+    try:
+        from agent_registry import get_agent
+    except Exception:
+        get_agent = None
+
+    if get_agent is not None:
+        if org_id is None:
+            agent = get_agent(agent_ref)
+        else:
+            try:
+                agent = get_agent(agent_ref, org_id=org_id)
+            except TypeError:
+                agent = get_agent(agent_ref)
+        if agent:
+            return agent
+
+    return _registry_get_agent_by_economy_key(agent_ref, org_id=org_id)
 
 
 def _reservation_datetime(value):
@@ -682,8 +725,7 @@ def set_reserve_floor_policy(amount_usd, note='', by='owner', org_id=None):
 def check_budget(agent_id, cost_usd, org_id=None):
     """Check agent budget + treasury runway. Returns (allowed, reason)."""
     # Try economy_key -> registry ID mapping first
-    from agent_registry import get_agent_by_economy_key
-    reg_agent = get_agent_by_economy_key(agent_id, org_id=org_id)
+    reg_agent = _registry_get_agent_by_economy_key(agent_id, org_id=org_id)
     lookup_id = reg_agent['id'] if reg_agent else agent_id
 
     # Check agent-level budget

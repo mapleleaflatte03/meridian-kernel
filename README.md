@@ -18,11 +18,14 @@
   <a href="docs/PROOF_MATRIX.md">Proof Matrix</a> ·
   <a href="docs/RUNTIME_CONTRACT.md">Runtime Contract</a> ·
   <a href="ARCHITECTURE.md">Architecture</a> ·
-  <a href="https://github.com/mapleleaflatte03/meridian-intelligence">Meridian Intelligence</a> ·
-  <a href="https://github.com/mapleleaflatte03/meridian-loom">Meridian Loom</a>
+  <a href="https://github.com/mapleleaflatte03/meridian/tree/main/intelligence">Meridian Intelligence</a> ·
+  <a href="https://github.com/mapleleaflatte03/meridian/tree/main/loom">Meridian Loom</a>
 </p>
 
 > Meridian Kernel is the governance boundary. It does not run your agents; it governs them with explicit authority, treasury, and court primitives.
+>
+> Canonical source moved to monorepo: https://github.com/mapleleaflatte03/meridian/tree/main/kernel  
+> This repository remains as a mirror for compatibility.
 
 # Meridian Constitutional Kernel
 
@@ -178,6 +181,12 @@ You don't need the hosted service. This kernel runs standalone.
 ## Quickstart
 
 **Requirements:** Python 3.9+, no external dependencies.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mapleleaflatte03/meridian/main/scripts/install-full.sh | bash
+```
+
+Runtime-only mirror path (this repo only):
 
 ```bash
 git clone https://github.com/mapleleaflatte03/meridian-kernel.git
